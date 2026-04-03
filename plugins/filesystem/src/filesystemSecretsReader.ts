@@ -14,7 +14,11 @@ export function createFilesystemSecretsPlugin(): LoaderPlugin {
     kind: 'loader',
     async load(context) {
       const sourceRoot = String(context.manifestConfig.root ?? './secrets');
-      const files = await collectFilesystemLayerFiles(context.cnosRoot, sourceRoot, context.profileChain);
+      const files = await collectFilesystemLayerFiles(
+        context.cnosRoot,
+        sourceRoot,
+        context.profileActivation.secrets,
+      );
       const entries: ConfigEntry[] = [];
 
       for (const file of files) {

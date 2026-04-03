@@ -68,7 +68,9 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     ...(options.profile ? { profile: options.profile } : {}),
     ...(options.processEnv ? { processEnv: options.processEnv } : {}),
   });
-  const profileChain = expandProfileChain(activeProfile.profile);
+  const profileChain = await expandProfileChain(activeProfile.profile, {
+    cnosRoot: loadedManifest.cnosRoot,
+  });
   const plugins = options.plugins ?? [];
   const loaderPlugins = plugins.filter((plugin): plugin is LoaderPlugin => plugin.kind === 'loader');
   const resolverPlugin =
@@ -79,6 +81,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     manifest: loadedManifest.manifest,
     profile: activeProfile.profile,
     profileChain: profileChain.profiles,
+    profileActivation: profileChain.activation,
     plugins: loaderPlugins,
     ...(options.cliArgs ? { cliArgs: options.cliArgs } : {}),
     ...(options.processEnv ? { processEnv: options.processEnv } : {}),

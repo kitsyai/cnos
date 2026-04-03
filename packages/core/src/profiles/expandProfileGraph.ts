@@ -1,5 +1,5 @@
 import { expandProfileChain } from './expandProfileChain.js';
 
-export function expandProfileGraph(activeProfile: string) {
-  return expandProfileChain(activeProfile);
+export async function expandProfileGraph(activeProfile: string, options?: { cnosRoot?: string }) {
+  return expandProfileChain(activeProfile, options);
 }

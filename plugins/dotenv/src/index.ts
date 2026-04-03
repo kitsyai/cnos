@@ -101,7 +101,7 @@ export function createDotenvPlugin(): LoaderPlugin {
       const config = context.manifestConfig as DotenvSourceConfig;
       const envRoot = path.resolve(context.cnosRoot, config.root ?? './env');
       const workspaceRoot = path.dirname(context.cnosRoot);
-      const fileNames = ['.env', ...context.profileChain.map((profile) => `.env.${profile}`)];
+      const fileNames = context.profileActivation.envFiles;
       const entries: ConfigEntry[] = [];
 
       for (const fileName of fileNames) {

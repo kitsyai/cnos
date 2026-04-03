@@ -1,5 +1,6 @@
 import type { ConfigEntry, InspectResult, LogicalKey, ResolvedGraph } from './core.js';
 import type { NormalizedManifest } from './manifest.js';
+import type { ProfileActivation } from './profile.js';
 import type { SchemaRule } from './schema.js';
 
 export type CnosPluginKind = 'loader' | 'resolver' | 'validator' | 'exporter' | 'inspector';
@@ -13,6 +14,7 @@ export interface LoaderContext {
   manifestConfig: Record<string, unknown>;
   profile: string;
   profileChain: string[];
+  profileActivation: ProfileActivation;
   cnosRoot: string;
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;

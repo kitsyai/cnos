@@ -7,9 +7,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createCnos,
   envVarToLogicalKey,
+  expandProfileChain,
   flattenObject,
   loadManifest,
   logicalKeyToEnvVar,
+  resolveActiveProfile,
   type ConfigEntry,
   type LoaderPlugin,
 } from '../src/index.js';
@@ -126,5 +128,87 @@ describe('@kitsy/cnos-core', () => {
     expect(envVarToLogicalKey('DATABASE_HOST', mapping)).toBe('value.inventory.db.host');
     expect(envVarToLogicalKey('SECRET_INVENTORY_DB_PASSWORD', mapping)).toBe('secret.inventory.db.password');
     expect(envVarToLogicalKey('not-valid', mapping)).toBeUndefined();
+  });
+
+  it('resolves the active profile by cli, then env, then manifest default', async () => {
+    const root = await createFixtureRoot('version: 1\nproject:\n  name: fixture\nprofiles:\n  default: local\n');
+    const manifest = (await loadManifest({ root })).manifest;
+
+    expect(
+      resolveActiveProfile(manifest, {
+        profile: 'stage',
+        processEnv: {
+          CNOS_PROFILE: 'prod',
+        },
+      }),
+    ).toEqual({
+      profile: 'stage',
+      source: 'cli',
+    });
+    expect(
+      resolveActiveProfile(manifest, {
+        processEnv: {
+          CNOS_PROFILE: 'prod',
+        },
+      }),
+    ).toEqual({
+      profile: 'prod',
+      source: 'env',
+    });
+    expect(resolveActiveProfile(manifest)).toEqual({
+      profile: 'local',
+      source: 'manifest-default',
+    });
+  });
+
+  it('expands inherited profile activation from profile files', async () => {
+    const root = await createFixtureRoot('version: 1\nproject:\n  name: fixture\n');
+    const profilesRoot = path.join(root, 'cnos', 'profiles');
+    await mkdir(profilesRoot, { recursive: true });
+    await writeFile(
+      path.join(profilesRoot, 'local.yml'),
+      [
+        'name: local',
+        'extends:',
+        '  - base',
+        'activate:',
+        '  values:',
+        '    - base',
+        '    - local',
+        '  secrets:',
+        '    - local',
+        '  envFiles:',
+        '    - .env',
+        '    - .env.local',
+      ].join('\n'),
+    );
+
+    await expect(
+      expandProfileChain('local', {
+        cnosRoot: path.join(root, 'cnos'),
+      }),
+    ).resolves.toEqual({
+      activeProfile: 'local',
+      profiles: ['base', 'local'],
+      activation: {
+        values: ['base', 'local'],
+        secrets: ['local'],
+        envFiles: ['.env', '.env.local'],
+      },
+    });
+  });
+
+  it('throws on profile inheritance cycles', async () => {
+    const root = await createFixtureRoot('version: 1\nproject:\n  name: fixture\n');
+    const profilesRoot = path.join(root, 'cnos', 'profiles');
+    await mkdir(profilesRoot, { recursive: true });
+    await writeFile(path.join(profilesRoot, 'a.yml'), 'name: a\nextends:\n  - b\n');
+    await writeFile(path.join(profilesRoot, 'b.yml'), 'name: b\nextends:\n  - a\n');
+
+    await expect(
+      expandProfileChain('a', {
+        cnosRoot: path.join(root, 'cnos'),
+      }),
+    ).rejects.toThrow('cycle');
   });
 });

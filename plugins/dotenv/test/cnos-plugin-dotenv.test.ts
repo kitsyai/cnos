@@ -114,6 +114,11 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
       },
       profile: 'local',
       profileChain: ['local'],
+      profileActivation: {
+        values: ['base', 'local'],
+        secrets: ['local'],
+        envFiles: ['.env', '.env.local'],
+      },
       cnosRoot,
     });
 

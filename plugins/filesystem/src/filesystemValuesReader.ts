@@ -14,10 +14,11 @@ export function createFilesystemValuesPlugin(): LoaderPlugin {
     kind: 'loader',
     async load(context) {
       const sourceRoot = String(context.manifestConfig.root ?? './values');
-      const files = await collectFilesystemLayerFiles(context.cnosRoot, sourceRoot, [
-        'base',
-        ...context.profileChain.filter((layer) => layer !== 'base'),
-      ]);
+      const files = await collectFilesystemLayerFiles(
+        context.cnosRoot,
+        sourceRoot,
+        context.profileActivation.values,
+      );
       const entries: ConfigEntry[] = [];
 
       for (const file of files) {

@@ -3,7 +3,7 @@ id: CORE-PROFILE-1
 short_id: 37302c9fb4b3
 title: Implement profile graph expansion, inherited resolution, and inspection
 type: feature
-status: todo
+status: done
 created: 2026-04-03
 updated: 2026-04-03
 aliases: []

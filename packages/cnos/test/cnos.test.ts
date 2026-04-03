@@ -138,4 +138,90 @@ describe('@kitsy/cnos', () => {
       ],
     });
   });
+
+  it('expands inherited profiles and preserves parent-before-child provenance', async () => {
+    const root = await createFixtureRoot();
+    await mkdir(path.join(root, 'cnos', 'profiles'), { recursive: true });
+    await mkdir(path.join(root, 'cnos', 'values', 'base'), { recursive: true });
+    await mkdir(path.join(root, 'cnos', 'values', 'stage'), { recursive: true });
+    await mkdir(path.join(root, 'cnos', 'secrets', 'stage'), { recursive: true });
+    await mkdir(path.join(root, 'cnos', 'env'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: cnos-runtime',
+        'profiles:',
+        '  default: local',
+        'envMapping:',
+        '  convention: SCREAMING_SNAKE',
+        '  explicit:',
+        '    DATABASE_HOST: value.inventory.db.host',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'profiles', 'stage.yml'),
+      [
+        'name: stage',
+        'extends:',
+        '  - base',
+        'activate:',
+        '  values:',
+        '    - base',
+        '    - stage',
+        '  secrets:',
+        '    - stage',
+        '  envFiles:',
+        '    - .env',
+        '    - .env.stage',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'values', 'base', 'app.yml'),
+      ['server:', '  port: 3000'].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'values', 'stage', 'app.yml'),
+      ['server:', '  port: 8080'].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'secrets', 'stage', 'app.yml'),
+      ['api:', '  token: stage-secret'].join('\n'),
+    );
+    await writeFile(path.join(root, 'cnos', 'env', '.env'), 'DATABASE_HOST=base-db\n');
+    await writeFile(path.join(root, 'cnos', 'env', '.env.stage'), 'DATABASE_HOST=stage-db\n');
+
+    const runtime = await createCnos({
+      root,
+      processEnv: {
+        CNOS_PROFILE: 'stage',
+      },
+    });
+
+    expect(runtime.meta('profile')).toBe('stage');
+    expect(runtime.meta('resolved.from')).toBe('env');
+    expect(runtime.require('value.server.port')).toBe(8080);
+    expect(runtime.require('value.inventory.db.host')).toBe('stage-db');
+    expect(runtime.require('secret.api.token')).toBe('stage-secret');
+    expect(runtime.inspect('value.server.port')).toMatchObject({
+      profile: 'stage',
+      profileSource: 'env',
+      winner: {
+        sourceId: 'filesystem-values',
+        origin: {
+          file: 'cnos/values/stage/app.yml',
+        },
+      },
+      overridden: [
+        {
+          sourceId: 'filesystem-values',
+          value: 3000,
+          origin: {
+            file: 'cnos/values/base/app.yml',
+          },
+        },
+      ],
+    });
+  });
 });
