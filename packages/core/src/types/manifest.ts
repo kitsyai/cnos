@@ -1,6 +1,7 @@
 import type { LogicalKey } from './core.js';
 import type { ProfileResolveFrom } from './profile.js';
 import type { SchemaRule } from './schema.js';
+import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from './workspace.js';
 
 export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
 
@@ -8,6 +9,15 @@ export interface ManifestFile {
   version?: number;
   project?: {
     name?: string;
+  };
+  workspaces?: {
+    default?: string;
+    global?: {
+      enabled?: boolean;
+      root?: string;
+      allowWrite?: boolean;
+    };
+    items?: Record<string, WorkspaceItemConfig>;
   };
   profiles?: {
     default?: string;
@@ -47,6 +57,15 @@ export interface NormalizedManifest {
   project: {
     name: string;
   };
+  workspaces: {
+    default?: string;
+    global: {
+      enabled: boolean;
+      root?: string;
+      allowWrite: boolean;
+    };
+    items: Record<string, NormalizedWorkspaceItem>;
+  };
   profiles: {
     default: string;
     resolveFrom: ProfileResolveFrom[];
@@ -85,7 +104,8 @@ export interface LoadManifestOptions {
 }
 
 export interface LoadedManifest {
-  cnosRoot: string;
+  manifestRoot: string;
+  repoRoot: string;
   manifestPath: string;
   manifest: NormalizedManifest;
   rawManifest: ManifestFile;

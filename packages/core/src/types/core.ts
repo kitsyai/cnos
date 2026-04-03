@@ -1,6 +1,7 @@
 import type { NormalizedManifest } from './manifest.js';
 import type { CnosPlugin } from './plugin.js';
 import type { ProfileSource } from './profile.js';
+import type { WorkspaceContext } from './workspace.js';
 
 export type LogicalKey = string;
 
@@ -19,6 +20,7 @@ export interface ConfigEntry {
   namespace: NamespaceName;
   sourceId: string;
   pluginId: string;
+  workspaceId: string;
   profile?: string;
   origin?: ConfigOrigin;
   metadata?: Record<string, unknown>;
@@ -37,6 +39,7 @@ export interface ResolvedGraph {
   profile: string;
   resolvedAt: string;
   profileSource: ProfileSource;
+  workspace: WorkspaceContext;
 }
 
 export interface InspectResult {
@@ -45,14 +48,21 @@ export interface InspectResult {
   namespace: NamespaceName;
   profile: string;
   profileSource: ProfileSource;
+  workspace: {
+    id: string;
+    source: WorkspaceContext['workspaceSource'];
+    chain: string[];
+  };
   winner: {
     sourceId: string;
     pluginId: string;
+    workspaceId: string;
     origin?: ConfigOrigin;
   };
   overridden: Array<{
     sourceId: string;
     pluginId: string;
+    workspaceId: string;
     value: unknown;
     origin?: ConfigOrigin;
   }>;
@@ -61,9 +71,45 @@ export interface InspectResult {
 export interface CnosCreateOptions {
   root?: string;
   profile?: string;
+  workspace?: string;
+  globalRoot?: string;
   plugins?: CnosPlugin[];
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
+}
+
+export interface ToEnvOptions {
+  includeSecrets?: boolean;
+}
+
+export interface ToPublicEnvOptions {
+  framework?: string;
+  prefix?: string;
+}
+
+export interface DumpPlanOptions {
+  flatten?: boolean;
+}
+
+export interface DumpFile {
+  path: string;
+  namespace: Exclude<NamespaceName, 'meta'>;
+  content: string;
+}
+
+export interface DumpPlan {
+  workspaceId: string;
+  profile: string;
+  flatten: boolean;
+  files: DumpFile[];
+}
+
+export interface DumpOptions extends DumpPlanOptions {
+  to: string;
+}
+
+export interface DumpResult extends DumpPlan {
+  root: string;
 }
 
 export interface CnosRuntime {
@@ -79,4 +125,6 @@ export interface CnosRuntime {
   inspect(key: LogicalKey): InspectResult;
   toObject(): Record<string, unknown>;
   toNamespace(namespace: NamespaceName): Record<string, unknown>;
+  toEnv(options?: ToEnvOptions): Record<string, string>;
+  toPublicEnv(options?: ToPublicEnvOptions): Record<string, string>;
 }

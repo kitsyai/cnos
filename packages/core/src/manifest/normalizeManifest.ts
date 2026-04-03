@@ -1,6 +1,7 @@
 import { CnosManifestError } from '../errors.js';
 import type { ManifestFile, NormalizedManifest } from '../types/manifest.js';
 import type { ProfileResolveFrom } from '../types/profile.js';
+import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from '../types/workspace.js';
 
 const DEFAULT_RESOLVE_FROM: ProfileResolveFrom[] = ['cli.profile', 'env.CNOS_PROFILE', 'default'];
 const DEFAULT_LOADERS = [
@@ -31,6 +32,24 @@ function validateResolveFrom(resolveFrom: ProfileResolveFrom[]): ProfileResolveF
   return resolveFrom;
 }
 
+function normalizeWorkspaceItems(
+  items?: Record<string, WorkspaceItemConfig>,
+): Record<string, NormalizedWorkspaceItem> {
+  return Object.fromEntries(
+    Object.entries(items ?? {}).map(([workspaceId, item]: [string, WorkspaceItemConfig]) => [
+      workspaceId,
+      {
+        extends: Array.isArray(item?.extends)
+          ? item.extends.map((entry) => entry.trim()).filter(Boolean)
+          : item?.extends
+            ? [item.extends.trim()].filter(Boolean)
+            : [],
+        ...(item?.globalId?.trim() ? { globalId: item.globalId.trim() } : {}),
+      } satisfies NormalizedWorkspaceItem,
+    ]),
+  );
+}
+
 export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
   const version = manifest.version ?? 1;
 
@@ -45,19 +64,20 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
   }
 
   const defaultProfile = manifest.profiles?.default?.trim() || 'local';
+  const workspaceItems = normalizeWorkspaceItems(manifest.workspaces?.items);
   const resolveFrom = validateResolveFrom(manifest.profiles?.resolveFrom ?? DEFAULT_RESOLVE_FROM);
   const filesystemValues = {
-    root: './values',
+    root: './workspaces/{workspace}/values',
     format: 'yaml',
     ...(manifest.sources?.['filesystem-values'] ?? {}),
   };
   const filesystemSecrets = {
-    root: './secrets',
+    root: './workspaces/{workspace}/secrets',
     format: 'yaml',
     ...(manifest.sources?.['filesystem-secrets'] ?? {}),
   };
   const dotenv = {
-    root: './env',
+    root: './workspaces/{workspace}/env',
     ...(manifest.sources?.dotenv ?? {}),
   };
 
@@ -65,6 +85,23 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
     version: 1,
     project: {
       name: projectName,
+    },
+    workspaces: {
+      ...(manifest.workspaces?.default?.trim()
+        ? {
+            default: manifest.workspaces.default.trim(),
+          }
+        : {}),
+      global: {
+        enabled: manifest.workspaces?.global?.enabled ?? false,
+        ...(manifest.workspaces?.global?.root?.trim()
+          ? {
+              root: manifest.workspaces.global.root.trim(),
+            }
+          : {}),
+        allowWrite: manifest.workspaces?.global?.allowWrite ?? false,
+      },
+      items: workspaceItems,
     },
     profiles: {
       default: defaultProfile,
@@ -112,8 +149,12 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
       define: {
         defaultProfile: manifest.writePolicy?.define?.defaultProfile ?? defaultProfile,
         targets: {
-          value: manifest.writePolicy?.define?.targets?.value ?? './values/{profile}/app.yml',
-          secret: manifest.writePolicy?.define?.targets?.secret ?? './secrets/{profile}/app.yml',
+          value:
+            manifest.writePolicy?.define?.targets?.value ??
+            './workspaces/{workspace}/values/{profile}/app.yml',
+          secret:
+            manifest.writePolicy?.define?.targets?.secret ??
+            './workspaces/{workspace}/secrets/{profile}/app.yml',
         },
       },
     },

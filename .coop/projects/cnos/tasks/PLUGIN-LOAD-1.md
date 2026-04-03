@@ -29,7 +29,9 @@ tests_required:
     base and profile-specific files.
 origin:
   authority_refs:
-    - docs/cnos-v1-canonical-spec.md
-    - docs/cnos-v1-codex-bootstrap-prompt.md
+    - docs/cnos-spec.md
+    - docs/cnos-prompt-pack.md
+  derived_refs:
+    - docs/cnos-workspace.md
 ---
 Build the filesystem loader package under plugins/filesystem with separate loader modules for value and secret sources.

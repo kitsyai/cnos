@@ -14,23 +14,25 @@ depends_on:
 delivery: v1
 acceptance:
   - packages/core implements the basic schema validator for type, required,
-    enum, pattern, and default behavior plus public safety validation for
-    invalid promotions.
+    enum, pattern, and default behavior plus public safety validation,
+    workspace safety validation, and env-mapping collision checks.
   - The repository documentation, starter fixtures, and examples reflect the
-    implemented runtime and CLI behavior using packages/core, packages/cnos,
+    workspace-aware runtime and CLI behavior using packages/core, packages/cnos,
     packages/cli, and plugins/* folder names.
   - The workspace test suite includes unit, integration, and golden coverage for
     runtime, plugins, and CLI surfaces needed to guard the shipped v1 behavior.
   - Tests cover invalid schema failures, coercion/default application, public
-    safety errors, starter example smoke flow, and golden snapshots for CLI
-    inspection/export output.
+    safety errors, workspace graph/write policy failures, starter example smoke
+    flow, and golden snapshots for CLI inspection/export/dump output.
 tests_required:
   - Unit tests for schema keyword handling and validation diagnostics.
   - Integration and golden tests covering end-to-end runtime plus CLI flows from
     starter/example fixtures.
 origin:
   authority_refs:
-    - docs/cnos-v1-canonical-spec.md
-    - docs/cnos-v1-codex-bootstrap-prompt.md
+    - docs/cnos-spec.md
+    - docs/cnos-prompt-pack.md
+  derived_refs:
+    - docs/cnos-workspace.md
 ---
 Finalize the v1 implementation with validator coverage, examples, and regression protection across the current monorepo layout.

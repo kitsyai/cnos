@@ -41,6 +41,7 @@ describe('@kitsy/cnos-plugin-filesystem', () => {
         namespace: 'value',
         sourceId: 'filesystem-values',
         pluginId: '@kitsy/cnos-plugin-filesystem',
+        workspaceId: 'default',
         origin: {
           file: 'cnos/values/local/app.yml',
         },
@@ -56,7 +57,18 @@ describe('@kitsy/cnos-plugin-filesystem', () => {
     await writeFile(path.join(root, 'cnos', 'values', 'local', 'b.yml'), 'x: 1\n');
     await writeFile(path.join(root, 'cnos', 'values', 'base', 'a.yml'), 'x: 1\n');
 
-    const files = await collectFilesystemLayerFiles(path.join(root, 'cnos'), './values', ['base', 'local']);
+    const files = await collectFilesystemLayerFiles(
+      path.join(root, 'cnos'),
+      [
+        {
+          scope: 'local',
+          workspaceId: 'fixture',
+          path: path.join(root, 'cnos'),
+        },
+      ],
+      './values',
+      ['base', 'local'],
+    );
 
     expect(files.map((file) => file.relativePath)).toEqual([
       'cnos/values/base/a.yml',
@@ -100,6 +112,7 @@ describe('@kitsy/cnos-plugin-filesystem', () => {
     expect(runtime.require('value.server.host')).toBe('127.0.0.1');
     expect(runtime.require('value.server.port')).toBe(8080);
     expect(runtime.require('secret.database.password')).toBe('s3cr3t');
+    expect(runtime.inspect('value.server.port').winner.workspaceId).toBe('filesystem-fixture');
     expect(runtime.inspect('value.server.port').winner.origin?.file).toBe('cnos/values/local/app.yml');
   });
 });

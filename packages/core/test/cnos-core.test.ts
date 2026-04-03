@@ -8,9 +8,12 @@ import {
   createCnos,
   envVarToLogicalKey,
   expandProfileChain,
+  expandWorkspaceChain,
   flattenObject,
   loadManifest,
+  loadWorkspaceFile,
   logicalKeyToEnvVar,
+  resolveWorkspaceContext,
   resolveActiveProfile,
   type ConfigEntry,
   type LoaderPlugin,
@@ -71,6 +74,7 @@ describe('@kitsy/cnos-core', () => {
         namespace: 'value',
         sourceId: 'seed-base',
         pluginId: 'seed-base',
+        workspaceId: 'fixture',
       },
     ]);
     const overrideLoader = createFixtureLoader('seed-override', [
@@ -82,6 +86,7 @@ describe('@kitsy/cnos-core', () => {
         namespace: 'value',
         sourceId: 'seed-override',
         pluginId: 'seed-override',
+        workspaceId: 'fixture',
       },
     ]);
     const runtime = await createCnos({
@@ -185,7 +190,19 @@ describe('@kitsy/cnos-core', () => {
 
     await expect(
       expandProfileChain('local', {
-        cnosRoot: path.join(root, 'cnos'),
+        manifestRoot: path.join(root, 'cnos'),
+        workspace: {
+          workspaceId: 'fixture',
+          workspaceSource: 'project-name',
+          workspaceChain: ['fixture'],
+          workspaceRoots: [
+            {
+              scope: 'local',
+              workspaceId: 'fixture',
+              path: path.join(root, 'cnos'),
+            },
+          ],
+        },
       }),
     ).resolves.toEqual({
       activeProfile: 'local',
@@ -207,8 +224,91 @@ describe('@kitsy/cnos-core', () => {
 
     await expect(
       expandProfileChain('a', {
-        cnosRoot: path.join(root, 'cnos'),
+        manifestRoot: path.join(root, 'cnos'),
+        workspace: {
+          workspaceId: 'fixture',
+          workspaceSource: 'project-name',
+          workspaceChain: ['fixture'],
+          workspaceRoots: [
+            {
+              scope: 'local',
+              workspaceId: 'fixture',
+              path: path.join(root, 'cnos'),
+            },
+          ],
+        },
       }),
     ).rejects.toThrow('cycle');
+  });
+
+  it('loads workspace file and resolves workspace selection and global root precedence', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'workspaces:',
+        '  default: api',
+        '  global:',
+        '    enabled: true',
+        '    root: C:/manifest-global',
+        '  items:',
+        '    base: {}',
+        '    api:',
+        '      extends:',
+        '        - base',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(root, '.cnos-workspace.yml'),
+      ['workspace: web', 'globalRoot: C:/workspace-file-global'].join('\n'),
+    );
+    const loadedManifest = await loadManifest({ root });
+    const workspaceFile = await loadWorkspaceFile(root);
+
+    expect(workspaceFile?.config).toEqual({
+      workspace: 'web',
+      globalRoot: 'C:/workspace-file-global',
+    });
+
+    const workspace = await resolveWorkspaceContext(loadedManifest.manifest, {
+      manifestRoot: loadedManifest.manifestRoot,
+      ...(workspaceFile ? { workspaceFile: workspaceFile.config } : {}),
+      workspace: 'api',
+      globalRoot: 'C:/cli-global',
+      processEnv: {
+        CNOS_HOME: 'C:/env-global',
+      },
+    });
+
+    expect(workspace.workspaceId).toBe('api');
+    expect(workspace.workspaceSource).toBe('cli');
+    expect(workspace.globalRoot).toBe(path.resolve('C:/cli-global'));
+    expect(workspace.globalRootSource).toBe('cli');
+    expect(workspace.workspaceChain).toEqual(['base', 'api']);
+  });
+
+  it('expands workspace inheritance and detects cycles', () => {
+    expect(
+      expandWorkspaceChain('api', {
+        base: {
+          extends: [],
+        },
+        api: {
+          extends: ['base'],
+        },
+      }),
+    ).toEqual(['base', 'api']);
+
+    expect(() =>
+      expandWorkspaceChain('a', {
+        a: {
+          extends: ['b'],
+        },
+        b: {
+          extends: ['a'],
+        },
+      }),
+    ).toThrow('cycle');
   });
 });

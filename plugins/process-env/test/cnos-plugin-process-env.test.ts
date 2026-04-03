@@ -30,6 +30,7 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         namespace: 'value',
         sourceId: 'process-env',
         pluginId: '@kitsy/cnos-plugin-process-env',
+        workspaceId: 'default',
         origin: {
           envVar: 'SERVER_PORT',
         },
@@ -40,6 +41,7 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         namespace: 'value',
         sourceId: 'process-env',
         pluginId: '@kitsy/cnos-plugin-process-env',
+        workspaceId: 'default',
         origin: {
           envVar: 'DATABASE_HOST',
         },
@@ -50,6 +52,7 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         namespace: 'secret',
         sourceId: 'process-env',
         pluginId: '@kitsy/cnos-plugin-process-env',
+        workspaceId: 'default',
         origin: {
           envVar: 'SECRET_INVENTORY_DB_PASSWORD',
         },

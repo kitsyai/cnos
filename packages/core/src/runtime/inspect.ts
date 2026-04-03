@@ -14,14 +14,21 @@ export function inspectValue(graph: ResolvedGraph, key: LogicalKey): InspectResu
     namespace: entry.namespace,
     profile: graph.profile,
     profileSource: graph.profileSource,
+    workspace: {
+      id: graph.workspace.workspaceId,
+      source: graph.workspace.workspaceSource,
+      chain: graph.workspace.workspaceChain,
+    },
     winner: {
       sourceId: entry.winner.sourceId,
       pluginId: entry.winner.pluginId,
+      workspaceId: entry.winner.workspaceId,
       ...(entry.winner.origin ? { origin: entry.winner.origin } : {}),
     },
     overridden: entry.overridden.map((override) => ({
       sourceId: override.sourceId,
       pluginId: override.pluginId,
+      workspaceId: override.workspaceId,
       value: override.value,
       ...(override.origin ? { origin: override.origin } : {}),
     })),

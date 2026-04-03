@@ -4,8 +4,12 @@ import type { ConfigEntry, LoaderPlugin } from '@kitsy/cnos-core';
 
 import { collectFilesystemLayerFiles, yamlObjectToEntries } from './helpers.js';
 
-export function filesystemValuesReader(filePath: string, document: string): ConfigEntry[] {
-  return yamlObjectToEntries(document, filePath, 'value', 'filesystem-values');
+export function filesystemValuesReader(filePath: string, document: string, workspaceId = 'default'): ConfigEntry[] {
+  return yamlObjectToEntries(document, filePath, 'value', 'filesystem-values', workspaceId);
+}
+
+function toWorkspaceRelativeSourceRoot(sourceRoot: string): string {
+  return sourceRoot.replace(/^[./\\]*workspaces[\\/]\{workspace\}[\\/]/, './');
 }
 
 export function createFilesystemValuesPlugin(): LoaderPlugin {
@@ -13,9 +17,12 @@ export function createFilesystemValuesPlugin(): LoaderPlugin {
     id: 'filesystem-values',
     kind: 'loader',
     async load(context) {
-      const sourceRoot = String(context.manifestConfig.root ?? './values');
+      const sourceRoot = toWorkspaceRelativeSourceRoot(
+        String(context.manifestConfig.root ?? './workspaces/{workspace}/values'),
+      );
       const files = await collectFilesystemLayerFiles(
-        context.cnosRoot,
+        context.manifestRoot,
+        context.workspace.workspaceRoots,
         sourceRoot,
         context.profileActivation.values,
       );
@@ -23,7 +30,7 @@ export function createFilesystemValuesPlugin(): LoaderPlugin {
 
       for (const file of files) {
         const document = await readFile(file.absolutePath, 'utf8');
-        entries.push(...filesystemValuesReader(file.relativePath, document));
+        entries.push(...filesystemValuesReader(file.relativePath, document, file.workspaceId));
       }
 
       return entries;

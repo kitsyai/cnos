@@ -8,6 +8,18 @@ export type {
   LogicalKey,
   CnosPlugin,
   CnosRuntime,
+  DumpOptions,
+  DumpPlan,
+  DumpPlanOptions,
+  DumpResult,
   ManifestFile,
   NormalizedManifest,
+  ToEnvOptions,
+  ToPublicEnvOptions,
+} from '@kitsy/cnos-core';
+export {
+  planDump,
+  toEnv,
+  toPublicEnv,
+  writeDump,
 } from '@kitsy/cnos-core';

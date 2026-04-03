@@ -4,8 +4,12 @@ import type { ConfigEntry, LoaderPlugin } from '@kitsy/cnos-core';
 
 import { collectFilesystemLayerFiles, yamlObjectToEntries } from './helpers.js';
 
-export function filesystemSecretsReader(filePath: string, document: string): ConfigEntry[] {
-  return yamlObjectToEntries(document, filePath, 'secret', 'filesystem-secrets');
+export function filesystemSecretsReader(filePath: string, document: string, workspaceId = 'default'): ConfigEntry[] {
+  return yamlObjectToEntries(document, filePath, 'secret', 'filesystem-secrets', workspaceId);
+}
+
+function toWorkspaceRelativeSourceRoot(sourceRoot: string): string {
+  return sourceRoot.replace(/^[./\\]*workspaces[\\/]\{workspace\}[\\/]/, './');
 }
 
 export function createFilesystemSecretsPlugin(): LoaderPlugin {
@@ -13,9 +17,12 @@ export function createFilesystemSecretsPlugin(): LoaderPlugin {
     id: 'filesystem-secrets',
     kind: 'loader',
     async load(context) {
-      const sourceRoot = String(context.manifestConfig.root ?? './secrets');
+      const sourceRoot = toWorkspaceRelativeSourceRoot(
+        String(context.manifestConfig.root ?? './workspaces/{workspace}/secrets'),
+      );
       const files = await collectFilesystemLayerFiles(
-        context.cnosRoot,
+        context.manifestRoot,
+        context.workspace.workspaceRoots,
         sourceRoot,
         context.profileActivation.secrets,
       );
@@ -23,7 +30,7 @@ export function createFilesystemSecretsPlugin(): LoaderPlugin {
 
       for (const file of files) {
         const document = await readFile(file.absolutePath, 'utf8');
-        entries.push(...filesystemSecretsReader(file.relativePath, document));
+        entries.push(...filesystemSecretsReader(file.relativePath, document, file.workspaceId));
       }
 
       return entries;

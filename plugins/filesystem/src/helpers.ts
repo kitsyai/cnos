@@ -1,7 +1,15 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { CnosManifestError, flattenObject, parseYaml, type ConfigEntry, type NamespaceName } from '@kitsy/cnos-core';
+import {
+  CnosManifestError,
+  flattenObject,
+  parseYaml,
+  toPortablePath,
+  type ConfigEntry,
+  type NamespaceName,
+  type WorkspaceRoot,
+} from '@kitsy/cnos-core';
 
 const YAML_EXTENSIONS = new Set(['.yml', '.yaml']);
 const FILESYSTEM_PLUGIN_ID = '@kitsy/cnos-plugin-filesystem';
@@ -9,6 +17,7 @@ const FILESYSTEM_PLUGIN_ID = '@kitsy/cnos-plugin-filesystem';
 export interface FilesystemLoaderFile {
   absolutePath: string;
   relativePath: string;
+  workspaceId: string;
 }
 
 async function existsDirectory(targetPath: string): Promise<boolean> {
@@ -42,26 +51,32 @@ async function collectYamlFiles(root: string): Promise<string[]> {
 }
 
 export async function collectFilesystemLayerFiles(
-  cnosRoot: string,
+  manifestRoot: string,
+  workspaceRoots: WorkspaceRoot[],
   sourceRoot: string,
   activeLayers: string[],
 ): Promise<FilesystemLoaderFile[]> {
-  const resolvedRoot = path.resolve(cnosRoot, sourceRoot);
-  const workspaceRoot = path.dirname(cnosRoot);
   const files: FilesystemLoaderFile[] = [];
+  const repoRoot = path.dirname(manifestRoot);
 
-  for (const layer of activeLayers) {
-    const layerRoot = path.join(resolvedRoot, layer);
+  for (const workspaceRoot of workspaceRoots) {
+    const resolvedRoot = path.resolve(workspaceRoot.path, sourceRoot);
 
-    if (!(await existsDirectory(layerRoot))) {
-      continue;
-    }
+    for (const layer of activeLayers) {
+      const layerRoot = path.join(resolvedRoot, layer);
 
-    for (const absolutePath of await collectYamlFiles(layerRoot)) {
-      files.push({
-        absolutePath,
-        relativePath: path.relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
-      });
+      if (!(await existsDirectory(layerRoot))) {
+        continue;
+      }
+
+      for (const absolutePath of await collectYamlFiles(layerRoot)) {
+        const relativePath = path.relative(repoRoot, absolutePath);
+        files.push({
+          absolutePath,
+          relativePath: toPortablePath(relativePath.startsWith('..') ? absolutePath : relativePath),
+          workspaceId: workspaceRoot.workspaceId,
+        });
+      }
     }
   }
 
@@ -81,6 +96,7 @@ export function yamlObjectToEntries(
   filePath: string,
   namespace: NamespaceName,
   sourceId: string,
+  workspaceId = 'default',
 ): ConfigEntry[] {
   const parsed = assertObjectDocument(parseYaml<unknown>(document), filePath);
   const flattened = flattenObject(parsed);
@@ -91,6 +107,7 @@ export function yamlObjectToEntries(
     namespace,
     sourceId,
     pluginId: FILESYSTEM_PLUGIN_ID,
+    workspaceId,
     origin: {
       file: filePath,
     },

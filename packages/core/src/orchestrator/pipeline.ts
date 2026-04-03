@@ -2,13 +2,15 @@ import type { ConfigEntry } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
 import type { ProfileActivation } from '../types/profile.js';
 import type { LoaderPlugin } from '../types/plugin.js';
+import type { WorkspaceContext } from '../types/workspace.js';
 
 export interface PipelineOptions {
-  cnosRoot: string;
+  manifestRoot: string;
   manifest: NormalizedManifest;
   profile: string;
   profileChain: string[];
   profileActivation: ProfileActivation;
+  workspace: WorkspaceContext;
   plugins: LoaderPlugin[];
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
@@ -25,7 +27,8 @@ export async function runPipeline(options: PipelineOptions): Promise<ConfigEntry
         profile: options.profile,
         profileChain: options.profileChain,
         profileActivation: options.profileActivation,
-        cnosRoot: options.cnosRoot,
+        manifestRoot: options.manifestRoot,
+        workspace: options.workspace,
         ...(options.cliArgs ? { cliArgs: options.cliArgs } : {}),
         ...(options.processEnv ? { processEnv: options.processEnv } : {}),
       }),

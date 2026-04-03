@@ -3,13 +3,13 @@ import path from 'node:path';
 
 import { CnosManifestError } from '../errors.js';
 import type { LoadedManifest, LoadManifestOptions, ManifestFile } from '../types/manifest.js';
-import { resolveCnosRoot } from '../utils/path.js';
+import { resolveManifestRoot } from '../utils/path.js';
 import { parseYaml } from '../utils/yaml.js';
 import { normalizeManifest } from './normalizeManifest.js';
 
 export async function loadManifest(options: LoadManifestOptions = {}): Promise<LoadedManifest> {
-  const cnosRoot = await resolveCnosRoot(options.root);
-  const manifestPath = path.join(cnosRoot, 'cnos.yml');
+  const manifestRoot = await resolveManifestRoot(options.root);
+  const manifestPath = path.join(manifestRoot, 'cnos.yml');
   let source: string;
 
   try {
@@ -25,7 +25,8 @@ export async function loadManifest(options: LoadManifestOptions = {}): Promise<L
   }
 
   return {
-    cnosRoot,
+    manifestRoot,
+    repoRoot: path.dirname(manifestRoot),
     manifestPath,
     manifest: normalizeManifest(rawManifest),
     rawManifest,

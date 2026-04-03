@@ -8,10 +8,13 @@ import type {
   ProfileActivation,
   ProfileDefinitionFile,
 } from '../types/profile.js';
+import type { WorkspaceContext } from '../types/workspace.js';
+import { toPortablePath } from '../utils/path.js';
 import { parseYaml } from '../utils/yaml.js';
 
 export interface ExpandProfileChainOptions {
-  cnosRoot?: string;
+  manifestRoot?: string;
+  workspace?: WorkspaceContext;
 }
 
 async function fileExists(targetPath: string): Promise<boolean> {
@@ -46,39 +49,45 @@ function normalizeProfileDefinition(
 
 async function loadProfileDefinition(
   profileName: string,
-  cnosRoot?: string,
+  options: ExpandProfileChainOptions,
 ): Promise<NormalizedProfileDefinition> {
-  if (!cnosRoot) {
+  const workspaceRoots = options.workspace?.workspaceRoots ?? [];
+
+  if (workspaceRoots.length === 0) {
     return normalizeProfileDefinition(profileName, undefined);
   }
 
-  const profilePath = path.join(cnosRoot, 'profiles', `${profileName}.yml`);
+  for (const workspaceRoot of [...workspaceRoots].reverse()) {
+    const profilePath = path.join(workspaceRoot.path, 'profiles', `${profileName}.yml`);
 
-  if (!(await fileExists(profilePath))) {
-    return normalizeProfileDefinition(profileName, undefined);
-  }
+    if (!(await fileExists(profilePath))) {
+      continue;
+    }
 
-  const document = await readFile(profilePath, 'utf8');
-  const parsed = parseYaml<unknown>(document);
+    const document = await readFile(profilePath, 'utf8');
+    const parsed = parseYaml<unknown>(document);
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new CnosManifestError('Profile definition must be a YAML object', profilePath);
-  }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new CnosManifestError('Profile definition must be a YAML object', profilePath);
+    }
 
-  const definition = normalizeProfileDefinition(
-    profileName,
-    parsed as ProfileDefinitionFile,
-    path.relative(path.dirname(cnosRoot), profilePath).replace(/\\/g, '/'),
-  );
-
-  if (definition.name !== profileName) {
-    throw new CnosManifestError(
-      `Profile file name mismatch: expected "${profileName}" but found "${definition.name}"`,
-      profilePath,
+    const definition = normalizeProfileDefinition(
+      profileName,
+      parsed as ProfileDefinitionFile,
+      options.manifestRoot ? toPortablePath(path.relative(path.dirname(options.manifestRoot), profilePath)) : toPortablePath(profilePath),
     );
+
+    if (definition.name !== profileName) {
+      throw new CnosManifestError(
+        `Profile file name mismatch: expected "${profileName}" but found "${definition.name}"`,
+        profilePath,
+      );
+    }
+
+    return definition;
   }
 
-  return definition;
+  return normalizeProfileDefinition(profileName, undefined);
 }
 
 function pushUnique(target: string[], values: string[]): void {
@@ -116,7 +125,7 @@ export async function expandProfileChain(
     }
 
     visiting.add(profileName);
-    const definition = await loadProfileDefinition(profileName, options.cnosRoot);
+    const definition = await loadProfileDefinition(profileName, options);
     definitions.set(profileName, definition);
 
     for (const parent of definition.extends) {

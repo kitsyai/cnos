@@ -70,6 +70,7 @@ export function createProfileAwareResolver(): ResolverPlugin {
         profile: context.profile,
         resolvedAt: new Date().toISOString(),
         profileSource: 'manifest-default',
+        workspace: context.workspace,
       };
     },
   };

@@ -13,6 +13,7 @@ export async function runMonorepoAppExample() {
           namespace: 'value',
           sourceId: 'monorepo-app-fixture',
           pluginId: 'monorepo-app-fixture',
+          workspaceId: 'monorepo-app',
         },
         {
           key: 'value.apps.web.port',
@@ -20,6 +21,7 @@ export async function runMonorepoAppExample() {
           namespace: 'value',
           sourceId: 'monorepo-app-fixture',
           pluginId: 'monorepo-app-fixture',
+          workspaceId: 'monorepo-app',
         },
       ];
     },

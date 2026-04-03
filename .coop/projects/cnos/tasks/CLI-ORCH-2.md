@@ -14,24 +14,31 @@ depends_on:
 delivery: v1
 acceptance:
   - packages/cli implements cnos define, cnos validate, cnos export env, cnos
-    run --, cnos diff, and cnos doctor as described in the canonical spec.
-  - define routes writes deterministically by writePolicy, performs
-    namespace/path safety checks, creates files as needed, and round-trips
-    through runtime reads.
-  - run injects resolved env into child processes, diff compares profile outputs
-    in text and JSON formats, and doctor reports repository and config health
-    issues.
-  - Tests cover define value/secret round-trips, export flags including
-    public/framework/profile/json, run env injection and exit code propagation,
-    diff output, and doctor diagnostics.
+    dump, cnos run --, cnos diff, and cnos doctor as described in the
+    workspace-integrated canonical spec.
+  - define routes writes deterministically by writePolicy, defaults to the local
+    selected workspace, and supports explicit --target global only when
+    workspaces.global.allowWrite is enabled.
+  - dump supports both workspace-preserving and --flatten snapshot modes, while
+    export env remains env-only projection.
+  - run injects resolved env into child processes, diff compares selected
+    workspace/profile outputs in text and JSON formats, and doctor reports
+    repository, workspace, global-root, and config health issues.
+  - Tests cover define value/secret round-trips, explicit global writes, export
+    flags including public/framework/profile/json, dump modes, run env injection
+    and exit code propagation, diff output, and doctor diagnostics.
 tests_required:
-  - Unit tests for write-policy routing, diff formatting, and doctor rule
-    evaluation.
+  - Unit tests for write-policy routing, dump planning, diff formatting, and
+    doctor rule evaluation.
   - Integration tests invoking the built CLI against fixture workspaces for
-    define, export, run, diff, validate, and doctor.
+    define, export, dump, run, diff, validate, and doctor.
 origin:
   authority_refs:
-    - docs/cnos-v1-canonical-spec.md
-    - docs/cnos-v1-codex-bootstrap-prompt.md
+    - docs/cnos-spec.md
+    - docs/cnos-prompt-pack.md
+  derived_refs:
+    - docs/cnos-workspace.md
 ---
-Finish the operational CLI surface in packages/cli with deterministic write policy handling and runtime-backed process execution.
+Finish the operational workspace-aware CLI surface in packages/cli with
+deterministic local/global write policy handling, dump support, and
+runtime-backed process execution.

@@ -9,6 +9,7 @@ interface ProcessEnvSourceConfig {
 export function processEnvEntriesFromObject(
   env: Record<string, string | undefined>,
   mapping: EnvMappingConfig = {},
+  workspaceId = 'default',
 ): ConfigEntry[] {
   return Object.entries(env).flatMap(([envVar, value]) => {
     if (typeof value !== 'string') {
@@ -28,6 +29,7 @@ export function processEnvEntriesFromObject(
         namespace: logicalKey.startsWith('secret.') ? 'secret' : 'value',
         sourceId: 'process-env',
         pluginId: PROCESS_ENV_PLUGIN_ID,
+        workspaceId,
         origin: {
           envVar,
         },
@@ -42,7 +44,11 @@ export function createProcessEnvPlugin(): LoaderPlugin {
     kind: 'loader',
     async load(context) {
       const config = context.manifestConfig as ProcessEnvSourceConfig;
-      return processEnvEntriesFromObject(context.processEnv ?? process.env, config.envMapping);
+      return processEnvEntriesFromObject(
+        context.processEnv ?? process.env,
+        config.envMapping,
+        context.workspace.workspaceId,
+      );
     },
   };
 }

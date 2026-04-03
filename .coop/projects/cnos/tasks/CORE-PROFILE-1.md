@@ -29,7 +29,9 @@ tests_required:
     output.
 origin:
   authority_refs:
-    - docs/cnos-v1-canonical-spec.md
-    - docs/cnos-v1-codex-bootstrap-prompt.md
+    - docs/cnos-spec.md
+    - docs/cnos-prompt-pack.md
+  derived_refs:
+    - docs/cnos-workspace.md
 ---
 Extend packages/core with profile selection, inheritance-aware resolution, and provenance inspection while using the current package folder names.

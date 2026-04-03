@@ -28,8 +28,9 @@ tests_required:
     and seeded entries.
 origin:
   authority_refs:
-    - docs/cnos-v1-canonical-spec.md
-    - docs/cnos-v1-codex-bootstrap-prompt.md
-  derived_refs: []
+    - docs/cnos-spec.md
+    - docs/cnos-prompt-pack.md
+  derived_refs:
+    - docs/cnos-workspace.md
 ---
 Implement the CNOS v1 core in the current workspace layout: packages/core, packages/cnos, packages/cli, and plugins/* instead of the older folder names used in the docs.

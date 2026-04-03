@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createCnos, defaultPlugins, type LoaderPlugin } from '../src/index.js';
+import { createCnos, defaultPlugins, planDump, writeDump, type LoaderPlugin } from '../src/index.js';
 
 const fixtureRoots: string[] = [];
 
@@ -35,6 +35,7 @@ describe('@kitsy/cnos', () => {
             namespace: 'value',
             sourceId: 'fixture-loader',
             pluginId: 'fixture-loader',
+            workspaceId: 'cnos-runtime',
           },
         ];
       },
@@ -46,6 +47,129 @@ describe('@kitsy/cnos', () => {
 
     expect(runtime.plugins).toHaveLength(defaultPlugins().length + 1);
     expect(runtime.require('value.app.name')).toBe('fixture-app');
+  });
+
+  it('projects env output and materializes deterministic workspace dump snapshots', async () => {
+    const root = await createFixtureRoot();
+    const dumpRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-dump-'));
+    fixtureRoots.push(dumpRoot);
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: cnos-runtime',
+        'workspaces:',
+        '  default: api',
+        '  items:',
+        '    api: {}',
+        'envMapping:',
+        '  convention: SCREAMING_SNAKE',
+        '  explicit:',
+        '    API_URL: value.api.baseUrl',
+        'public:',
+        '  promote:',
+        '    - value.api.baseUrl',
+        '    - value.app.name',
+      ].join('\n'),
+    );
+    const fixtureLoader: LoaderPlugin = {
+      id: 'fixture-exporter',
+      kind: 'loader',
+      async load() {
+        return [
+          {
+            key: 'value.api.baseUrl',
+            value: 'https://api.example.com',
+            namespace: 'value',
+            sourceId: 'fixture-exporter',
+            pluginId: 'fixture-exporter',
+            workspaceId: 'api',
+          },
+          {
+            key: 'value.app.name',
+            value: 'cnos',
+            namespace: 'value',
+            sourceId: 'fixture-exporter',
+            pluginId: 'fixture-exporter',
+            workspaceId: 'api',
+          },
+          {
+            key: 'secret.app.token',
+            value: 'secret-token',
+            namespace: 'secret',
+            sourceId: 'fixture-exporter',
+            pluginId: 'fixture-exporter',
+            workspaceId: 'api',
+          },
+        ];
+      },
+    };
+
+    const runtime = await createCnos({
+      root,
+      workspace: 'api',
+      plugins: [fixtureLoader],
+      processEnv: {},
+    });
+
+    expect(runtime.toEnv()).toEqual({
+      API_URL: 'https://api.example.com',
+      APP_NAME: 'cnos',
+      SECRET_APP_TOKEN: 'secret-token',
+    });
+    expect(runtime.toPublicEnv({ framework: 'vite' })).toEqual({
+      VITE_API_URL: 'https://api.example.com',
+      VITE_APP_NAME: 'cnos',
+    });
+
+    expect(planDump(runtime.graph)).toEqual({
+      workspaceId: 'api',
+      profile: 'local',
+      flatten: false,
+      files: [
+        {
+          path: 'workspaces/api/secrets/local/app.yml',
+          namespace: 'secret',
+          content: 'app:\n  token: secret-token\n',
+        },
+        {
+          path: 'workspaces/api/values/local/app.yml',
+          namespace: 'value',
+          content: 'api:\n  baseUrl: https://api.example.com\napp:\n  name: cnos\n',
+        },
+      ],
+    });
+    expect(planDump(runtime.graph, { flatten: true })).toEqual({
+      workspaceId: 'api',
+      profile: 'local',
+      flatten: true,
+      files: [
+        {
+          path: 'secrets/local/app.yml',
+          namespace: 'secret',
+          content: 'app:\n  token: secret-token\n',
+        },
+        {
+          path: 'values/local/app.yml',
+          namespace: 'value',
+          content: 'api:\n  baseUrl: https://api.example.com\napp:\n  name: cnos\n',
+        },
+      ],
+    });
+
+    const dumpResult = await writeDump(runtime.graph, {
+      to: dumpRoot,
+      flatten: true,
+    });
+
+    expect(dumpResult.root).toBe(dumpRoot);
+    await expect(readFile(path.join(dumpRoot, 'values', 'local', 'app.yml'), 'utf8')).resolves.toBe(
+      'api:\n  baseUrl: https://api.example.com\napp:\n  name: cnos\n',
+    );
+    await expect(readFile(path.join(dumpRoot, 'secrets', 'local', 'app.yml'), 'utf8')).resolves.toBe(
+      'app:\n  token: secret-token\n',
+    );
   });
 
   it('resolves filesystem, dotenv, process env, and cli args with spec precedence', async () => {
@@ -219,6 +343,91 @@ describe('@kitsy/cnos', () => {
           value: 3000,
           origin: {
             file: 'cnos/values/base/app.yml',
+          },
+        },
+      ],
+    });
+  });
+
+  it('layers global and local workspace roots with local child winning last', async () => {
+    const root = await createFixtureRoot();
+    const globalRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-global-'));
+    fixtureRoots.push(globalRoot);
+    await mkdir(path.join(root, 'cnos', 'workspaces', 'base', 'values', 'base'), { recursive: true });
+    await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local'), { recursive: true });
+    await mkdir(path.join(globalRoot, 'workspaces', 'base', 'values', 'base'), { recursive: true });
+    await mkdir(path.join(globalRoot, 'workspaces', 'api', 'values', 'local'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: cnos-runtime',
+        'workspaces:',
+        '  default: api',
+        '  global:',
+        '    enabled: true',
+        '  items:',
+        '    base: {}',
+        '    api:',
+        '      extends:',
+        '        - base',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(globalRoot, 'workspaces', 'base', 'values', 'base', 'app.yml'),
+      ['server:', '  host: global-base'].join('\n'),
+    );
+    await writeFile(
+      path.join(globalRoot, 'workspaces', 'api', 'values', 'local', 'app.yml'),
+      ['server:', '  host: global-api'].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'workspaces', 'base', 'values', 'base', 'app.yml'),
+      ['server:', '  host: local-base'].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local', 'app.yml'),
+      ['server:', '  host: local-api'].join('\n'),
+    );
+
+    const runtime = await createCnos({
+      root,
+      workspace: 'api',
+      globalRoot,
+    });
+
+    expect(runtime.meta('workspace')).toBe('api');
+    expect(runtime.meta('global.enabled')).toBe(true);
+    expect(runtime.require('value.server.host')).toBe('local-api');
+    expect(runtime.inspect('value.server.host')).toMatchObject({
+      workspace: {
+        id: 'api',
+        chain: ['base', 'api'],
+      },
+      winner: {
+        workspaceId: 'api',
+        origin: {
+          file: 'cnos/workspaces/api/values/local/app.yml',
+        },
+      },
+      overridden: [
+        {
+          workspaceId: 'base',
+          origin: {
+            file: expect.stringContaining('cnos-global-'),
+          },
+        },
+        {
+          workspaceId: 'api',
+          origin: {
+            file: expect.stringContaining('cnos-global-'),
+          },
+        },
+        {
+          workspaceId: 'base',
+          origin: {
+            file: 'cnos/workspaces/base/values/base/app.yml',
           },
         },
       ],

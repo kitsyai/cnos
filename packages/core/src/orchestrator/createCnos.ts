@@ -1,12 +1,14 @@
 import packageJson from '../../package.json';
 
 import { loadManifest } from '../manifest/loadManifest.js';
+import { loadWorkspaceFile } from '../manifest/loadWorkspaceFile.js';
 import { expandProfileChain } from '../profiles/expandProfileChain.js';
 import { resolveActiveProfile } from '../profiles/resolveActiveProfile.js';
 import { createProfileAwareResolver } from '../resolvers/profileAwareResolver.js';
 import type { CnosCreateOptions, CnosRuntime, ResolvedEntry, ResolvedGraph } from '../types/core.js';
 import type { ConfigEntry } from '../types/core.js';
 import type { LoaderPlugin, ResolverPlugin } from '../types/plugin.js';
+import { resolveWorkspaceContext } from '../workspaces/resolveWorkspaceContext.js';
 import { runPipeline } from './pipeline.js';
 import { createRuntime } from './runtime.js';
 
@@ -18,6 +20,7 @@ function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
       namespace: 'meta',
       sourceId: 'profile-resolver',
       pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
     },
     {
       key: 'meta.cnos.version',
@@ -25,6 +28,7 @@ function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
       namespace: 'meta',
       sourceId: 'core',
       pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
     },
     {
       key: 'meta.resolved.at',
@@ -32,6 +36,7 @@ function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
       namespace: 'meta',
       sourceId: 'core',
       pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
     },
     {
       key: 'meta.resolved.from',
@@ -39,6 +44,47 @@ function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
       namespace: 'meta',
       sourceId: 'profile-resolver',
       pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
+    },
+    {
+      key: 'meta.workspace',
+      value: graph.workspace.workspaceId,
+      namespace: 'meta',
+      sourceId: 'workspace-resolver',
+      pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
+    },
+    {
+      key: 'meta.workspace.source',
+      value: graph.workspace.workspaceSource,
+      namespace: 'meta',
+      sourceId: 'workspace-resolver',
+      pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
+    },
+    {
+      key: 'meta.workspace.chain',
+      value: graph.workspace.workspaceChain,
+      namespace: 'meta',
+      sourceId: 'workspace-resolver',
+      pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
+    },
+    {
+      key: 'meta.globalRoot',
+      value: graph.workspace.globalRoot ?? null,
+      namespace: 'meta',
+      sourceId: 'workspace-resolver',
+      pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
+    },
+    {
+      key: 'meta.global.enabled',
+      value: Boolean(graph.workspace.globalRoot),
+      namespace: 'meta',
+      sourceId: 'workspace-resolver',
+      pluginId: 'core',
+      workspaceId: graph.workspace.workspaceId,
     },
   ];
 }
@@ -64,12 +110,21 @@ function appendMetaEntries(graph: ResolvedGraph): ResolvedGraph {
 
 export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosRuntime> {
   const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const workspaceFile = await loadWorkspaceFile(loadedManifest.repoRoot);
+  const workspace = await resolveWorkspaceContext(loadedManifest.manifest, {
+    manifestRoot: loadedManifest.manifestRoot,
+    ...(workspaceFile ? { workspaceFile: workspaceFile.config } : {}),
+    ...(options.workspace ? { workspace: options.workspace } : {}),
+    ...(options.globalRoot ? { globalRoot: options.globalRoot } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+  });
   const activeProfile = resolveActiveProfile(loadedManifest.manifest, {
     ...(options.profile ? { profile: options.profile } : {}),
     ...(options.processEnv ? { processEnv: options.processEnv } : {}),
   });
   const profileChain = await expandProfileChain(activeProfile.profile, {
-    cnosRoot: loadedManifest.cnosRoot,
+    manifestRoot: loadedManifest.manifestRoot,
+    workspace,
   });
   const plugins = options.plugins ?? [];
   const loaderPlugins = plugins.filter((plugin): plugin is LoaderPlugin => plugin.kind === 'loader');
@@ -77,11 +132,12 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     plugins.find((plugin): plugin is ResolverPlugin => plugin.kind === 'resolver') ??
     createProfileAwareResolver();
   const entries = await runPipeline({
-    cnosRoot: loadedManifest.cnosRoot,
+    manifestRoot: loadedManifest.manifestRoot,
     manifest: loadedManifest.manifest,
     profile: activeProfile.profile,
     profileChain: profileChain.profiles,
     profileActivation: profileChain.activation,
+    workspace,
     plugins: loaderPlugins,
     ...(options.cliArgs ? { cliArgs: options.cliArgs } : {}),
     ...(options.processEnv ? { processEnv: options.processEnv } : {}),
@@ -91,6 +147,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     profile: activeProfile.profile,
     profileChain: profileChain.profiles,
     precedenceOrder: loadedManifest.manifest.resolution.precedence,
+    workspace,
   });
 
   return createRuntime(

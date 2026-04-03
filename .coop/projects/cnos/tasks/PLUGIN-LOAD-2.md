@@ -29,7 +29,9 @@ tests_required:
     manifest mappings and competing sources.
 origin:
   authority_refs:
-    - docs/cnos-v1-canonical-spec.md
-    - docs/cnos-v1-codex-bootstrap-prompt.md
+    - docs/cnos-spec.md
+    - docs/cnos-prompt-pack.md
+  derived_refs:
+    - docs/cnos-workspace.md
 ---
 Build plugins/dotenv, plugins/process-env, and plugins/cli-args plus the shared env naming/mapping utilities in packages/core.

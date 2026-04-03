@@ -1,7 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { envVarToLogicalKey, type ConfigEntry, type EnvMappingConfig, type LoaderPlugin } from '@kitsy/cnos-core';
+import {
+  envVarToLogicalKey,
+  resolveWorkspaceScopedPath,
+  toPortablePath,
+  type ConfigEntry,
+  type EnvMappingConfig,
+  type LoaderPlugin,
+} from '@kitsy/cnos-core';
 
 const DOTENV_PLUGIN_ID = '@kitsy/cnos-plugin-dotenv';
 
@@ -61,6 +68,7 @@ export function dotenvEntriesFromObject(
   values: Record<string, string>,
   mapping: EnvMappingConfig = {},
   originFile?: string,
+  workspaceId = 'default',
 ): ConfigEntry[] {
   return Object.entries(values).flatMap(([envVar, value]) => {
     const logicalKey = envVarToLogicalKey(envVar, mapping);
@@ -76,6 +84,7 @@ export function dotenvEntriesFromObject(
         namespace: logicalKey.startsWith('secret.') ? 'secret' : 'value',
         sourceId: 'dotenv',
         pluginId: DOTENV_PLUGIN_ID,
+        workspaceId,
         origin: {
           envVar,
           ...(originFile ? { file: originFile } : {}),
@@ -99,26 +108,32 @@ export function createDotenvPlugin(): LoaderPlugin {
     kind: 'loader',
     async load(context) {
       const config = context.manifestConfig as DotenvSourceConfig;
-      const envRoot = path.resolve(context.cnosRoot, config.root ?? './env');
-      const workspaceRoot = path.dirname(context.cnosRoot);
+      const rootTemplate = config.root ?? './workspaces/{workspace}/env';
       const fileNames = context.profileActivation.envFiles;
       const entries: ConfigEntry[] = [];
 
-      for (const fileName of fileNames) {
-        const absolutePath = path.join(envRoot, fileName);
-        const document = await readIfPresent(absolutePath);
+      for (const workspaceRoot of context.workspace.workspaceRoots) {
+        const envRoot = resolveWorkspaceScopedPath(workspaceRoot.path, rootTemplate, {
+          workspace: workspaceRoot.workspaceId,
+        });
 
-        if (!document) {
-          continue;
+        for (const fileName of fileNames) {
+          const absolutePath = path.join(envRoot, fileName);
+          const document = await readIfPresent(absolutePath);
+
+          if (!document) {
+            continue;
+          }
+
+          entries.push(
+            ...dotenvEntriesFromObject(
+              parseDotenv(document),
+              config.envMapping,
+              toPortablePath(path.relative(path.dirname(context.manifestRoot), absolutePath)),
+              workspaceRoot.workspaceId,
+            ),
+          );
         }
-
-        entries.push(
-          ...dotenvEntriesFromObject(
-            parseDotenv(document),
-            config.envMapping,
-            path.relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
-          ),
-        );
       }
 
       return entries;

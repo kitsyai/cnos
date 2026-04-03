@@ -1,47 +1,14 @@
 import type { CnosPlugin } from '../types/plugin.js';
-import type { CnosRuntime, NamespaceName, ResolvedGraph } from '../types/core.js';
+import type { CnosRuntime, ResolvedGraph } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
 import { inspectValue } from '../runtime/inspect.js';
+import { toNamespaceObject } from '../runtime/projection.js';
 import { readOrValue } from '../runtime/readOr.js';
 import { readValue } from '../runtime/read.js';
 import { requireValue } from '../runtime/require.js';
-import { stripNamespace, toLogicalKey } from '../utils/path.js';
-
-function setNestedValue(target: Record<string, unknown>, pathSegments: string[], value: unknown): void {
-  const [head, ...tail] = pathSegments;
-
-  if (!head) {
-    return;
-  }
-
-  if (tail.length === 0) {
-    target[head] = value;
-    return;
-  }
-
-  const current = target[head];
-  const nextTarget =
-    current && typeof current === 'object' && !Array.isArray(current)
-      ? (current as Record<string, unknown>)
-      : {};
-  target[head] = nextTarget;
-  setNestedValue(nextTarget, tail, value);
-}
-
-function toNamespaceObject(graph: ResolvedGraph, namespace?: NamespaceName): Record<string, unknown> {
-  const output: Record<string, unknown> = {};
-
-  for (const entry of graph.entries.values()) {
-    if (namespace && entry.namespace !== namespace) {
-      continue;
-    }
-
-    const path = namespace ? stripNamespace(entry.key) : entry.key;
-    setNestedValue(output, path.split('.'), entry.value);
-  }
-
-  return output;
-}
+import { toEnv } from '../runtime/toEnv.js';
+import { toPublicEnv } from '../runtime/toPublicEnv.js';
+import { toLogicalKey } from '../utils/path.js';
 
 export function createRuntime(
   manifest: NormalizedManifest,
@@ -78,6 +45,12 @@ export function createRuntime(
     },
     toNamespace(namespace) {
       return toNamespaceObject(graph, namespace);
+    },
+    toEnv(options) {
+      return toEnv(graph, manifest, options);
+    },
+    toPublicEnv(options) {
+      return toPublicEnv(graph, manifest, options);
     },
   };
 }

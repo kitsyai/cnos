@@ -63,6 +63,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         namespace: 'value',
         sourceId: 'dotenv',
         pluginId: '@kitsy/cnos-plugin-dotenv',
+        workspaceId: 'default',
         origin: {
           envVar: 'SERVER_PORT',
           file: 'cnos/env/.env.local',
@@ -74,6 +75,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         namespace: 'value',
         sourceId: 'dotenv',
         pluginId: '@kitsy/cnos-plugin-dotenv',
+        workspaceId: 'default',
         origin: {
           envVar: 'DATABASE_HOST',
           file: 'cnos/env/.env.local',
@@ -85,6 +87,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         namespace: 'secret',
         sourceId: 'dotenv',
         pluginId: '@kitsy/cnos-plugin-dotenv',
+        workspaceId: 'default',
         origin: {
           envVar: 'SECRET_INVENTORY_DB_PASSWORD',
           file: 'cnos/env/.env.local',
@@ -119,7 +122,19 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         secrets: ['local'],
         envFiles: ['.env', '.env.local'],
       },
-      cnosRoot,
+      manifestRoot: cnosRoot,
+      workspace: {
+        workspaceId: 'fixture',
+        workspaceSource: 'project-name',
+        workspaceChain: ['fixture'],
+        workspaceRoots: [
+          {
+            scope: 'local',
+            workspaceId: 'fixture',
+            path: cnosRoot,
+          },
+        ],
+      },
     });
 
     expect(entries.map((entry) => [entry.key, entry.value, entry.origin?.file])).toEqual([

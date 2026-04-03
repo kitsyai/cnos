@@ -2,6 +2,7 @@ import type { ConfigEntry, InspectResult, LogicalKey, ResolvedGraph } from './co
 import type { NormalizedManifest } from './manifest.js';
 import type { ProfileActivation } from './profile.js';
 import type { SchemaRule } from './schema.js';
+import type { WorkspaceContext } from './workspace.js';
 
 export type CnosPluginKind = 'loader' | 'resolver' | 'validator' | 'exporter' | 'inspector';
 
@@ -15,7 +16,8 @@ export interface LoaderContext {
   profile: string;
   profileChain: string[];
   profileActivation: ProfileActivation;
-  cnosRoot: string;
+  manifestRoot: string;
+  workspace: WorkspaceContext;
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
 }
@@ -25,6 +27,7 @@ export interface ResolverContext {
   profile: string;
   profileChain: string[];
   precedenceOrder: string[];
+  workspace: WorkspaceContext;
 }
 
 export interface ValidationContext {
@@ -36,10 +39,12 @@ export interface ExportContext {
   manifest: NormalizedManifest;
   promotions: string[];
   frameworkPrefixes?: string[];
+  workspace: WorkspaceContext;
 }
 
 export interface InspectContext {
   manifest: NormalizedManifest;
+  workspace: WorkspaceContext;
 }
 
 export interface LoaderPlugin extends CnosPlugin {

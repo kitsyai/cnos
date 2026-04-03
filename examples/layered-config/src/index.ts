@@ -13,6 +13,7 @@ export async function runLayeredConfigExample() {
           namespace: 'value',
           sourceId: 'layered-config-fixture',
           pluginId: 'layered-config-fixture',
+          workspaceId: 'layered-config',
         },
         {
           key: 'value.app.stage',
@@ -20,6 +21,7 @@ export async function runLayeredConfigExample() {
           namespace: 'value',
           sourceId: 'layered-config-fixture',
           pluginId: 'layered-config-fixture',
+          workspaceId: 'layered-config',
         },
         {
           key: 'secret.app.token',
@@ -27,6 +29,7 @@ export async function runLayeredConfigExample() {
           namespace: 'secret',
           sourceId: 'layered-config-fixture',
           pluginId: 'layered-config-fixture',
+          workspaceId: 'layered-config',
         },
       ];
     },

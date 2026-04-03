@@ -13,6 +13,7 @@ export async function runBasicNodeExample() {
           namespace: 'value',
           sourceId: 'basic-node-fixture',
           pluginId: 'basic-node-fixture',
+          workspaceId: 'basic-node',
         },
         {
           key: 'value.app.port',
@@ -20,6 +21,7 @@ export async function runBasicNodeExample() {
           namespace: 'value',
           sourceId: 'basic-node-fixture',
           pluginId: 'basic-node-fixture',
+          workspaceId: 'basic-node',
         },
       ];
     },

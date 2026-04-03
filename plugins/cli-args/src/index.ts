@@ -58,7 +58,7 @@ export function parseCliArgs(args: string[]): ParsedCliArg[] {
   return parsed;
 }
 
-export function cliArgEntriesFromArgs(args: string[]): ConfigEntry[] {
+export function cliArgEntriesFromArgs(args: string[], workspaceId = 'default'): ConfigEntry[] {
   return parseCliArgs(args).flatMap(({ key, value, raw }) => {
     const [candidateNamespace = '', ...pathSegments] = key.split('.');
 
@@ -76,6 +76,7 @@ export function cliArgEntriesFromArgs(args: string[]): ConfigEntry[] {
         namespace,
         sourceId: 'cli-args',
         pluginId: CLI_ARGS_PLUGIN_ID,
+        workspaceId,
         origin: {
           cliArg: raw,
         },
@@ -89,7 +90,7 @@ export function createCliArgsPlugin(): LoaderPlugin {
     id: 'cli-args',
     kind: 'loader',
     async load(context) {
-      return cliArgEntriesFromArgs(context.cliArgs ?? []);
+      return cliArgEntriesFromArgs(context.cliArgs ?? [], context.workspace.workspaceId);
     },
   };
 }

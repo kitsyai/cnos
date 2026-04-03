@@ -44,6 +44,7 @@ describe('@kitsy/cnos-plugin-cli-args', () => {
         namespace: 'value',
         sourceId: 'cli-args',
         pluginId: '@kitsy/cnos-plugin-cli-args',
+        workspaceId: 'default',
         origin: {
           cliArg: '--value.server.port=8080',
         },
@@ -54,6 +55,7 @@ describe('@kitsy/cnos-plugin-cli-args', () => {
         namespace: 'secret',
         sourceId: 'cli-args',
         pluginId: '@kitsy/cnos-plugin-cli-args',
+        workspaceId: 'default',
         origin: {
           cliArg: '--secret.inventory.db.password top-secret',
         },
