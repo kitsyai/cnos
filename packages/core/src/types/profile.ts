@@ -1,9 +1,13 @@
-export interface CnosProfileSelection {
-  activeProfile?: string;
-  fallbackProfiles?: string[];
+export type ProfileResolveFrom = 'cli.profile' | 'env.CNOS_PROFILE' | 'default';
+
+export type ProfileSource = 'cli' | 'env' | 'manifest-default';
+
+export interface ResolvedProfile {
+  profile: string;
+  source: ProfileSource;
 }
 
-export interface ExpandedProfileGraph {
-  activeProfile?: string;
+export interface ExpandedProfileChain {
+  activeProfile: string;
   profiles: string[];
 }

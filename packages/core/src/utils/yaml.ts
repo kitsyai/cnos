@@ -1,8 +1,9 @@
+import { parse, stringify } from 'yaml';
+
 export function parseYaml<T>(source: string): T {
-  void source;
-  throw new Error('YAML parsing is not implemented in the initial CNOS scaffold.');
+  return parse(source) as T;
 }
 
 export function stringifyYaml(value: unknown): string {
-  return JSON.stringify(value, null, 2);
+  return stringify(value);
 }

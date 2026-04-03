@@ -1,28 +1,82 @@
-export interface CnosConfigEntry {
-  key: string;
+import type { NormalizedManifest } from './manifest.js';
+import type { CnosPlugin } from './plugin.js';
+import type { ProfileSource } from './profile.js';
+
+export type LogicalKey = string;
+
+export type NamespaceName = 'value' | 'secret' | 'meta';
+
+export interface ConfigOrigin {
+  file?: string;
+  line?: number;
+  envVar?: string;
+  cliArg?: string;
+}
+
+export interface ConfigEntry {
+  key: LogicalKey;
   value: unknown;
-  source?: string;
+  namespace: NamespaceName;
+  sourceId: string;
+  pluginId: string;
   profile?: string;
-  secret?: boolean;
+  origin?: ConfigOrigin;
+  metadata?: Record<string, unknown>;
 }
 
-export interface CnosInspectRecord extends CnosConfigEntry {
-  resolved: boolean;
+export interface ResolvedEntry {
+  key: LogicalKey;
+  value: unknown;
+  namespace: NamespaceName;
+  winner: ConfigEntry;
+  overridden: ConfigEntry[];
 }
 
-export interface CnosRuntime {
-  manifest: CnosManifest;
-  plugins: CnosPlugin[];
-  read(key: string): unknown;
-  require(key: string): unknown;
-  inspect(): CnosInspectRecord[];
+export interface ResolvedGraph {
+  entries: Map<LogicalKey, ResolvedEntry>;
+  profile: string;
+  resolvedAt: string;
+  profileSource: ProfileSource;
+}
+
+export interface InspectResult {
+  key: LogicalKey;
+  value: unknown;
+  namespace: NamespaceName;
+  profile: string;
+  profileSource: ProfileSource;
+  winner: {
+    sourceId: string;
+    pluginId: string;
+    origin?: ConfigOrigin;
+  };
+  overridden: Array<{
+    sourceId: string;
+    pluginId: string;
+    value: unknown;
+    origin?: ConfigOrigin;
+  }>;
 }
 
 export interface CnosCreateOptions {
-  manifest?: CnosManifest;
+  root?: string;
+  profile?: string;
   plugins?: CnosPlugin[];
-  entries?: CnosConfigEntry[];
+  cliArgs?: string[];
+  processEnv?: Record<string, string | undefined>;
 }
 
-import type { CnosManifest } from './manifest.js';
-import type { CnosPlugin } from './plugin.js';
+export interface CnosRuntime {
+  manifest: NormalizedManifest;
+  plugins: CnosPlugin[];
+  readonly graph: ResolvedGraph;
+  read<T = unknown>(key: LogicalKey): T | undefined;
+  require<T = unknown>(key: LogicalKey): T;
+  readOr<T>(key: LogicalKey, fallback: T): T;
+  value<T = unknown>(path: string): T | undefined;
+  secret<T = unknown>(path: string): T | undefined;
+  meta<T = unknown>(path: string): T | undefined;
+  inspect(key: LogicalKey): InspectResult;
+  toObject(): Record<string, unknown>;
+  toNamespace(namespace: NamespaceName): Record<string, unknown>;
+}

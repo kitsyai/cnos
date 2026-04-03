@@ -1,7 +1,11 @@
-import type { CnosPlugin } from '@kitsy/cnos-core';
+import type { LoaderPlugin } from '@kitsy/cnos-core';
 
-export function createProcessEnvPlugin(): CnosPlugin {
+export function createProcessEnvPlugin(): LoaderPlugin {
   return {
-    name: '@kitsy/cnos-plugin-process-env',
+    id: 'process-env',
+    kind: 'loader',
+    async load() {
+      return [];
+    },
   };
 }

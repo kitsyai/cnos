@@ -4,6 +4,6 @@ import { createProcessEnvPlugin } from '../src/index.js';
 
 describe('@kitsy/cnos-plugin-process-env', () => {
   it('creates a named plugin', () => {
-    expect(createProcessEnvPlugin().name).toBe('@kitsy/cnos-plugin-process-env');
+    expect(createProcessEnvPlugin().id).toBe('process-env');
   });
 });

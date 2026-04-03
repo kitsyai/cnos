@@ -1,10 +1,13 @@
 export { createCnos } from './createCnos.js';
 export { defaultPlugins } from './defaultPlugins.js';
 export type {
-  CnosConfigEntry,
+  ConfigEntry,
   CnosCreateOptions,
-  CnosInspectRecord,
-  CnosManifest,
+  InspectResult,
+  LoaderPlugin,
+  LogicalKey,
   CnosPlugin,
   CnosRuntime,
+  ManifestFile,
+  NormalizedManifest,
 } from '@kitsy/cnos-core';

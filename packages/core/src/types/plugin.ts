@@ -1,12 +1,83 @@
-import type { CnosConfigEntry, CnosRuntime } from './core.js';
+import type { ConfigEntry, InspectResult, LogicalKey, ResolvedGraph } from './core.js';
+import type { NormalizedManifest } from './manifest.js';
+import type { SchemaRule } from './schema.js';
 
-export interface CnosPluginContext {
-  manifestName: string;
-}
+export type CnosPluginKind = 'loader' | 'resolver' | 'validator' | 'exporter' | 'inspector';
 
 export interface CnosPlugin {
-  name: string;
-  setup?(context: CnosPluginContext): void | Promise<void>;
-  collect?(): CnosConfigEntry[] | Promise<CnosConfigEntry[]>;
-  extendRuntime?(runtime: CnosRuntime): void | Promise<void>;
+  id: string;
+  kind: CnosPluginKind;
+}
+
+export interface LoaderContext {
+  manifestConfig: Record<string, unknown>;
+  profile: string;
+  profileChain: string[];
+  cnosRoot: string;
+  cliArgs?: string[];
+  processEnv?: Record<string, string | undefined>;
+}
+
+export interface ResolverContext {
+  manifest: NormalizedManifest;
+  profile: string;
+  profileChain: string[];
+  precedenceOrder: string[];
+}
+
+export interface ValidationContext {
+  manifest: NormalizedManifest;
+  schema?: Record<LogicalKey, SchemaRule>;
+}
+
+export interface ExportContext {
+  manifest: NormalizedManifest;
+  promotions: string[];
+  frameworkPrefixes?: string[];
+}
+
+export interface InspectContext {
+  manifest: NormalizedManifest;
+}
+
+export interface LoaderPlugin extends CnosPlugin {
+  kind: 'loader';
+  load(context: LoaderContext): Promise<ConfigEntry[]>;
+}
+
+export interface ResolverPlugin extends CnosPlugin {
+  kind: 'resolver';
+  resolve(entries: ConfigEntry[], context: ResolverContext): Promise<ResolvedGraph>;
+}
+
+export interface ValidationIssue {
+  code: string;
+  message: string;
+  key?: LogicalKey;
+}
+
+export interface ValidationResult {
+  pluginId: string;
+  valid: boolean;
+  issues: ValidationIssue[];
+}
+
+export interface ValidatorPlugin extends CnosPlugin {
+  kind: 'validator';
+  validate(graph: ResolvedGraph, context: ValidationContext): Promise<ValidationResult>;
+}
+
+export interface ExportResult {
+  pluginId: string;
+  value: Record<string, string>;
+}
+
+export interface ExporterPlugin extends CnosPlugin {
+  kind: 'exporter';
+  export(graph: ResolvedGraph, context: ExportContext): Promise<ExportResult>;
+}
+
+export interface InspectorPlugin extends CnosPlugin {
+  kind: 'inspector';
+  inspect(key: LogicalKey, graph: ResolvedGraph, context: InspectContext): Promise<InspectResult>;
 }

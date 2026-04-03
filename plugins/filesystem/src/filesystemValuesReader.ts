@@ -1,11 +1,16 @@
-import type { CnosConfigEntry } from '@kitsy/cnos-core';
+import type { ConfigEntry } from '@kitsy/cnos-core';
 
 import { toConfigKey } from './helpers.js';
 
-export function filesystemValuesReader(filePath: string, value: unknown): CnosConfigEntry {
+export function filesystemValuesReader(filePath: string, value: unknown): ConfigEntry {
   return {
-    key: toConfigKey(filePath),
+    key: `value.${toConfigKey(filePath)}`,
     value,
-    source: 'filesystem',
+    namespace: 'value',
+    sourceId: 'filesystem-values',
+    pluginId: '@kitsy/cnos-plugin-filesystem',
+    origin: {
+      file: filePath,
+    },
   };
 }

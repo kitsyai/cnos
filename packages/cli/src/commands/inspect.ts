@@ -3,5 +3,5 @@ import { printInspect } from '../format/printInspect.js';
 
 export async function runInspect(): Promise<string> {
   const runtime = await createRuntimeService();
-  return printInspect(runtime.inspect());
+  return printInspect(runtime.inspect('meta.profile'));
 }

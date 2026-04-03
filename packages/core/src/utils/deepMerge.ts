@@ -1,3 +1,7 @@
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function deepMerge<T extends Record<string, unknown>>(
   base: T,
   override: Partial<T>,
@@ -7,18 +11,8 @@ export function deepMerge<T extends Record<string, unknown>>(
   for (const [key, value] of Object.entries(override)) {
     const currentValue = merged[key];
 
-    if (
-      currentValue &&
-      value &&
-      typeof currentValue === 'object' &&
-      typeof value === 'object' &&
-      !Array.isArray(currentValue) &&
-      !Array.isArray(value)
-    ) {
-      merged[key] = deepMerge(
-        currentValue as Record<string, unknown>,
-        value as Record<string, unknown>,
-      );
+    if (isPlainObject(currentValue) && isPlainObject(value)) {
+      merged[key] = deepMerge(currentValue, value);
       continue;
     }
 

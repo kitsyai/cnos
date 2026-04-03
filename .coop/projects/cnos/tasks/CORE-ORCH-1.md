@@ -3,7 +3,7 @@ id: CORE-ORCH-1
 short_id: 76d0fcd7e657
 title: Implement core domain model, manifest loading, and runtime baseline
 type: feature
-status: todo
+status: done
 created: 2026-04-03
 updated: 2026-04-03
 aliases: []

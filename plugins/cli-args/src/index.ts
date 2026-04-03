@@ -1,7 +1,11 @@
-import type { CnosPlugin } from '@kitsy/cnos-core';
+import type { LoaderPlugin } from '@kitsy/cnos-core';
 
-export function createCliArgsPlugin(): CnosPlugin {
+export function createCliArgsPlugin(): LoaderPlugin {
   return {
-    name: '@kitsy/cnos-plugin-cli-args',
+    id: 'cli-args',
+    kind: 'loader',
+    async load() {
+      return [];
+    },
   };
 }

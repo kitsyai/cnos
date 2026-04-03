@@ -1,15 +1,33 @@
-import { createCnos } from '@kitsy/cnos';
+import { createCnos, type LoaderPlugin } from '@kitsy/cnos';
+import { fileURLToPath } from 'node:url';
 
 export async function runMonorepoAppExample() {
-  const runtime = await createCnos({
-    entries: [
-      { key: 'workspace.name', value: 'cnos-monorepo' },
-      { key: 'apps.web.port', value: 4000 },
-    ],
-    manifest: {
-      name: 'monorepo-app',
+  const fixtureLoader: LoaderPlugin = {
+    id: 'monorepo-app-fixture',
+    kind: 'loader',
+    async load() {
+      return [
+        {
+          key: 'value.workspace.name',
+          value: 'cnos-monorepo',
+          namespace: 'value',
+          sourceId: 'monorepo-app-fixture',
+          pluginId: 'monorepo-app-fixture',
+        },
+        {
+          key: 'value.apps.web.port',
+          value: 4000,
+          namespace: 'value',
+          sourceId: 'monorepo-app-fixture',
+          pluginId: 'monorepo-app-fixture',
+        },
+      ];
     },
+  };
+  const runtime = await createCnos({
+    root: fileURLToPath(new URL('../cnos', import.meta.url)),
+    plugins: [fixtureLoader],
   });
 
-  return runtime.inspect();
+  return runtime.toNamespace('value');
 }

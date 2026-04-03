@@ -1,12 +1,16 @@
-import type { CnosConfigEntry } from '@kitsy/cnos-core';
+import type { ConfigEntry } from '@kitsy/cnos-core';
 
 import { toConfigKey } from './helpers.js';
 
-export function filesystemSecretsReader(filePath: string, value: unknown): CnosConfigEntry {
+export function filesystemSecretsReader(filePath: string, value: unknown): ConfigEntry {
   return {
-    key: toConfigKey(filePath),
+    key: `secret.${toConfigKey(filePath)}`,
     value,
-    source: 'filesystem',
-    secret: true,
+    namespace: 'secret',
+    sourceId: 'filesystem-secrets',
+    pluginId: '@kitsy/cnos-plugin-filesystem',
+    origin: {
+      file: filePath,
+    },
   };
 }

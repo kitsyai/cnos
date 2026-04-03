@@ -1,7 +1,11 @@
-import type { CnosPlugin } from '@kitsy/cnos-core';
+import type { LoaderPlugin } from '@kitsy/cnos-core';
 
-export function createDotenvPlugin(): CnosPlugin {
+export function createDotenvPlugin(): LoaderPlugin {
   return {
-    name: '@kitsy/cnos-plugin-dotenv',
+    id: 'dotenv',
+    kind: 'loader',
+    async load() {
+      return [];
+    },
   };
 }

@@ -1,15 +1,5 @@
-import type { ExpandedProfileGraph } from '../types/profile.js';
+import { expandProfileChain } from './expandProfileChain.js';
 
-export function expandProfileGraph(
-  activeProfile?: string,
-  fallbackProfiles: string[] = [],
-): ExpandedProfileGraph {
-  const profiles = [activeProfile, ...fallbackProfiles].filter(
-    (profile): profile is string => Boolean(profile),
-  );
-
-  return {
-    ...(activeProfile ? { activeProfile } : {}),
-    profiles: [...new Set(profiles)],
-  };
+export function expandProfileGraph(activeProfile: string) {
+  return expandProfileChain(activeProfile);
 }

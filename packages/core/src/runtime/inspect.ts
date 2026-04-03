@@ -1,8 +1,29 @@
-import type { CnosConfigEntry, CnosInspectRecord } from '../types/core.js';
+import { CnosKeyNotFoundError } from '../errors.js';
+import type { InspectResult, LogicalKey, ResolvedGraph } from '../types/core.js';
 
-export function inspectEntries(entries: CnosConfigEntry[]): CnosInspectRecord[] {
-  return entries.map((entry) => ({
-    ...entry,
-    resolved: entry.value !== undefined,
-  }));
+export function inspectValue(graph: ResolvedGraph, key: LogicalKey): InspectResult {
+  const entry = graph.entries.get(key);
+
+  if (!entry) {
+    throw new CnosKeyNotFoundError(key);
+  }
+
+  return {
+    key: entry.key,
+    value: entry.value,
+    namespace: entry.namespace,
+    profile: graph.profile,
+    profileSource: graph.profileSource,
+    winner: {
+      sourceId: entry.winner.sourceId,
+      pluginId: entry.winner.pluginId,
+      ...(entry.winner.origin ? { origin: entry.winner.origin } : {}),
+    },
+    overridden: entry.overridden.map((override) => ({
+      sourceId: override.sourceId,
+      pluginId: override.pluginId,
+      value: override.value,
+      ...(override.origin ? { origin: override.origin } : {}),
+    })),
+  };
 }

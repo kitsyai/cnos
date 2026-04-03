@@ -1,5 +1,5 @@
-import type { CnosConfigEntry } from '../types/core.js';
+import type { LogicalKey, ResolvedGraph } from '../types/core.js';
 
-export function readValue(entries: CnosConfigEntry[], key: string): unknown {
-  return entries.find((entry) => entry.key === key)?.value;
+export function readValue<T = unknown>(graph: ResolvedGraph, key: LogicalKey): T | undefined {
+  return graph.entries.get(key)?.value as T | undefined;
 }
