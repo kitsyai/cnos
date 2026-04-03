@@ -1,0 +1,12 @@
+id: v1
+short_id: f4ad824cd212
+name: v1
+capacity_profiles:
+  - backend_team
+constraints:
+  max_concurrent_tasks: 6
+  allowed_types:
+    - feature
+    - bug
+    - chore
+    - spike
