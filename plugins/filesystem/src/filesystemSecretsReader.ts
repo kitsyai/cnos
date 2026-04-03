@@ -1,16 +1,28 @@
-import type { ConfigEntry } from '@kitsy/cnos-core';
+import { readFile } from 'node:fs/promises';
 
-import { toConfigKey } from './helpers.js';
+import type { ConfigEntry, LoaderPlugin } from '@kitsy/cnos-core';
 
-export function filesystemSecretsReader(filePath: string, value: unknown): ConfigEntry {
+import { collectFilesystemLayerFiles, yamlObjectToEntries } from './helpers.js';
+
+export function filesystemSecretsReader(filePath: string, document: string): ConfigEntry[] {
+  return yamlObjectToEntries(document, filePath, 'secret', 'filesystem-secrets');
+}
+
+export function createFilesystemSecretsPlugin(): LoaderPlugin {
   return {
-    key: `secret.${toConfigKey(filePath)}`,
-    value,
-    namespace: 'secret',
-    sourceId: 'filesystem-secrets',
-    pluginId: '@kitsy/cnos-plugin-filesystem',
-    origin: {
-      file: filePath,
+    id: 'filesystem-secrets',
+    kind: 'loader',
+    async load(context) {
+      const sourceRoot = String(context.manifestConfig.root ?? './secrets');
+      const files = await collectFilesystemLayerFiles(context.cnosRoot, sourceRoot, context.profileChain);
+      const entries: ConfigEntry[] = [];
+
+      for (const file of files) {
+        const document = await readFile(file.absolutePath, 'utf8');
+        entries.push(...filesystemSecretsReader(file.relativePath, document));
+      }
+
+      return entries;
     },
   };
 }

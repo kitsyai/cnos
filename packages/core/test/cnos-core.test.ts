@@ -4,7 +4,15 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createCnos, flattenObject, loadManifest, type ConfigEntry, type LoaderPlugin } from '../src/index.js';
+import {
+  createCnos,
+  envVarToLogicalKey,
+  flattenObject,
+  loadManifest,
+  logicalKeyToEnvVar,
+  type ConfigEntry,
+  type LoaderPlugin,
+} from '../src/index.js';
 
 const fixtureRoots: string[] = [];
 
@@ -101,5 +109,22 @@ describe('@kitsy/cnos-core', () => {
     expect(flattenObject({ app: { port: 3000 } })).toEqual({
       'app.port': 3000,
     });
+  });
+
+  it('maps env names bidirectionally with convention and explicit overrides', () => {
+    const mapping = {
+      convention: 'SCREAMING_SNAKE' as const,
+      explicit: {
+        DATABASE_HOST: 'value.inventory.db.host',
+        DATABASE_PASSWORD: 'secret.inventory.db.password',
+      },
+    };
+
+    expect(logicalKeyToEnvVar('value.server.port', mapping)).toBe('SERVER_PORT');
+    expect(logicalKeyToEnvVar('secret.inventory.db.password', mapping)).toBe('DATABASE_PASSWORD');
+    expect(envVarToLogicalKey('SERVER_PORT', mapping)).toBe('value.server.port');
+    expect(envVarToLogicalKey('DATABASE_HOST', mapping)).toBe('value.inventory.db.host');
+    expect(envVarToLogicalKey('SECRET_INVENTORY_DB_PASSWORD', mapping)).toBe('secret.inventory.db.password');
+    expect(envVarToLogicalKey('not-valid', mapping)).toBeUndefined();
   });
 });

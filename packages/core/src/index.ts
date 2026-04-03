@@ -1,4 +1,5 @@
 export * from './errors.js';
+export * from './inspectors/provenance.js';
 export * from './manifest/loadManifest.js';
 export * from './manifest/normalizeManifest.js';
 export * from './orchestrator/createCnos.js';
@@ -18,6 +19,7 @@ export * from './types/plugin.js';
 export * from './types/profile.js';
 export * from './types/schema.js';
 export * from './utils/deepMerge.js';
+export * from './utils/envNaming.js';
 export * from './utils/flatten.js';
 export * from './utils/path.js';
 export * from './utils/yaml.js';

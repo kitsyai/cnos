@@ -5,7 +5,7 @@ CNOS is a plugin-first configuration orchestration system. This repository is a 
 ## Package map
 
 - `@kitsy/cnos-core`: workflow orchestrator, contracts, manifest model, and runtime primitives.
-- `@kitsy/cnos`: batteries-included runtime assembly with the official v1 plugins.
+- `@kitsy/cnos`: batteries-included runtime assembly with the official v1 plugins and convenience re-exports under `@kitsy/cnos/plugin/*`.
 - `@kitsy/cnos-cli`: `cnos` executable and command routing.
 - `@kitsy/cnos-plugin-*`: official plugins kept as separate publishable packages.
 

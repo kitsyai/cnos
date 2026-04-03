@@ -3,7 +3,7 @@ id: PLUGIN-LOAD-2
 short_id: 75e324793a1f
 title: Implement env and CLI loaders with bidirectional env mapping
 type: feature
-status: todo
+status: done
 created: 2026-04-03
 updated: 2026-04-03
 aliases: []

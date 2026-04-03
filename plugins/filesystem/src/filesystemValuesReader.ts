@@ -1,16 +1,31 @@
-import type { ConfigEntry } from '@kitsy/cnos-core';
+import { readFile } from 'node:fs/promises';
 
-import { toConfigKey } from './helpers.js';
+import type { ConfigEntry, LoaderPlugin } from '@kitsy/cnos-core';
 
-export function filesystemValuesReader(filePath: string, value: unknown): ConfigEntry {
+import { collectFilesystemLayerFiles, yamlObjectToEntries } from './helpers.js';
+
+export function filesystemValuesReader(filePath: string, document: string): ConfigEntry[] {
+  return yamlObjectToEntries(document, filePath, 'value', 'filesystem-values');
+}
+
+export function createFilesystemValuesPlugin(): LoaderPlugin {
   return {
-    key: `value.${toConfigKey(filePath)}`,
-    value,
-    namespace: 'value',
-    sourceId: 'filesystem-values',
-    pluginId: '@kitsy/cnos-plugin-filesystem',
-    origin: {
-      file: filePath,
+    id: 'filesystem-values',
+    kind: 'loader',
+    async load(context) {
+      const sourceRoot = String(context.manifestConfig.root ?? './values');
+      const files = await collectFilesystemLayerFiles(context.cnosRoot, sourceRoot, [
+        'base',
+        ...context.profileChain.filter((layer) => layer !== 'base'),
+      ]);
+      const entries: ConfigEntry[] = [];
+
+      for (const file of files) {
+        const document = await readFile(file.absolutePath, 'utf8');
+        entries.push(...filesystemValuesReader(file.relativePath, document));
+      }
+
+      return entries;
     },
   };
 }
