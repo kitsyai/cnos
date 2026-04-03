@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": false,
+  "commit": false,
+  "fixed": [
+    [
+      "@kitsy/cnos-core",
+      "@kitsy/cnos",
+      "@kitsy/cnos-cli",
+      "@kitsy/cnos-plugin-filesystem",
+      "@kitsy/cnos-plugin-dotenv",
+      "@kitsy/cnos-plugin-process-env",
+      "@kitsy/cnos-plugin-cli-args",
+      "@kitsy/cnos-plugin-basic-schema",
+      "@kitsy/cnos-plugin-env-export"
+    ]
+  ],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}

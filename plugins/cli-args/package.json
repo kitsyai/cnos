@@ -1,0 +1,48 @@
+{
+  "name": "@kitsy/cnos-plugin-cli-args",
+  "version": "0.1.0",
+  "description": "CLI argument plugin scaffold for CNOS.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kitsyai/cnos.git",
+    "directory": "plugins/cli-args"
+  },
+  "homepage": "https://github.com/kitsyai/cnos/tree/main/plugins/cli-args",
+  "bugs": {
+    "url": "https://github.com/kitsyai/cnos/issues"
+  },
+  "keywords": [
+    "cnos",
+    "plugin",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@kitsy/cnos-core": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "clean": "rimraf dist",
+    "dev": "tsup src/index.ts --watch --format esm,cjs --dts",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

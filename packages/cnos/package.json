@@ -1,0 +1,54 @@
+{
+  "name": "@kitsy/cnos",
+  "version": "0.1.0",
+  "description": "Batteries-included CNOS runtime package wired with the official plugins.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kitsyai/cnos.git",
+    "directory": "packages/cnos"
+  },
+  "homepage": "https://github.com/kitsyai/cnos/tree/main/packages/cnos",
+  "bugs": {
+    "url": "https://github.com/kitsyai/cnos/issues"
+  },
+  "keywords": [
+    "cnos",
+    "config",
+    "runtime"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@kitsy/cnos-core": "workspace:*",
+    "@kitsy/cnos-plugin-basic-schema": "workspace:*",
+    "@kitsy/cnos-plugin-cli-args": "workspace:*",
+    "@kitsy/cnos-plugin-dotenv": "workspace:*",
+    "@kitsy/cnos-plugin-env-export": "workspace:*",
+    "@kitsy/cnos-plugin-filesystem": "workspace:*",
+    "@kitsy/cnos-plugin-process-env": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "clean": "rimraf dist",
+    "dev": "tsup src/index.ts --watch --format esm,cjs --dts",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

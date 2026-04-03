@@ -1,2 +1,17 @@
 .coop/logs/
 .coop/tmp/
+node_modules/
+dist/
+coverage/
+.artifacts/
+.turbo/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+.env
+.env.local
+.env.*.local
+!.env.example
+pnpm-debug.log*

@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "sourceMap": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "paths": {
+      "@kitsy/cnos-core": [
+        "packages/core/src/index.ts"
+      ],
+      "@kitsy/cnos": [
+        "packages/cnos/src/index.ts"
+      ],
+      "@kitsy/cnos-cli": [
+        "packages/cli/src/index.ts"
+      ],
+      "@kitsy/cnos-plugin-filesystem": [
+        "plugins/filesystem/src/index.ts"
+      ],
+      "@kitsy/cnos-plugin-dotenv": [
+        "plugins/dotenv/src/index.ts"
+      ],
+      "@kitsy/cnos-plugin-process-env": [
+        "plugins/process-env/src/index.ts"
+      ],
+      "@kitsy/cnos-plugin-cli-args": [
+        "plugins/cli-args/src/index.ts"
+      ],
+      "@kitsy/cnos-plugin-basic-schema": [
+        "plugins/basic-schema/src/index.ts"
+      ],
+      "@kitsy/cnos-plugin-env-export": [
+        "plugins/env-export/src/index.ts"
+      ]
+    }
+  }
+}

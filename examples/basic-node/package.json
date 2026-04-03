@@ -1,0 +1,16 @@
+{
+  "name": "@kitsy/cnos-example-basic-node",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@kitsy/cnos": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --clean",
+    "clean": "rimraf dist",
+    "dev": "tsup src/index.ts --watch --format esm --clean",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
