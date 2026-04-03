@@ -1,0 +1,65 @@
+version: 2
+project:
+  name: "cnos"
+  id: "cnos"
+  aliases: []
+
+id_prefixes:
+  idea: "IDEA"
+  task: "PM"
+  delivery: "DEL"
+  run: "RUN"
+
+id:
+  naming:
+    task: "<TYPE>-<TITLE16>-<SEQ>"
+    idea: "<TYPE>-<TITLE16>-<SEQ>"
+    track: "<NAME_SLUG>"
+    delivery: "<NAME_SLUG>"
+    run: "<TYPE>-<YYMMDD>-<RAND>"
+  tokens: {}
+  seq_padding: 0
+
+defaults:
+  task:
+    type: feature
+    priority: p2
+    complexity: medium
+    determinism: medium
+  track: unassigned
+
+scheduling:
+  algorithm: critical-path
+  velocity_window_weeks: 4
+  overhead_factor: 1.2
+
+ai:
+  provider: mock
+  model: mock-local
+  default_executor: claude-sonnet
+  sandbox: true
+  max_concurrent_agents: 4
+  token_budget_per_task: 50000
+
+plugins:
+  enabled: []
+
+github:
+  owner: ""
+  repo: ""
+  base_branch: main
+  token_env: GITHUB_TOKEN
+  webhook_secret_env: GITHUB_WEBHOOK_SECRET
+  merge_method: squash
+
+api:
+  host: 127.0.0.1
+  port: 3847
+  remotes: {}
+
+hooks:
+  on_task_transition: .coop/projects/cnos/hooks/on-task-transition.sh
+  on_delivery_complete: .coop/projects/cnos/hooks/on-delivery-complete.sh
+
+index:
+  data: yaml

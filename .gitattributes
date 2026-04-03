@@ -1,0 +1,2 @@
+.coop/projects/*/tasks/*.md merge=coop-task
+.coop/projects/*/deliveries/*.yml merge=coop-delivery

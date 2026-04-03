@@ -1,0 +1,8 @@
+id: console-log
+name: "Console Logger"
+version: "1.0.0"
+triggers:
+  - event: task.transitioned
+    action:
+      type: console
+      template: "Task {{ task.id }} moved to {{ event.to }} by {{ event.actor }}"

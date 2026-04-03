@@ -1,0 +1,16 @@
+id: github-pr
+name: "GitHub PR Sync"
+version: "1.0.0"
+triggers:
+  - event: task.transitioned
+    filter:
+      to: [in_review]
+    action:
+      type: github_pr
+      operation: create_or_update
+  - event: task.transitioned
+    filter:
+      to: [done]
+    action:
+      type: github_pr
+      operation: merge
