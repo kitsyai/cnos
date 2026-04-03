@@ -69,6 +69,12 @@ export interface ValidationResult {
   issues: ValidationIssue[];
 }
 
+export interface ValidationSummary {
+  valid: boolean;
+  issues: ValidationIssue[];
+  results: ValidationResult[];
+}
+
 export interface ValidatorPlugin extends CnosPlugin {
   kind: 'validator';
   validate(graph: ResolvedGraph, context: ValidationContext): Promise<ValidationResult>;

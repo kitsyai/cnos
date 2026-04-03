@@ -1,14 +1,16 @@
-import type { ValidatorPlugin } from '@kitsy/cnos-core';
+import { applySchemaRules, type ValidatorPlugin } from '@kitsy/cnos-core';
 
 export function createBasicSchemaPlugin(): ValidatorPlugin {
   return {
     id: 'basic-schema',
     kind: 'validator',
-    async validate() {
+    async validate(graph, context) {
+      const result = applySchemaRules(graph, context.schema ?? {});
+
       return {
         pluginId: 'basic-schema',
-        valid: true,
-        issues: [],
+        valid: result.issues.length === 0,
+        issues: result.issues,
       };
     },
   };

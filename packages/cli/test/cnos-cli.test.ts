@@ -5,10 +5,17 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseArgs } from '../src/cli/parseArgs.js';
+import { runDefine } from '../src/commands/define.js';
+import { runDiff } from '../src/commands/diff.js';
+import { runDoctor } from '../src/commands/doctor.js';
+import { runDump } from '../src/commands/dump.js';
+import { runExport } from '../src/commands/export.js';
 import { runInit } from '../src/commands/init.js';
 import { runInspect } from '../src/commands/inspect.js';
 import { runRead } from '../src/commands/read.js';
+import { runCommand } from '../src/commands/run.js';
 import { runSecret } from '../src/commands/secret.js';
+import { runValidate } from '../src/commands/validate.js';
 import { runValue } from '../src/commands/value.js';
 import { printJson } from '../src/format/printJson.js';
 
@@ -22,7 +29,9 @@ async function createRuntimeFixture(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-'));
   fixtureRoots.push(root);
   await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local'), { recursive: true });
+  await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'stage'), { recursive: true });
   await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'local'), { recursive: true });
+  await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'stage'), { recursive: true });
   await writeFile(
     path.join(root, 'cnos', 'cnos.yml'),
     [
@@ -31,19 +40,49 @@ async function createRuntimeFixture(): Promise<string> {
       '  name: cli-fixture',
       'workspaces:',
       '  default: api',
+      '  global:',
+      '    enabled: true',
+      '    allowWrite: true',
       '  items:',
       '    api: {}',
       'envMapping:',
       '  convention: SCREAMING_SNAKE',
+      '  explicit:',
+      '    API_URL: value.api.baseUrl',
+      'public:',
+      '  promote:',
+      '    - value.api.baseUrl',
+      'schema:',
+      '  value.server.port:',
+      '    type: number',
+      '    required: true',
+      '  value.server.host:',
+      '    type: string',
+      '    default: localhost',
     ].join('\n'),
   );
   await writeFile(
     path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local', 'app.yml'),
-    ['app:', '  name: cli-fixture', 'server:', '  port: 8080'].join('\n'),
+    [
+      'app:',
+      '  name: cli-fixture',
+      'server:',
+      '  port: "8080"',
+      'api:',
+      '  baseUrl: https://api.local',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, 'cnos', 'workspaces', 'api', 'values', 'stage', 'app.yml'),
+    ['server:', '  port: "9090"', 'api:', '  baseUrl: https://api.stage'].join('\n'),
   );
   await writeFile(
     path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'local', 'app.yml'),
     ['app:', '  token: super-secret'].join('\n'),
+  );
+  await writeFile(
+    path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'stage', 'app.yml'),
+    ['app:', '  token: stage-secret'].join('\n'),
   );
   return root;
 }
@@ -72,6 +111,7 @@ describe('@kitsy/cnos-cli', () => {
         json: true,
         cliArgs: ['--value.server.port=9000'],
       },
+      passthrough: [],
     });
   });
 
@@ -116,9 +156,16 @@ describe('@kitsy/cnos-cli', () => {
   it('prints inspect output in text and json modes', async () => {
     const root = await createRuntimeFixture();
 
-    await expect(runInspect('value.server.port', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
-      'workspace: api',
-    );
+    await expect(runInspect('value.server.port', { root, workspace: 'api', processEnv: {} })).resolves.toMatchInlineSnapshot(`
+      "key: value.server.port
+      value: 8080
+      namespace: value
+      profile: local (manifest-default)
+      workspace: api (cli)
+      workspaceChain: api
+      winner: filesystem-values via @kitsy/cnos-plugin-filesystem @ api
+      winnerOrigin: cnos/workspaces/api/values/local/app.yml"
+    `);
     await expect(
       runInspect('value.server.port', { root, workspace: 'api', processEnv: {}, json: true }),
     ).resolves.toContain('"workspace"');
@@ -132,6 +179,98 @@ describe('@kitsy/cnos-cli', () => {
     );
     await expect(runSecret('app.missing', { root, workspace: 'api', processEnv: {} })).rejects.toThrow(
       'Missing CNOS secret path',
+    );
+  });
+
+  it('defines values locally and globally using deterministic write targets', async () => {
+    const root = await createRuntimeFixture();
+    const globalRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-global-'));
+    fixtureRoots.push(globalRoot);
+
+    await expect(
+      runDefine('value', 'server.port', '3001', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('defined value.server.port');
+    await expect(
+      readFile(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local', 'app.yml'), 'utf8'),
+    ).resolves.toContain('3001');
+
+    await expect(
+      runDefine('secret', 'app.token', 'global-secret', {
+        root,
+        workspace: 'api',
+        globalRoot,
+        processEnv: {},
+        cliArgs: ['--target', 'global'],
+      }),
+    ).resolves.toContain(globalRoot);
+    await expect(
+      readFile(path.join(globalRoot, 'workspaces', 'api', 'secrets', 'local', 'app.yml'), 'utf8'),
+    ).resolves.toContain('global-secret');
+  });
+
+  it('exports env projections and dumps snapshot files', async () => {
+    const root = await createRuntimeFixture();
+    const dumpRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-dump-'));
+    fixtureRoots.push(dumpRoot);
+
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--public', '--framework', 'vite'],
+      }),
+    ).resolves.toMatchInlineSnapshot(`
+      "VITE_API_URL=https://api.local"
+    `);
+    await expect(
+      runDump({
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--flatten', '--to', dumpRoot],
+      }),
+    ).resolves.toContain(dumpRoot);
+    await expect(readFile(path.join(dumpRoot, 'values', 'local', 'app.yml'), 'utf8')).resolves.toContain(
+      'baseUrl: https://api.local',
+    );
+  });
+
+  it('runs child processes with injected env and returns diffs between profiles', async () => {
+    const root = await createRuntimeFixture();
+    const result = await runCommand(
+      [
+        process.execPath,
+        '-e',
+        "process.stdout.write(`${process.env.API_URL}|${process.env.SERVER_PORT}`)",
+      ],
+      {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        stdio: 'pipe',
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('https://api.local|8080');
+    await expect(runDiff('local', 'stage', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
+      'value.server.port: 8080 -> 9090',
+    );
+  });
+
+  it('validates schema/public rules and reports doctor diagnostics', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(runValidate({ root, workspace: 'api', processEnv: {}, json: true })).resolves.toContain(
+      '"valid": true',
+    );
+    await expect(runDoctor({ root, workspace: 'api', processEnv: {}, json: true })).resolves.toContain(
+      '"gitignore"',
     );
   });
 });

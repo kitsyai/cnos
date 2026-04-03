@@ -9,6 +9,7 @@ import type { CnosCreateOptions, CnosRuntime, ResolvedEntry, ResolvedGraph } fro
 import type { ConfigEntry } from '../types/core.js';
 import type { LoaderPlugin, ResolverPlugin } from '../types/plugin.js';
 import { resolveWorkspaceContext } from '../workspaces/resolveWorkspaceContext.js';
+import { applySchemaRules } from '../validation/basicSchema.js';
 import { runPipeline } from './pipeline.js';
 import { createRuntime } from './runtime.js';
 
@@ -149,11 +150,12 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     precedenceOrder: loadedManifest.manifest.resolution.precedence,
     workspace,
   });
+  const schemaApplied = applySchemaRules(graph, loadedManifest.manifest.schema);
 
   return createRuntime(
     loadedManifest.manifest,
     appendMetaEntries({
-      ...graph,
+      ...schemaApplied.graph,
       profileSource: activeProfile.source,
     }),
     plugins,

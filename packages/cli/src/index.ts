@@ -2,17 +2,20 @@
 
 import { parseArgs } from './cli/parseArgs.js';
 import { runDefine } from './commands/define.js';
+import { runDiff } from './commands/diff.js';
 import { runDoctor } from './commands/doctor.js';
+import { runDump } from './commands/dump.js';
 import { runExport } from './commands/export.js';
 import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runRead } from './commands/read.js';
+import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
 import { runValidate } from './commands/validate.js';
 import { runValue } from './commands/value.js';
 
 export async function main(argv: string[]): Promise<void> {
-  const { command, args, options } = parseArgs(argv);
+  const { command, args, options, passthrough } = parseArgs(argv);
   const runtimeOptions = {
     ...(options.root
       ? {
@@ -60,19 +63,35 @@ export async function main(argv: string[]): Promise<void> {
       process.stdout.write(`${await runSecret(args[0] ?? 'app.token', runtimeOptions)}\n`);
       return;
     case 'define':
-      process.stdout.write(`${runDefine()}\n`);
+      process.stdout.write(
+        `${await runDefine((args[0] as 'value' | 'secret') ?? 'value', args[1] ?? 'app.name', args[2] ?? '', runtimeOptions)}\n`,
+      );
       return;
     case 'inspect':
       process.stdout.write(`${await runInspect(args[0] ?? 'meta.profile', runtimeOptions)}\n`);
       return;
     case 'validate':
-      process.stdout.write(`${runValidate()}\n`);
+      process.stdout.write(`${await runValidate(runtimeOptions)}\n`);
       return;
     case 'export':
-      process.stdout.write(`${runExport()}\n`);
+      process.stdout.write(`${await runExport(args[0], runtimeOptions)}\n`);
+      return;
+    case 'dump':
+      process.stdout.write(`${await runDump(runtimeOptions)}\n`);
+      return;
+    case 'run': {
+      const result = await runCommand(passthrough.length > 0 ? passthrough : args, {
+        ...runtimeOptions,
+        stdio: 'inherit',
+      });
+      process.exitCode = result.exitCode;
+      return;
+    }
+    case 'diff':
+      process.stdout.write(`${await runDiff(args[0] ?? 'local', args[1] ?? 'stage', runtimeOptions)}\n`);
       return;
     case 'doctor':
-      process.stdout.write(`${runDoctor()}\n`);
+      process.stdout.write(`${await runDoctor(runtimeOptions)}\n`);
       return;
     default:
       process.stderr.write(`Unknown command: ${command}\n`);

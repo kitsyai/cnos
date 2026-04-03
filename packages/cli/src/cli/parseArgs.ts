@@ -11,6 +11,7 @@ export interface ParsedCommand {
   command: string;
   args: string[];
   options: CommandOptions;
+  passthrough: string[];
 }
 
 const OPTION_KEYS = {
@@ -33,11 +34,23 @@ export function parseArgs(argv: string[]): ParsedCommand {
   const options: Omit<CommandOptions, 'cliArgs'> = {};
   const args: string[] = [];
   const cliArgs: string[] = [];
+  const passthrough: string[] = [];
+  let passthroughMode = false;
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
 
     if (!token) {
+      continue;
+    }
+
+    if (token === '--') {
+      passthroughMode = true;
+      continue;
+    }
+
+    if (passthroughMode) {
+      passthrough.push(token);
       continue;
     }
 
@@ -82,5 +95,6 @@ export function parseArgs(argv: string[]): ParsedCommand {
       ...options,
       cliArgs,
     },
+    passthrough,
   };
 }

@@ -3,7 +3,7 @@ id: CLI-ORCH-2
 short_id: a387cf2f6a3e
 title: Implement write, validate, export, run, diff, and doctor CLI commands
 type: feature
-status: todo
+status: done
 created: 2026-04-03
 updated: 2026-04-03
 aliases: []

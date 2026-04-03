@@ -3,7 +3,7 @@ id: CORE-VALIDATE-1
 short_id: 0a812c74645a
 title: Implement schema validation, public safety validation, and v1 polish
 type: feature
-status: todo
+status: done
 created: 2026-04-03
 updated: 2026-04-03
 aliases: []
@@ -14,8 +14,8 @@ depends_on:
 delivery: v1
 acceptance:
   - packages/core implements the basic schema validator for type, required,
-    enum, pattern, and default behavior plus public safety validation,
-    workspace safety validation, and env-mapping collision checks.
+    enum, pattern, and default behavior plus public safety validation, workspace
+    safety validation, and env-mapping collision checks.
   - The repository documentation, starter fixtures, and examples reflect the
     workspace-aware runtime and CLI behavior using packages/core, packages/cnos,
     packages/cli, and plugins/* folder names.

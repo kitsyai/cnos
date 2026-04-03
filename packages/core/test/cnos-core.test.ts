@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  applySchemaRules,
   createCnos,
   envVarToLogicalKey,
   expandProfileChain,
@@ -15,6 +16,9 @@ import {
   logicalKeyToEnvVar,
   resolveWorkspaceContext,
   resolveActiveProfile,
+  validateEnvMappingCollisions,
+  validatePublicSafety,
+  validateWorkspaceSafety,
   type ConfigEntry,
   type LoaderPlugin,
 } from '../src/index.js';
@@ -310,5 +314,171 @@ describe('@kitsy/cnos-core', () => {
         },
       }),
     ).toThrow('cycle');
+  });
+
+  it('applies schema defaults and coercion during runtime creation', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'schema:',
+        '  value.server.port:',
+        '    type: number',
+        '    required: true',
+        '  value.server.host:',
+        '    type: string',
+        '    default: localhost',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('seed', [
+      {
+        key: 'value.server.port',
+        value: '8080',
+        namespace: 'value',
+        sourceId: 'seed',
+        pluginId: 'seed',
+        workspaceId: 'fixture',
+      },
+    ]);
+
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+    });
+
+    expect(runtime.require('value.server.port')).toBe(8080);
+    expect(runtime.require('value.server.host')).toBe('localhost');
+  });
+
+  it('reports public safety and env-mapping collisions', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'envMapping:',
+        '  convention: SCREAMING_SNAKE',
+        'public:',
+        '  promote:',
+        '    - secret.app.token',
+      ].join('\n'),
+    );
+    const manifest = (await loadManifest({ root })).manifest;
+
+    expect(validatePublicSafety(manifest)).toEqual([
+      expect.objectContaining({
+        code: 'public.invalid-promotion',
+        key: 'secret.app.token',
+      }),
+    ]);
+    expect(
+      validateEnvMappingCollisions(
+        {
+          ...manifest,
+          schema: {
+            'value.app-url': {
+              type: 'string',
+            },
+            'value.app_url': {
+              type: 'string',
+            },
+          },
+        },
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        code: 'env-mapping.collision',
+      }),
+    ]);
+  });
+
+  it('reports workspace safety policy mismatches', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'workspaces:',
+        '  default: fixture',
+        '  global:',
+        '    enabled: false',
+        '    allowWrite: true',
+        '  items:',
+        '    fixture: {}',
+      ].join('\n'),
+    );
+    const runtime = await createCnos({
+      root,
+      plugins: [
+        createFixtureLoader('seed', [
+          {
+            key: 'value.app.name',
+            value: 'fixture',
+            namespace: 'value',
+            sourceId: 'seed',
+            pluginId: 'seed',
+            workspaceId: 'fixture',
+          },
+        ]),
+      ],
+    });
+
+    expect(validateWorkspaceSafety(runtime.manifest, runtime.graph)).toEqual([
+      expect.objectContaining({
+        code: 'workspace.global-write-policy',
+      }),
+    ]);
+  });
+
+  it('reports schema violations for required, enum, and pattern rules', () => {
+    const result = applySchemaRules(
+      {
+        entries: new Map([
+          [
+            'value.app.stage',
+            {
+              key: 'value.app.stage',
+              value: 'dev',
+              namespace: 'value',
+              winner: {
+                key: 'value.app.stage',
+                value: 'dev',
+                namespace: 'value',
+                sourceId: 'seed',
+                pluginId: 'seed',
+                workspaceId: 'fixture',
+              },
+              overridden: [],
+            },
+          ],
+        ]),
+        profile: 'local',
+        resolvedAt: '2026-04-03T00:00:00.000Z',
+        profileSource: 'manifest-default',
+        workspace: {
+          workspaceId: 'fixture',
+          workspaceSource: 'project-name',
+          workspaceChain: ['fixture'],
+          workspaceRoots: [],
+        },
+      },
+      {
+        'value.app.stage': {
+          enum: ['prod'],
+        },
+        'value.app.name': {
+          required: true,
+          pattern: '^cnos$',
+        },
+      },
+    );
+
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'schema.enum', key: 'value.app.stage' }),
+        expect.objectContaining({ code: 'schema.required', key: 'value.app.name' }),
+      ]),
+    );
   });
 });

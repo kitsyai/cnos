@@ -36,7 +36,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@kitsy/cnos": "workspace:*"
+    "@kitsy/cnos": "workspace:*",
+    "@kitsy/cnos-core": "workspace:*"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
