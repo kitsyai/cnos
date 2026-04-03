@@ -6,6 +6,8 @@ import { runDiff } from './commands/diff.js';
 import { runDoctor } from './commands/doctor.js';
 import { runDump } from './commands/dump.js';
 import { runExport } from './commands/export.js';
+import { runHelp } from './commands/help.js';
+import { runHelpAi } from './commands/helpAi.js';
 import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runRead } from './commands/read.js';
@@ -13,9 +15,28 @@ import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
 import { runValidate } from './commands/validate.js';
 import { runValue } from './commands/value.js';
+import { normalizeHelpTopic } from './cli/helpRegistry.js';
+
+function resolveHelpTopic(command: string, args: string[]): string | undefined {
+  if (command === 'help' || command === 'help-ai') {
+    return normalizeHelpTopic(args);
+  }
+
+  if (command === 'export' && args[0] === 'env') {
+    return normalizeHelpTopic([command, args[0]]);
+  }
+
+  return normalizeHelpTopic([command]);
+}
 
 export async function main(argv: string[]): Promise<void> {
   const { command, args, options, passthrough } = parseArgs(argv);
+
+  if (options.help) {
+    process.stdout.write(`${runHelp(resolveHelpTopic(command, args))}\n`);
+    return;
+  }
+
   const runtimeOptions = {
     ...(options.root
       ? {
@@ -50,6 +71,12 @@ export async function main(argv: string[]): Promise<void> {
   };
 
   switch (command) {
+    case 'help':
+      process.stdout.write(`${runHelp(resolveHelpTopic(command, args))}\n`);
+      return;
+    case 'help-ai':
+      process.stdout.write(`${runHelpAi(resolveHelpTopic(command, args), options.cliArgs)}\n`);
+      return;
     case 'init':
       process.stdout.write(`${await runInit(runtimeOptions)}\n`);
       return;

@@ -10,6 +10,8 @@ import { runDiff } from '../src/commands/diff.js';
 import { runDoctor } from '../src/commands/doctor.js';
 import { runDump } from '../src/commands/dump.js';
 import { runExport } from '../src/commands/export.js';
+import { runHelp } from '../src/commands/help.js';
+import { runHelpAi } from '../src/commands/helpAi.js';
 import { runInit } from '../src/commands/init.js';
 import { runInspect } from '../src/commands/inspect.js';
 import { runRead } from '../src/commands/read.js';
@@ -115,6 +117,34 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
+  it('parses help flags for root and command-level help', () => {
+    expect(parseArgs(['--help'])).toEqual({
+      command: 'help',
+      args: [],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['help-ai', 'export', 'env', '--format', 'json'])).toEqual({
+      command: 'help-ai',
+      args: ['export', 'env'],
+      options: {
+        cliArgs: ['--format', 'json'],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['export', 'env', '--help'])).toEqual({
+      command: 'export',
+      args: ['env'],
+      options: {
+        help: true,
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+  });
+
   it('scaffolds the workspace-aware starter tree and gitignore entries', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-init-'));
     fixtureRoots.push(root);
@@ -137,6 +167,25 @@ describe('@kitsy/cnos-cli', () => {
 
   it('formats json output', () => {
     expect(printJson({ ok: true })).toContain('"ok": true');
+  });
+
+  it('prints human help for the root CLI and command topics', () => {
+    expect(runHelp()).toContain('Commands');
+    expect(runHelp()).toContain('help-ai');
+    expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
+    expect(runHelp('export env')).toContain('--public');
+  });
+
+  it('prints machine-readable help for agents', () => {
+    const rootPayload = JSON.parse(runHelpAi(undefined, ['--format', 'json']));
+    const commandPayload = JSON.parse(runHelpAi('export env', ['--format=json']));
+
+    expect(rootPayload.cli).toBe('cnos');
+    expect(rootPayload.commands.some((command: { id: string }) => command.id === 'doctor')).toBe(true);
+    expect(commandPayload.command.id).toBe('export env');
+    expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
+      true,
+    );
   });
 
   it('reads value and secret aliases from the selected workspace', async () => {
