@@ -7,6 +7,6 @@ describe('layered-config example', () => {
     const result = await runLayeredConfigExample();
 
     expect(result.inspect.key).toBe('value.app.stage');
-    expect(result.meta.profile).toBe('local');
+    expect(result.meta.profile).toBe('base');
   });
 });

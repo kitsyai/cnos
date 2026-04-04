@@ -12,7 +12,11 @@ export interface RuntimeServiceOptions {
 
 export async function createRuntimeService(options: RuntimeServiceOptions = {}) {
   const createOptions = {
-    root: options.root ?? process.cwd(),
+    ...(options.root
+      ? {
+          root: options.root,
+        }
+      : {}),
     ...(options.workspace
       ? {
           workspace: options.workspace,

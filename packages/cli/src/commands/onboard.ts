@@ -37,7 +37,7 @@ export async function runOnboard(options: RuntimeServiceOptions = {}): Promise<s
   }
 
   const scaffold = await scaffoldWorkspace(root, workspace);
-  const envRoot = path.join(root, 'cnos', 'workspaces', workspace, 'env');
+  const envRoot = path.join(root, '.cnos', 'workspaces', workspace, 'env');
   const rootFiles = await listRootEnvFiles(root);
   const imported: string[] = [];
   const skipped: string[] = [];
@@ -73,5 +73,5 @@ export async function runOnboard(options: RuntimeServiceOptions = {}): Promise<s
 
   const importedCount = imported.length;
   const skippedSuffix = skipped.length > 0 ? ` (${skipped.length} skipped)` : '';
-  return `onboarded ${workspace} at ${root}; imported ${importedCount} root env files into cnos/workspaces/${workspace}/env using ${result.mode}${skippedSuffix}`;
+  return `onboarded ${workspace} at ${root}; imported ${importedCount} root env files into .cnos/workspaces/${workspace}/env using ${result.mode}${skippedSuffix}`;
 }

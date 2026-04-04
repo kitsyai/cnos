@@ -1,6 +1,6 @@
 export type ProfileResolveFrom = 'cli.profile' | 'env.CNOS_PROFILE' | 'default';
 
-export type ProfileSource = 'cli' | 'env' | 'manifest-default';
+export type ProfileSource = 'cli' | 'workspace-file' | 'env' | 'manifest-default';
 
 export interface ProfileDefinitionFile {
   name?: string;

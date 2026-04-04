@@ -31,7 +31,9 @@ async function resolveLocalWorkspaceRoot(manifestRoot: string, workspaceId: stri
     return workspaceRoot;
   }
 
-  const legacyMarkers = ['values', 'secrets', 'env', 'profiles'].map((segment) => path.join(manifestRoot, segment));
+  const legacyMarkers = ['values', 'secrets', 'env', 'profiles'].map((segment) =>
+    path.join(manifestRoot, segment),
+  );
 
   if ((await Promise.all(legacyMarkers.map((marker) => exists(marker)))).some(Boolean)) {
     return manifestRoot;
@@ -68,8 +70,8 @@ function resolveWorkspaceSelection(
 
   if (Object.keys(manifest.workspaces.items).length === 0) {
     return {
-      workspaceId: manifest.project.name,
-      source: 'project-name',
+      workspaceId: 'default',
+      source: 'implicit',
     };
   }
 

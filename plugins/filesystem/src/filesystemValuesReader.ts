@@ -8,18 +8,12 @@ export function filesystemValuesReader(filePath: string, document: string, works
   return yamlObjectToEntries(document, filePath, 'value', 'filesystem-values', workspaceId);
 }
 
-function toWorkspaceRelativeSourceRoot(sourceRoot: string): string {
-  return sourceRoot.replace(/^[./\\]*workspaces[\\/]\{workspace\}[\\/]/, './');
-}
-
 export function createFilesystemValuesPlugin(): LoaderPlugin {
   return {
     id: 'filesystem-values',
     kind: 'loader',
     async load(context) {
-      const sourceRoot = toWorkspaceRelativeSourceRoot(
-        String(context.manifestConfig.root ?? './workspaces/{workspace}/values'),
-      );
+      const sourceRoot = String(context.manifestConfig.root ?? './');
       const files = await collectFilesystemLayerFiles(
         context.manifestRoot,
         context.workspace.workspaceRoots,

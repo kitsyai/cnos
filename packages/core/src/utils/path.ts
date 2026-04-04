@@ -5,6 +5,9 @@ import path from 'node:path';
 import { CnosManifestError } from '../errors.js';
 import type { LogicalKey, NamespaceName } from '../types/core.js';
 
+export const PRIMARY_CNOS_DIR = '.cnos';
+export const LEGACY_CNOS_DIR = 'cnos';
+
 async function exists(filePath: string): Promise<boolean> {
   try {
     await access(filePath);
@@ -16,7 +19,11 @@ async function exists(filePath: string): Promise<boolean> {
 
 export async function resolveCnosRoot(root = process.cwd()): Promise<string> {
   const basePath = path.resolve(root);
-  const candidates = [path.join(basePath, 'cnos'), basePath];
+  const candidates = [
+    path.join(basePath, PRIMARY_CNOS_DIR),
+    path.join(basePath, LEGACY_CNOS_DIR),
+    basePath,
+  ];
 
   for (const candidate of candidates) {
     if (await exists(path.join(candidate, 'cnos.yml'))) {
@@ -24,7 +31,9 @@ export async function resolveCnosRoot(root = process.cwd()): Promise<string> {
     }
   }
 
-  throw new CnosManifestError(`Could not locate cnos/cnos.yml from root: ${basePath}`);
+  throw new CnosManifestError(
+    `Could not locate .cnos/cnos.yml or cnos/cnos.yml from root: ${basePath}`,
+  );
 }
 
 export async function resolveManifestRoot(root = process.cwd()): Promise<string> {
@@ -76,6 +85,31 @@ export function resolveWorkspaceScopedPath(
   const relativeTemplate = stripWorkspaceTemplatePrefix(template);
   const interpolated = interpolatePathTemplate(relativeTemplate, tokens);
   return path.resolve(workspaceRoot, interpolated);
+}
+
+export function resolveNamespaceDirectory(
+  workspaceRoot: string,
+  namespace: 'value' | 'secret',
+  profile?: string,
+): string {
+  const rootFolder = namespace === 'value' ? 'values' : 'secrets';
+
+  if (profile && profile !== 'base') {
+    return path.resolve(workspaceRoot, 'profiles', profile, rootFolder);
+  }
+
+  return path.resolve(workspaceRoot, rootFolder);
+}
+
+export function resolveConfigDocumentPath(
+  workspaceRoot: string,
+  namespace: 'value' | 'secret',
+  configPath: string,
+  profile?: string,
+): string {
+  const namespaceRoot = resolveNamespaceDirectory(workspaceRoot, namespace, profile);
+  const fileName = `${configPath.split('.').shift() ?? 'app'}.yml`;
+  return path.resolve(namespaceRoot, fileName);
 }
 
 export function toPortablePath(targetPath: string): string {

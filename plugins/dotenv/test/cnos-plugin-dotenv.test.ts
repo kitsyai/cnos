@@ -125,7 +125,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
       manifestRoot: cnosRoot,
       workspace: {
         workspaceId: 'fixture',
-        workspaceSource: 'project-name',
+        workspaceSource: 'implicit',
         workspaceChain: ['fixture'],
         workspaceRoots: [
           {

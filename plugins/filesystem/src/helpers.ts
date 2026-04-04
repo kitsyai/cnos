@@ -3,8 +3,11 @@ import path from 'node:path';
 
 import {
   CnosManifestError,
-  flattenObject,
   parseYaml,
+  readLocalSecret,
+  resolveSecretStoreRoot,
+  type SecretReference,
+  isSecretReference,
   toPortablePath,
   type ConfigEntry,
   type NamespaceName,
@@ -91,6 +94,34 @@ function assertObjectDocument(value: unknown, filePath: string): Record<string, 
   return value as Record<string, unknown>;
 }
 
+function flattenConfigObject(
+  value: Record<string, unknown>,
+  options: {
+    stopAtLeaf?: (entry: unknown) => boolean;
+  } = {},
+  prefix = '',
+): Record<string, unknown> {
+  return Object.entries(value).reduce<Record<string, unknown>>((accumulator, [key, nestedValue]) => {
+    const nextKey = prefix ? `${prefix}.${key}` : key;
+
+    if (
+      nestedValue &&
+      typeof nestedValue === 'object' &&
+      !Array.isArray(nestedValue) &&
+      !options.stopAtLeaf?.(nestedValue)
+    ) {
+      Object.assign(
+        accumulator,
+        flattenConfigObject(nestedValue as Record<string, unknown>, options, nextKey),
+      );
+      return accumulator;
+    }
+
+    accumulator[nextKey] = nestedValue;
+    return accumulator;
+  }, {});
+}
+
 export function yamlObjectToEntries(
   document: string,
   filePath: string,
@@ -99,7 +130,13 @@ export function yamlObjectToEntries(
   workspaceId = 'default',
 ): ConfigEntry[] {
   const parsed = assertObjectDocument(parseYaml<unknown>(document), filePath);
-  const flattened = flattenObject(parsed);
+  const flattened = flattenConfigObject(parsed, {
+    ...(namespace === 'secret'
+      ? {
+          stopAtLeaf: isSecretReference,
+        }
+      : {}),
+  });
 
   return Object.entries(flattened).map(([key, value]) => ({
     key: `${namespace}.${key}`,
@@ -112,4 +149,47 @@ export function yamlObjectToEntries(
       file: filePath,
     },
   }));
+}
+
+export async function resolveSecretValue(
+  value: unknown,
+  processEnv?: Record<string, string | undefined>,
+): Promise<unknown> {
+  if (!isSecretReference(value)) {
+    return value;
+  }
+
+  if (value.provider === 'local') {
+    if (!processEnv?.CNOS_SECRET_PASSPHRASE) {
+      return value;
+    }
+
+    return readLocalSecret(
+      resolveSecretStoreRoot(processEnv),
+      value.ref,
+      processEnv?.CNOS_SECRET_PASSPHRASE,
+    );
+  }
+
+  if (value.provider === 'env') {
+    const resolved = processEnv?.[value.ref];
+
+    if (resolved === undefined) {
+      return value;
+    }
+
+    return resolved;
+  }
+
+  return value;
+}
+
+export function toSecretReferenceMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!isSecretReference(value)) {
+    return undefined;
+  }
+
+  return {
+    secretRef: value satisfies SecretReference,
+  };
 }

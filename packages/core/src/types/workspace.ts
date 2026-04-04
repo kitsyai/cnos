@@ -1,9 +1,10 @@
-export type WorkspaceSource = 'cli' | 'workspace-file' | 'manifest-default' | 'project-name';
+export type WorkspaceSource = 'cli' | 'workspace-file' | 'manifest-default' | 'implicit';
 
 export type GlobalRootSource = 'cli' | 'workspace-file' | 'manifest' | 'CNOS_HOME';
 
 export interface WorkspaceFile {
   workspace?: string;
+  profile?: string;
   globalRoot?: string;
 }
 

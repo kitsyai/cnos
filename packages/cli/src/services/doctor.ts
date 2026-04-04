@@ -15,11 +15,14 @@ export interface DoctorCheck {
 async function checkGitignore(root: string): Promise<DoctorCheck> {
   const gitignorePath = path.join(root, '.gitignore');
   const expected = [
-    'cnos/workspaces/*/secrets/',
-    'cnos/workspaces/*/env/.env',
-    'cnos/workspaces/*/env/.env.*',
-    '!cnos/workspaces/*/env/.env.example',
-    '!cnos/workspaces/*/env/.env.*.example',
+    '.cnos/env/.env',
+    '.cnos/env/.env.*',
+    '!.cnos/env/.env.example',
+    '!.cnos/env/.env.*.example',
+    '.cnos/workspaces/*/env/.env',
+    '.cnos/workspaces/*/env/.env.*',
+    '!.cnos/workspaces/*/env/.env.example',
+    '!.cnos/workspaces/*/env/.env.*.example',
   ];
 
   try {

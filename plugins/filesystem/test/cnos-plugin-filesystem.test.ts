@@ -112,7 +112,7 @@ describe('@kitsy/cnos-plugin-filesystem', () => {
     expect(runtime.require('value.server.host')).toBe('127.0.0.1');
     expect(runtime.require('value.server.port')).toBe(8080);
     expect(runtime.require('secret.database.password')).toBe('s3cr3t');
-    expect(runtime.inspect('value.server.port').winner.workspaceId).toBe('filesystem-fixture');
+    expect(runtime.inspect('value.server.port').winner.workspaceId).toBe('default');
     expect(runtime.inspect('value.server.port').winner.origin?.file).toBe('cnos/values/local/app.yml');
   });
 });

@@ -6,7 +6,7 @@ import { createBasicSchemaPlugin } from '../src/index.js';
 function createWorkspaceContext(): WorkspaceContext {
   return {
     workspaceId: 'fixture',
-    workspaceSource: 'project-name',
+    workspaceSource: 'implicit',
     workspaceChain: ['fixture'],
     workspaceRoots: [],
   };

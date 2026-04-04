@@ -31,12 +31,17 @@ afterEach(async () => {
 async function createRuntimeFixture(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-'));
   fixtureRoots.push(root);
-  await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local'), { recursive: true });
-  await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'stage'), { recursive: true });
-  await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'local'), { recursive: true });
-  await mkdir(path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'stage'), { recursive: true });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'values'), { recursive: true });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'profiles', 'stage', 'values'), {
+    recursive: true,
+  });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'secrets'), { recursive: true });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'profiles', 'stage', 'secrets'), {
+    recursive: true,
+  });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'env'), { recursive: true });
   await writeFile(
-    path.join(root, 'cnos', 'cnos.yml'),
+    path.join(root, '.cnos', 'cnos.yml'),
     [
       'version: 1',
       'project:',
@@ -65,7 +70,7 @@ async function createRuntimeFixture(): Promise<string> {
     ].join('\n'),
   );
   await writeFile(
-    path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local', 'app.yml'),
+    path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
     [
       'app:',
       '  name: cli-fixture',
@@ -76,16 +81,21 @@ async function createRuntimeFixture(): Promise<string> {
     ].join('\n'),
   );
   await writeFile(
-    path.join(root, 'cnos', 'workspaces', 'api', 'values', 'stage', 'app.yml'),
+    path.join(root, '.cnos', 'workspaces', 'api', 'profiles', 'stage', 'values', 'app.yml'),
     ['server:', '  port: "9090"', 'api:', '  baseUrl: https://api.stage'].join('\n'),
   );
   await writeFile(
-    path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'local', 'app.yml'),
+    path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'),
     ['app:', '  token: super-secret'].join('\n'),
   );
   await writeFile(
-    path.join(root, 'cnos', 'workspaces', 'api', 'secrets', 'stage', 'app.yml'),
+    path.join(root, '.cnos', 'workspaces', 'api', 'profiles', 'stage', 'secrets', 'app.yml'),
     ['app:', '  token: stage-secret'].join('\n'),
+  );
+  await writeFile(path.join(root, '.cnos', 'workspaces', 'api', 'env', '.env'), 'API_URL=https://api.local\n');
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'env', '.env.stage'),
+    'API_URL=https://api.stage\n',
   );
   return root;
 }
@@ -155,17 +165,17 @@ describe('@kitsy/cnos-cli', () => {
       workspace: 'api',
     });
 
-    await expect(readFile(path.join(root, 'cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
       'default: api',
     );
     await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).resolves.toContain(
       'workspace: api',
     );
     await expect(readFile(path.join(root, '.gitignore'), 'utf8')).resolves.toContain(
-      'cnos/workspaces/*/secrets/',
+      '.cnos/workspaces/*/env/.env',
     );
     await expect(readFile(path.join(root, '.gitignore'), 'utf8')).resolves.toContain(
-      '!cnos/workspaces/*/env/.env.*.example',
+      '!.cnos/workspaces/*/env/.env.*.example',
     );
   });
 
@@ -200,10 +210,10 @@ describe('@kitsy/cnos-cli', () => {
     await writeFile(path.join(root, '.env.stage.example'), 'VITE_DEPLOY_ENV=stage\n');
 
     await expect(runOnboard({ root, workspace: 'webapp' })).resolves.toContain('imported 3 root env files');
-    await expect(readFile(path.join(root, 'cnos', 'workspaces', 'webapp', 'env', '.env'), 'utf8')).resolves.toContain(
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'webapp', 'env', '.env'), 'utf8')).resolves.toContain(
       'VITE_DEPLOY_ENV=local',
     );
-    await expect(readFile(path.join(root, 'cnos', 'workspaces', 'webapp', 'env', '.env.stage'), 'utf8')).resolves.toContain(
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'webapp', 'env', '.env.stage'), 'utf8')).resolves.toContain(
       'VITE_DEPLOY_ENV=stage',
     );
     await expect(readFile(path.join(root, '.env'), 'utf8')).resolves.toContain('VITE_DEPLOY_ENV=local');
@@ -230,11 +240,11 @@ describe('@kitsy/cnos-cli', () => {
       "key: value.server.port
       value: 8080
       namespace: value
-      profile: local (manifest-default)
+      profile: base (manifest-default)
       workspace: api (cli)
       workspaceChain: api
       winner: filesystem-values via @kitsy/cnos-plugin-filesystem @ api
-      winnerOrigin: cnos/workspaces/api/values/local/app.yml"
+      winnerOrigin: .cnos/workspaces/api/values/app.yml"
     `);
     await expect(
       runInspect('value.server.port', { root, workspace: 'api', processEnv: {}, json: true }),
@@ -265,7 +275,7 @@ describe('@kitsy/cnos-cli', () => {
       }),
     ).resolves.toContain('defined value.server.port');
     await expect(
-      readFile(path.join(root, 'cnos', 'workspaces', 'api', 'values', 'local', 'app.yml'), 'utf8'),
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', 'values', 'server.yml'), 'utf8'),
     ).resolves.toContain('3001');
 
     await expect(
@@ -273,13 +283,15 @@ describe('@kitsy/cnos-cli', () => {
         root,
         workspace: 'api',
         globalRoot,
-        processEnv: {},
-        cliArgs: ['--target', 'global'],
+        processEnv: {
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--target', 'global', '--passphrase', 'dev-pass'],
       }),
     ).resolves.toContain(globalRoot);
     await expect(
-      readFile(path.join(globalRoot, 'workspaces', 'api', 'secrets', 'local', 'app.yml'), 'utf8'),
-    ).resolves.toContain('global-secret');
+      readFile(path.join(globalRoot, 'workspaces', 'api', 'secrets', 'app.yml'), 'utf8'),
+    ).resolves.toContain('provider: local');
   });
 
   it('exports env projections and dumps snapshot files', async () => {
@@ -305,7 +317,7 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--flatten', '--to', dumpRoot],
       }),
     ).resolves.toContain(dumpRoot);
-    await expect(readFile(path.join(dumpRoot, 'values', 'local', 'app.yml'), 'utf8')).resolves.toContain(
+    await expect(readFile(path.join(dumpRoot, 'values', 'base', 'app.yml'), 'utf8')).resolves.toContain(
       'baseUrl: https://api.local',
     );
   });
@@ -328,7 +340,7 @@ describe('@kitsy/cnos-cli', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('https://api.local|8080');
-    await expect(runDiff('local', 'stage', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
+    await expect(runDiff('base', 'stage', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
       'value.server.port: 8080 -> 9090',
     );
   });

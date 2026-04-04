@@ -27,6 +27,7 @@ export async function loadWorkspaceFile(repoRoot: string): Promise<LoadedWorkspa
       path: workspaceFilePath,
       config: {
         ...(config.workspace ? { workspace: config.workspace.trim() } : {}),
+        ...(config.profile ? { profile: config.profile.trim() } : {}),
         ...(config.globalRoot ? { globalRoot: config.globalRoot.trim() } : {}),
       },
     };

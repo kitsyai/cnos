@@ -11,9 +11,11 @@ import { runHelpAi } from './commands/helpAi.js';
 import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runOnboard } from './commands/onboard.js';
+import { runProfile } from './commands/profile.js';
 import { runRead } from './commands/read.js';
 import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
+import { runUse } from './commands/use.js';
 import { runValidate } from './commands/validate.js';
 import { runValue } from './commands/value.js';
 import { normalizeHelpTopic } from './cli/helpRegistry.js';
@@ -25,6 +27,21 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
 
   if (command === 'export' && args[0] === 'env') {
     return normalizeHelpTopic([command, args[0]]);
+  }
+
+  if (
+    command === 'secret' &&
+    args[0] &&
+    ['set', 'create', 'add', 'list', 'delete', 'remove'].includes(args[0])
+  ) {
+    return normalizeHelpTopic([
+      command,
+      args[0] === 'remove' ? 'delete' : args[0] === 'create' || args[0] === 'add' ? 'set' : args[0],
+    ]);
+  }
+
+  if (command === 'profile' && args[0] && ['create', 'list', 'use', 'delete', 'remove'].includes(args[0])) {
+    return normalizeHelpTopic([command, args[0] === 'remove' ? 'delete' : args[0]]);
   }
 
   return normalizeHelpTopic([command]);
@@ -91,7 +108,13 @@ export async function main(argv: string[]): Promise<void> {
       process.stdout.write(`${await runValue(args[0] ?? 'app.name', runtimeOptions)}\n`);
       return;
     case 'secret':
-      process.stdout.write(`${await runSecret(args[0] ?? 'app.token', runtimeOptions)}\n`);
+      process.stdout.write(`${await runSecret(args.length > 0 ? args : ['app.token'], runtimeOptions)}\n`);
+      return;
+    case 'use':
+      process.stdout.write(`${await runUse(runtimeOptions)}\n`);
+      return;
+    case 'profile':
+      process.stdout.write(`${await runProfile(args, runtimeOptions)}\n`);
       return;
     case 'define':
       process.stdout.write(

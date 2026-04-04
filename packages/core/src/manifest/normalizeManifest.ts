@@ -63,21 +63,21 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
     throw new CnosManifestError('Manifest requires project.name');
   }
 
-  const defaultProfile = manifest.profiles?.default?.trim() || 'local';
+  const defaultProfile = manifest.profiles?.default?.trim() || 'base';
   const workspaceItems = normalizeWorkspaceItems(manifest.workspaces?.items);
   const resolveFrom = validateResolveFrom(manifest.profiles?.resolveFrom ?? DEFAULT_RESOLVE_FROM);
   const filesystemValues = {
-    root: './workspaces/{workspace}/values',
+    root: './',
     format: 'yaml',
     ...(manifest.sources?.['filesystem-values'] ?? {}),
   };
   const filesystemSecrets = {
-    root: './workspaces/{workspace}/secrets',
+    root: './',
     format: 'yaml',
     ...(manifest.sources?.['filesystem-secrets'] ?? {}),
   };
   const dotenv = {
-    root: './workspaces/{workspace}/env',
+    root: './env',
     ...(manifest.sources?.dotenv ?? {}),
   };
 
@@ -151,10 +151,10 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
         targets: {
           value:
             manifest.writePolicy?.define?.targets?.value ??
-            './workspaces/{workspace}/values/{profile}/app.yml',
+            './values/app.yml',
           secret:
             manifest.writePolicy?.define?.targets?.secret ??
-            './workspaces/{workspace}/secrets/{profile}/app.yml',
+            './secrets/app.yml',
         },
       },
     },

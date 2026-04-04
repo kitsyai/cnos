@@ -22,9 +22,50 @@ const OPTION_KEYS = {
   '--global-root': 'globalRoot',
 } as const;
 
-const COMMAND_OPTION_KEYS_WITH_VALUE = new Set(['--format', '--framework', '--prefix', '--target', '--to']);
-const COMMAND_FLAG_KEYS = new Set(['--flatten', '--public']);
+const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
+  '--format',
+  '--framework',
+  '--prefix',
+  '--target',
+  '--to',
+  '--provider',
+  '--passphrase',
+  '--inherit',
+]);
+const COMMAND_FLAG_KEYS = new Set(['--flatten', '--public', '--local', '--remote', '--ref']);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
+
+function normalizeCommand(argv: string[]): string[] {
+  const [command = 'doctor', ...rest] = argv;
+  const resource = rest[0];
+  const remaining = rest.slice(1);
+
+  if ((command === 'create' || command === 'add') && resource === 'profile') {
+    return ['profile', 'create', ...remaining];
+  }
+
+  if ((command === 'delete' || command === 'remove') && resource === 'profile') {
+    return ['profile', 'delete', ...remaining];
+  }
+
+  if (command === 'list' && resource === 'profile') {
+    return ['profile', 'list', ...remaining];
+  }
+
+  if ((command === 'create' || command === 'add') && resource === 'secret') {
+    return ['secret', 'set', ...remaining];
+  }
+
+  if ((command === 'delete' || command === 'remove') && resource === 'secret') {
+    return ['secret', 'delete', ...remaining];
+  }
+
+  if (command === 'list' && resource === 'secret') {
+    return ['secret', 'list', ...remaining];
+  }
+
+  return [command, ...rest];
+}
 
 function setOption(
   options: Omit<CommandOptions, 'cliArgs'>,
@@ -46,7 +87,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
     };
   }
 
-  const [command = 'doctor', ...rest] = argv;
+  const normalizedArgv = normalizeCommand(argv);
+  const [command = 'doctor', ...rest] = normalizedArgv;
   const options: Omit<CommandOptions, 'cliArgs'> = {};
   const args: string[] = [];
   const cliArgs: string[] = [];

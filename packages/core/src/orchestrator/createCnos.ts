@@ -121,6 +121,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
   });
   const activeProfile = resolveActiveProfile(loadedManifest.manifest, {
     ...(options.profile ? { profile: options.profile } : {}),
+    ...(workspaceFile ? { workspaceFile: workspaceFile.config } : {}),
     ...(options.processEnv ? { processEnv: options.processEnv } : {}),
   });
   const profileChain = await expandProfileChain(activeProfile.profile, {

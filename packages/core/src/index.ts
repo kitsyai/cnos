@@ -28,6 +28,7 @@ export * from './utils/deepMerge.js';
 export * from './utils/envNaming.js';
 export * from './utils/flatten.js';
 export * from './utils/path.js';
+export * from './utils/secretStore.js';
 export * from './utils/yaml.js';
 export * from './validation/basicSchema.js';
 export * from './validation/envMapping.js';

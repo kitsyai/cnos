@@ -3,6 +3,9 @@ import type { ResolvedProfile } from '../types/profile.js';
 
 export interface ResolveActiveProfileOptions {
   profile?: string;
+  workspaceFile?: {
+    profile?: string;
+  };
   processEnv?: Record<string, string | undefined>;
 }
 
@@ -19,6 +22,13 @@ export function resolveActiveProfile(
     }
 
     if (source === 'env.CNOS_PROFILE') {
+      if (options.workspaceFile?.profile) {
+        return {
+          profile: options.workspaceFile.profile,
+          source: 'workspace-file',
+        };
+      }
+
       const envProfile = options.processEnv?.CNOS_PROFILE;
 
       if (envProfile) {

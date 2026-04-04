@@ -31,6 +31,23 @@ function normalizeProfileDefinition(
   rawDefinition: ProfileDefinitionFile | undefined,
   filePath?: string,
 ): NormalizedProfileDefinition {
+  const normalizeActivationLayer = (
+    entry: string,
+    namespace: 'values' | 'secrets',
+  ): string => {
+    const normalized = entry.trim();
+
+    if (!normalized) {
+      return normalized;
+    }
+
+    if (normalized.includes('/') || normalized.includes('\\') || normalized.startsWith('.')) {
+      return normalized.replace(/\\/g, '/');
+    }
+
+    return `${namespace}/${normalized}`;
+  };
+
   return {
     name: rawDefinition?.name?.trim() || profileName,
     extends: Array.isArray(rawDefinition?.extends)
@@ -39,8 +56,14 @@ function normalizeProfileDefinition(
         ? [rawDefinition.extends.trim()].filter(Boolean)
         : [],
     activate: {
-      values: rawDefinition?.activate?.values?.map((entry) => entry.trim()).filter(Boolean) ?? [],
-      secrets: rawDefinition?.activate?.secrets?.map((entry) => entry.trim()).filter(Boolean) ?? [],
+      values:
+        rawDefinition?.activate?.values
+          ?.map((entry) => normalizeActivationLayer(entry, 'values'))
+          .filter(Boolean) ?? [],
+      secrets:
+        rawDefinition?.activate?.secrets
+          ?.map((entry) => normalizeActivationLayer(entry, 'secrets'))
+          .filter(Boolean) ?? [],
       envFiles: rawDefinition?.activate?.envFiles?.map((entry) => entry.trim()).filter(Boolean) ?? [],
     },
     ...(filePath ? { filePath } : {}),
@@ -99,10 +122,20 @@ function pushUnique(target: string[], values: string[]): void {
 }
 
 function buildFallbackActivation(activeProfile: string, orderedProfiles: string[]): ProfileActivation {
+  const overlayProfiles = orderedProfiles.filter((profile) => profile !== 'base');
+
   return {
-    values: ['base', ...orderedProfiles.filter((profile) => profile !== 'base')],
-    secrets: [activeProfile],
-    envFiles: ['.env', `.env.${activeProfile}`],
+    values: [
+      'values',
+      ...(activeProfile !== 'base' ? ['values/base'] : []),
+      ...overlayProfiles.flatMap((profile) => [`profiles/${profile}/values`, `values/${profile}`]),
+    ],
+    secrets: [
+      'secrets',
+      ...overlayProfiles.flatMap((profile) => [`profiles/${profile}/secrets`, `secrets/${profile}`]),
+    ],
+    envFiles:
+      activeProfile === 'base' ? ['.env'] : ['.env', `.env.${activeProfile}`],
   };
 }
 

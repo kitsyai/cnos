@@ -3,30 +3,39 @@ import path from 'node:path';
 
 export interface ScaffoldWorkspaceResult {
   root: string;
-  workspace: string;
+  workspace?: string;
   created: string[];
 }
 
-function scaffoldManifest(projectName: string, workspace: string): string {
-  return [
+function scaffoldManifest(projectName: string, workspace?: string): string {
+  const lines = [
     'version: 1',
     'project:',
     `  name: ${projectName}`,
-    'workspaces:',
-    `  default: ${workspace}`,
-    '  global:',
-    '    enabled: false',
-    '    allowWrite: false',
-    '  items:',
-    `    ${workspace}: {}`,
     'profiles:',
-    '  default: local',
+    '  default: base',
     'envMapping:',
     '  convention: SCREAMING_SNAKE',
     'public:',
     '  promote: []',
     '',
-  ].join('\n');
+  ];
+
+  if (workspace) {
+    lines.splice(
+      4,
+      0,
+      'workspaces:',
+      `  default: ${workspace}`,
+      '  global:',
+      '    enabled: false',
+      '    allowWrite: false',
+      '  items:',
+      `    ${workspace}: {}`,
+    );
+  }
+
+  return lines.join('\n');
 }
 
 export async function ensureFile(filePath: string, content: string): Promise<boolean> {
@@ -42,11 +51,14 @@ export async function ensureFile(filePath: string, content: string): Promise<boo
 export async function ensureGitignore(root: string): Promise<boolean> {
   const gitignorePath = path.join(root, '.gitignore');
   const requiredEntries = [
-    'cnos/workspaces/*/secrets/',
-    'cnos/workspaces/*/env/.env',
-    'cnos/workspaces/*/env/.env.*',
-    '!cnos/workspaces/*/env/.env.example',
-    '!cnos/workspaces/*/env/.env.*.example',
+    '.cnos/env/.env',
+    '.cnos/env/.env.*',
+    '!.cnos/env/.env.example',
+    '!.cnos/env/.env.*.example',
+    '.cnos/workspaces/*/env/.env',
+    '.cnos/workspaces/*/env/.env.*',
+    '!.cnos/workspaces/*/env/.env.example',
+    '!.cnos/workspaces/*/env/.env.*.example',
   ];
 
   let current = '';
@@ -68,22 +80,34 @@ export async function ensureGitignore(root: string): Promise<boolean> {
   return true;
 }
 
-export async function scaffoldWorkspace(root: string, workspace: string): Promise<ScaffoldWorkspaceResult> {
-  const cnosRoot = path.join(root, 'cnos');
-  const workspaceRoot = path.join(cnosRoot, 'workspaces', workspace);
+export async function scaffoldWorkspace(
+  root: string,
+  workspace?: string,
+): Promise<ScaffoldWorkspaceResult> {
+  const cnosRoot = path.join(root, '.cnos');
+  const workspaceRoot = workspace ? path.join(cnosRoot, 'workspaces', workspace) : cnosRoot;
   const createdPaths: string[] = [];
 
   await mkdir(path.join(workspaceRoot, 'profiles'), { recursive: true });
-  await mkdir(path.join(workspaceRoot, 'values', 'local'), { recursive: true });
-  await mkdir(path.join(workspaceRoot, 'secrets', 'local'), { recursive: true });
+  await mkdir(path.join(workspaceRoot, 'values'), { recursive: true });
+  await mkdir(path.join(workspaceRoot, 'secrets'), { recursive: true });
   await mkdir(path.join(workspaceRoot, 'env'), { recursive: true });
 
-  for (const relativePath of [
-    ['workspaces', workspace, 'profiles', '.gitkeep'],
-    ['workspaces', workspace, 'values', 'local', '.gitkeep'],
-    ['workspaces', workspace, 'secrets', 'local', '.gitkeep'],
-    ['workspaces', workspace, 'env', '.gitkeep'],
-  ]) {
+  const relativePaths = workspace
+    ? [
+        ['workspaces', workspace, 'profiles', '.gitkeep'],
+        ['workspaces', workspace, 'values', '.gitkeep'],
+        ['workspaces', workspace, 'secrets', '.gitkeep'],
+        ['workspaces', workspace, 'env', '.gitkeep'],
+      ]
+    : [
+        ['profiles', '.gitkeep'],
+        ['values', '.gitkeep'],
+        ['secrets', '.gitkeep'],
+        ['env', '.gitkeep'],
+      ];
+
+  for (const relativePath of relativePaths) {
     const filePath = path.join(cnosRoot, ...relativePath);
 
     if (await ensureFile(filePath, '')) {
@@ -91,11 +115,16 @@ export async function scaffoldWorkspace(root: string, workspace: string): Promis
     }
   }
 
-  if (await ensureFile(path.join(cnosRoot, 'cnos.yml'), scaffoldManifest(path.basename(root), workspace))) {
-    createdPaths.push('cnos/cnos.yml');
+  if (
+    await ensureFile(path.join(cnosRoot, 'cnos.yml'), scaffoldManifest(path.basename(root), workspace))
+  ) {
+    createdPaths.push('.cnos/cnos.yml');
   }
 
-  if (await ensureFile(path.join(root, '.cnos-workspace.yml'), `workspace: ${workspace}\nglobalRoot: ~/.cnos\n`)) {
+  if (
+    workspace &&
+    (await ensureFile(path.join(root, '.cnos-workspace.yml'), `workspace: ${workspace}\nglobalRoot: ~/.cnos\n`))
+  ) {
     createdPaths.push('.cnos-workspace.yml');
   }
 
@@ -105,7 +134,7 @@ export async function scaffoldWorkspace(root: string, workspace: string): Promis
 
   return {
     root,
-    workspace,
+    ...(workspace ? { workspace } : {}),
     created: createdPaths,
   };
 }

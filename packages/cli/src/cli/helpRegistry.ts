@@ -62,7 +62,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Scaffold a workspace-aware CNOS tree in the current project.',
     usage: 'cnos init [--workspace <id>] [--root <path>] [--json]',
     description:
-      'Creates cnos/cnos.yml, .cnos-workspace.yml, workspace folders, and .gitignore entries without overwriting existing files.',
+      'Creates .cnos/cnos.yml, optional .cnos-workspace.yml, config folders, and .gitignore entries without overwriting existing files.',
     examples: ['cnos init', 'cnos init --workspace api', 'cnos init --root ./apps/api --workspace api --json'],
   },
   {
@@ -70,7 +70,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Onboard an existing repo into CNOS and import root dotenv files.',
     usage: 'cnos onboard [--workspace <id>] [--root <path>] [--move] [--json]',
     description:
-      'Scaffolds the CNOS workspace tree and imports root-level .env, .env.<profile>, and .env.*.example files into cnos/workspaces/<workspace>/env.',
+      'Scaffolds the CNOS workspace tree and imports root-level .env, .env.<profile>, and .env.*.example files into .cnos/workspaces/<workspace>/env.',
     options: [
       {
         flag: '--move',
@@ -109,24 +109,51 @@ const COMMANDS: HelpCommand[] = [
   },
   {
     id: 'secret',
-    summary: 'Read a secret namespace key without the secret. prefix.',
-    usage: 'cnos secret <path> [global-options]',
-    description: 'Reads secret.<path> from the selected workspace and profile.',
+    summary: 'Read, write, list, and delete secrets.',
+    usage: 'cnos secret [get <path> | set <path> <value> | list | delete <path>] [options] [global-options]',
+    description:
+      'Reads resolved secrets, writes secret refs plus external local-secret material, and manages secret entries for the selected workspace and profile.',
     arguments: [
       {
         name: 'path',
         description: 'Secret path without the secret. namespace prefix.',
-        required: true,
       },
     ],
-    examples: ['cnos secret app.token', 'cnos secret service.apiKey --workspace agents'],
+    options: [
+      {
+        flag: '--local',
+        description: 'Store encrypted secret material under ~/.cnos/secrets and write a local ref into the repo.',
+      },
+      {
+        flag: '--remote',
+        description: 'Write a remote secret reference into the repo.',
+      },
+      {
+        flag: '--ref',
+        description: 'Write a generic secret reference into the repo.',
+      },
+      {
+        flag: '--provider <name>',
+        description: 'Provider name for --remote or --ref secret writes.',
+      },
+      {
+        flag: '--passphrase <value>',
+        description: 'Passphrase used to encrypt local secret material when --local is selected.',
+      },
+    ],
+    examples: [
+      'cnos secret app.token',
+      'cnos secret set app.token super-secret --local --passphrase dev-pass',
+      'cnos add secret app.token APP_TOKEN --ref --provider env',
+      'cnos secret list --workspace agents',
+    ],
   },
   {
     id: 'define',
     summary: 'Write a value or secret into the selected workspace.',
     usage: 'cnos define <value|secret> <path> <rawValue> [--target <local|global>] [global-options]',
     description:
-      'Writes deterministic YAML into the selected workspace. Global writes require allowWrite and an explicit --target global flag.',
+      'Writes deterministic YAML into the selected workspace. Secret writes default to secure local-secret storage plus a repo ref. Global writes require allowWrite and an explicit --target global flag.',
     arguments: [
       {
         name: 'namespace',
@@ -152,8 +179,85 @@ const COMMANDS: HelpCommand[] = [
     ],
     examples: [
       'cnos define value server.port 3000 --workspace api',
-      'cnos define secret app.token super-secret --workspace api --target global',
+      'cnos define secret app.token super-secret --workspace api',
     ],
+  },
+  {
+    id: 'use',
+    summary: 'Persist repo-local CLI defaults such as workspace and profile.',
+    usage: 'cnos use [--workspace <id>] [--profile <name>] [--global-root <path>] [--root <path>] [--json]',
+    description:
+      'Writes .cnos-workspace.yml so future CLI invocations can omit repeated workspace/profile/global-root flags.',
+    examples: ['cnos use --workspace api --profile stage', 'cnos use --global-root ~/.cnos'],
+  },
+  {
+    id: 'profile',
+    summary: 'Manage CNOS profiles.',
+    usage: 'cnos profile [create <name> | list | use <name> | delete <name>] [options] [global-options]',
+    description:
+      'Creates and lists explicit profiles and stores the active repo-local profile selection for CLI usage.',
+    options: [
+      {
+        flag: '--inherit <name>',
+        description: 'Parent profile to extend when creating a profile.',
+      },
+    ],
+    examples: [
+      'cnos profile create stage --inherit base',
+      'cnos profile list',
+      'cnos profile use stage',
+    ],
+  },
+  {
+    id: 'profile create',
+    summary: 'Create a profile definition.',
+    usage: 'cnos profile create <name> [--inherit <name>] [--root <path>] [--json]',
+    description: 'Creates .cnos/profiles/<name>.yml for an explicit profile overlay.',
+    examples: ['cnos profile create stage --inherit base'],
+  },
+  {
+    id: 'profile list',
+    summary: 'List available profiles.',
+    usage: 'cnos profile list [--root <path>] [--json]',
+    description: 'Lists the base profile plus any explicit profile definition files in .cnos/profiles.',
+    examples: ['cnos profile list'],
+  },
+  {
+    id: 'profile use',
+    summary: 'Persist the active profile for this repo.',
+    usage: 'cnos profile use <name> [--root <path>] [--json]',
+    description: 'Writes the selected profile into .cnos-workspace.yml.',
+    examples: ['cnos profile use stage'],
+  },
+  {
+    id: 'profile delete',
+    summary: 'Delete a profile definition.',
+    usage: 'cnos profile delete <name> [--root <path>] [--json]',
+    description: 'Deletes .cnos/profiles/<name>.yml.',
+    examples: ['cnos profile delete stage'],
+  },
+  {
+    id: 'secret set',
+    summary: 'Write a secret securely.',
+    usage: 'cnos secret set <path> <value> [--local|--remote|--ref] [--provider <name>] [--passphrase <value>] [global-options]',
+    description:
+      'Writes a secret reference into the repo and, when --local is used, stores encrypted secret material outside the repo under ~/.cnos/secrets.',
+    examples: ['cnos secret set app.token super-secret --local --passphrase dev-pass'],
+  },
+  {
+    id: 'secret list',
+    summary: 'List resolved secrets.',
+    usage: 'cnos secret list [global-options]',
+    description: 'Lists resolved secret keys for the selected workspace and profile.',
+    examples: ['cnos secret list --workspace api'],
+  },
+  {
+    id: 'secret delete',
+    summary: 'Delete a secret reference.',
+    usage: 'cnos secret delete <path> [--target <local|global>] [global-options]',
+    description:
+      'Deletes the secret reference from the repo and removes local encrypted material when the secret used the local provider.',
+    examples: ['cnos secret delete app.token'],
   },
   {
     id: 'inspect',
@@ -311,7 +415,12 @@ export const HELP_DOCUMENT: HelpDocument = {
     'CNOS resolves one active workspace per invocation, layers local and optional global config roots, and exposes read, write, export, dump, validation, and diagnostics commands.',
   globalOptions: GLOBAL_OPTIONS,
   commands: COMMANDS,
-  examples: ['cnos doctor --workspace api', 'cnos export env --public --framework vite', 'cnos help-ai --format json'],
+  examples: [
+    'cnos use --profile stage',
+    'cnos doctor --workspace api',
+    'cnos export env --public --framework vite',
+    'cnos help-ai --format json',
+  ],
 };
 
 export function normalizeHelpTopic(parts: string[]): string | undefined {

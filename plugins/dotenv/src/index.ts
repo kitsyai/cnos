@@ -108,7 +108,7 @@ export function createDotenvPlugin(): LoaderPlugin {
     kind: 'loader',
     async load(context) {
       const config = context.manifestConfig as DotenvSourceConfig;
-      const rootTemplate = config.root ?? './workspaces/{workspace}/env';
+      const rootTemplate = config.root ?? './env';
       const fileNames = context.profileActivation.envFiles;
       const entries: ConfigEntry[] = [];
 

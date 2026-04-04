@@ -125,16 +125,16 @@ describe('@kitsy/cnos', () => {
 
     expect(planDump(runtime.graph)).toEqual({
       workspaceId: 'api',
-      profile: 'local',
+      profile: 'base',
       flatten: false,
       files: [
         {
-          path: 'workspaces/api/secrets/local/app.yml',
+          path: 'workspaces/api/secrets/base/app.yml',
           namespace: 'secret',
           content: 'app:\n  token: secret-token\n',
         },
         {
-          path: 'workspaces/api/values/local/app.yml',
+          path: 'workspaces/api/values/base/app.yml',
           namespace: 'value',
           content: 'api:\n  baseUrl: https://api.example.com\napp:\n  name: cnos\n',
         },
@@ -142,16 +142,16 @@ describe('@kitsy/cnos', () => {
     });
     expect(planDump(runtime.graph, { flatten: true })).toEqual({
       workspaceId: 'api',
-      profile: 'local',
+      profile: 'base',
       flatten: true,
       files: [
         {
-          path: 'secrets/local/app.yml',
+          path: 'secrets/base/app.yml',
           namespace: 'secret',
           content: 'app:\n  token: secret-token\n',
         },
         {
-          path: 'values/local/app.yml',
+          path: 'values/base/app.yml',
           namespace: 'value',
           content: 'api:\n  baseUrl: https://api.example.com\napp:\n  name: cnos\n',
         },
@@ -164,10 +164,10 @@ describe('@kitsy/cnos', () => {
     });
 
     expect(dumpResult.root).toBe(dumpRoot);
-    await expect(readFile(path.join(dumpRoot, 'values', 'local', 'app.yml'), 'utf8')).resolves.toBe(
+    await expect(readFile(path.join(dumpRoot, 'values', 'base', 'app.yml'), 'utf8')).resolves.toBe(
       'api:\n  baseUrl: https://api.example.com\napp:\n  name: cnos\n',
     );
-    await expect(readFile(path.join(dumpRoot, 'secrets', 'local', 'app.yml'), 'utf8')).resolves.toBe(
+    await expect(readFile(path.join(dumpRoot, 'secrets', 'base', 'app.yml'), 'utf8')).resolves.toBe(
       'app:\n  token: secret-token\n',
     );
   });
@@ -228,7 +228,7 @@ describe('@kitsy/cnos', () => {
     expect(runtime.require('value.inventory.db.host')).toBe('process-db');
     expect(runtime.require('secret.inventory.db.password')).toBe('cli-secret');
     expect(runtime.inspect('value.server.port')).toMatchObject({
-      profile: 'local',
+      profile: 'base',
       winner: {
         sourceId: 'cli-args',
         origin: {

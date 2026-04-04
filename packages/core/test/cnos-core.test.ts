@@ -54,7 +54,7 @@ describe('@kitsy/cnos-core', () => {
     const loadedManifest = await loadManifest({ root });
 
     expect(loadedManifest.manifest.project.name).toBe('fixture');
-    expect(loadedManifest.manifest.profiles.default).toBe('local');
+    expect(loadedManifest.manifest.profiles.default).toBe('base');
     expect(loadedManifest.manifest.plugins.resolver).toBe('profile-aware');
   });
 
@@ -104,12 +104,12 @@ describe('@kitsy/cnos-core', () => {
     });
     expect(runtime.readOr('value.app.missing', 'fallback')).toBe('fallback');
     expect(() => runtime.require('value.app.missing')).toThrow('value.app.missing');
-    expect(runtime.meta('profile')).toBe('local');
+    expect(runtime.meta('profile')).toBe('base');
     expect(runtime.meta('resolved.from')).toBe('manifest-default');
     expect(runtime.meta('cnos.version')).toBeTruthy();
     expect(runtime.inspect('value.app.config').winner.sourceId).toBe('seed-override');
     expect(runtime.toNamespace('meta')).toMatchObject({
-      profile: 'local',
+      profile: 'base',
       resolved: {
         from: 'manifest-default',
       },
@@ -197,7 +197,7 @@ describe('@kitsy/cnos-core', () => {
         manifestRoot: path.join(root, 'cnos'),
         workspace: {
           workspaceId: 'fixture',
-          workspaceSource: 'project-name',
+          workspaceSource: 'implicit',
           workspaceChain: ['fixture'],
           workspaceRoots: [
             {
@@ -212,8 +212,8 @@ describe('@kitsy/cnos-core', () => {
       activeProfile: 'local',
       profiles: ['base', 'local'],
       activation: {
-        values: ['base', 'local'],
-        secrets: ['local'],
+        values: ['values/base', 'values/local'],
+        secrets: ['secrets/local'],
         envFiles: ['.env', '.env.local'],
       },
     });
@@ -231,7 +231,7 @@ describe('@kitsy/cnos-core', () => {
         manifestRoot: path.join(root, 'cnos'),
         workspace: {
           workspaceId: 'fixture',
-          workspaceSource: 'project-name',
+          workspaceSource: 'implicit',
           workspaceChain: ['fixture'],
           workspaceRoots: [
             {
@@ -458,7 +458,7 @@ describe('@kitsy/cnos-core', () => {
         profileSource: 'manifest-default',
         workspace: {
           workspaceId: 'fixture',
-          workspaceSource: 'project-name',
+          workspaceSource: 'implicit',
           workspaceChain: ['fixture'],
           workspaceRoots: [],
         },

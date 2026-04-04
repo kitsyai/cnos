@@ -6,12 +6,15 @@ import { scaffoldWorkspace } from '../services/scaffold.js';
 
 export async function runInit(options: RuntimeServiceOptions = {}): Promise<string> {
   const root = path.resolve(options.root ?? process.cwd());
-  const workspace = options.workspace ?? path.basename(root);
-  const result = await scaffoldWorkspace(root, workspace);
+  const result = await scaffoldWorkspace(root, options.workspace);
 
   if (options.json) {
     return printJson(result);
   }
 
-  return `initialized CNOS workspace ${workspace} at ${root}`;
+  if (result.workspace) {
+    return `initialized CNOS workspace ${result.workspace} at ${root}`;
+  }
+
+  return `initialized CNOS project at ${root}`;
 }
