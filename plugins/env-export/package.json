@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-plugin-env-export",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Environment export plugin scaffold for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
