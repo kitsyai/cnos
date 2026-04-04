@@ -36,6 +36,10 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
     args[0] &&
     ['set', 'create', 'add', 'list', 'delete', 'remove'].includes(args[0])
   ) {
+    if ((args[0] === 'create' || args[0] === 'add') && args[1] === 'vault') {
+      return normalizeHelpTopic(['secret', 'create', 'vault']);
+    }
+
     return normalizeHelpTopic([
       command,
       args[0] === 'remove' ? 'delete' : args[0] === 'create' || args[0] === 'add' ? 'set' : args[0],
@@ -94,6 +98,11 @@ export async function main(argv: string[]): Promise<void> {
           json: true,
         }
       : {}),
+    ...(options.verbose
+      ? {
+          verbose: true,
+        }
+      : {}),
     ...(options.cliArgs.length > 0
       ? {
           cliArgs: options.cliArgs,
@@ -127,7 +136,7 @@ export async function main(argv: string[]): Promise<void> {
       process.stdout.write(`${await runSecret(args.length > 0 ? args : ['app.token'], runtimeOptions)}\n`);
       return;
     case 'use':
-      process.stdout.write(`${await runUse(runtimeOptions)}\n`);
+      process.stdout.write(`${await runUse(args, runtimeOptions)}\n`);
       return;
     case 'profile':
       process.stdout.write(`${await runProfile(args, runtimeOptions)}\n`);
@@ -172,4 +181,15 @@ export async function main(argv: string[]): Promise<void> {
   }
 }
 
-void main(process.argv.slice(2));
+void main(process.argv.slice(2)).catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const verbose = process.argv.includes('--verbose');
+
+  if (verbose && error instanceof Error && error.stack) {
+    process.stderr.write(`${error.stack}\n`);
+  } else {
+    process.stderr.write(`${message}\n`);
+  }
+
+  process.exitCode = 1;
+});

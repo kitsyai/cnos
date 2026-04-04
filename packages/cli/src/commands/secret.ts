@@ -2,9 +2,10 @@ import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
-import { deleteSecret, setSecret } from '../services/writes.js';
+import { createVault, deleteSecret, setSecret } from '../services/writes.js';
+import { listConfigEntries } from '../services/listing.js';
 
-function isSecretRef(value: unknown): value is { provider: string; ref: string } {
+function isSecretRef(value: unknown): value is { provider: string; ref: string; vault?: string } {
   return Boolean(
     value &&
       typeof value === 'object' &&
@@ -14,8 +15,10 @@ function isSecretRef(value: unknown): value is { provider: string; ref: string }
   );
 }
 
-function normalizeSecretCommand(args: string[]): { action: 'get' | 'set' | 'list' | 'delete'; tail: string[] } {
-  const [actionOrPath, ...tail] = args;
+function normalizeSecretCommand(
+  args: string[],
+): { action: 'get' | 'set' | 'list' | 'delete' | 'create-vault'; tail: string[] } {
+  const [actionOrPath, next, ...tail] = args;
 
   if (!actionOrPath) {
     return {
@@ -24,15 +27,17 @@ function normalizeSecretCommand(args: string[]): { action: 'get' | 'set' | 'list
     };
   }
 
-  if (['get', 'set', 'create', 'add', 'list', 'delete', 'remove'].includes(actionOrPath)) {
+  if ((actionOrPath === 'create' || actionOrPath === 'add') && next === 'vault') {
     return {
-      action:
-        actionOrPath === 'remove'
-          ? 'delete'
-          : actionOrPath === 'create' || actionOrPath === 'add'
-            ? 'set'
-            : (actionOrPath as 'get' | 'set' | 'list' | 'delete'),
+      action: 'create-vault',
       tail,
+    };
+  }
+
+  if (['get', 'set', 'list', 'delete', 'remove'].includes(actionOrPath)) {
+    return {
+      action: actionOrPath === 'remove' ? 'delete' : (actionOrPath as 'get' | 'set' | 'list' | 'delete'),
+      tail: [next, ...tail].filter((value): value is string => Boolean(value)),
     };
   }
 
@@ -47,18 +52,35 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   const { action, tail } = normalizeSecretCommand(args);
   const cliArgs = [...(options.cliArgs ?? [])];
 
-  if (action === 'list') {
-    const runtime = await createRuntimeService(options);
-    const secrets = runtime.toNamespace('secret');
+  if (action === 'create-vault') {
+    const vault = tail[0] ?? 'default';
+    const passphrase = consumeOption(cliArgs, '--passphrase');
+    const result = await createVault(vault, {
+      ...options,
+      cliArgs,
+      ...(passphrase ? { passphrase } : {}),
+    });
 
     if (options.json) {
-      return printJson(secrets);
+      return printJson(result);
     }
 
-    return Object.entries(secrets)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, value]) => `${key}=${printValue(value)}`)
-      .join('\n');
+    return `created secret vault "${result.vault}" in ${result.filePath}`;
+  }
+
+  if (action === 'list') {
+    const prefix = consumeOption(cliArgs, '--prefix');
+    const entries = await listConfigEntries('secret', {
+      ...options,
+      cliArgs,
+      ...(prefix ? { prefix } : {}),
+    });
+
+    if (options.json) {
+      return printJson(entries);
+    }
+
+    return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');
   }
 
   if (action === 'set') {
@@ -70,12 +92,14 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
     const provider = consumeOption(cliArgs, '--provider');
     const passphrase = consumeOption(cliArgs, '--passphrase');
+    const vault = consumeOption(cliArgs, '--vault') ?? 'default';
     const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : 'local';
     const result = await setSecret(secretPath ?? 'app.token', rawValue, {
       ...options,
       cliArgs,
       target,
       mode,
+      vault,
       ...(provider ? { provider } : {}),
       ...(passphrase ? { passphrase } : {}),
     });
@@ -84,7 +108,9 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
       return printJson(result);
     }
 
-    return `set secret.${secretPath} via ${result.provider} in ${result.filePath}`;
+    return result.provider === 'local'
+      ? `set secret.${secretPath} in vault "${result.vault ?? 'default'}" with ref "${result.ref}" and repo pointer ${result.filePath}`
+      : `set secret.${secretPath} via ${result.provider} in ${result.filePath}`;
   }
 
   if (action === 'delete') {
@@ -113,8 +139,9 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   }
 
   if (isSecretRef(value)) {
+    const vault = value.vault ?? 'default';
     throw new Error(
-      `Secret ${tail[0] ?? 'app.token'} is stored as an unresolved ${value.provider} reference. Provide the required provider context to resolve it.`,
+      `Secret ${tail[0] ?? 'app.token'} is stored in vault "${vault}" as ref "${value.ref}". Provide the correct vault passphrase to resolve it.`,
     );
   }
 

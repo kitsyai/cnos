@@ -5,6 +5,7 @@ import {
   CnosManifestError,
   parseYaml,
   readLocalSecret,
+  resolveSecretPassphrase,
   resolveSecretStoreRoot,
   type SecretReference,
   isSecretReference,
@@ -160,14 +161,17 @@ export async function resolveSecretValue(
   }
 
   if (value.provider === 'local') {
-    if (!processEnv?.CNOS_SECRET_PASSPHRASE) {
+    const passphrase = resolveSecretPassphrase(value.vault, processEnv);
+
+    if (!passphrase) {
       return value;
     }
 
     return readLocalSecret(
       resolveSecretStoreRoot(processEnv),
       value.ref,
-      processEnv?.CNOS_SECRET_PASSPHRASE,
+      passphrase,
+      value.vault,
     );
   }
 

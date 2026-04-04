@@ -61,6 +61,10 @@ const GLOBAL_OPTIONS: HelpOption[] = [
     description: 'Emit JSON output for commands that support structured responses.',
   },
   {
+    flag: '--verbose',
+    description: 'Print full stack traces and verbose diagnostics for command failures.',
+  },
+  {
     flag: '--help, -h',
     description: 'Show command help.',
   },
@@ -230,20 +234,20 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'use',
     summary: 'Persist repo-local CLI defaults such as workspace and profile.',
-    usage: 'cnos use [--workspace <id>] [--profile <name>] [--global-root <path>] [--root <path>] [--json]',
+    usage: 'cnos use [show] [--workspace <id>] [--profile <name>] [--global-root <path>] [--root <path>] [--json]',
     description:
-      'Writes .cnos-workspace.yml so future CLI invocations can omit repeated workspace/profile/global-root flags.',
-    examples: ['cnos use --workspace api --profile stage', 'cnos use --global-root ~/.cnos'],
+      'Shows the current repo-local CLI context by default, or writes .cnos-workspace.yml when workspace/profile/global-root flags are provided.',
+    examples: ['cnos use show', 'cnos use --workspace api --profile stage', 'cnos use --global-root ~/.cnos'],
   },
   {
     id: 'list',
     summary: 'List resolved config entries.',
-    usage: 'cnos list [value|secret|meta|all] [--prefix <path>] [global-options]',
+    usage: 'cnos list [value|secret|meta|env|public|all] [--prefix <path>] [global-options]',
     description:
-      'Lists resolved config entries across one namespace or the full effective graph, with optional key-prefix filtering.',
+      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering.',
     options: [
       {
-        flag: '--namespace <value|secret|meta|all>',
+        flag: '--namespace <value|secret|meta|env|public|all>',
         description: 'Explicit namespace selector when not using a positional namespace argument.',
       },
       {
@@ -251,7 +255,7 @@ const COMMANDS: HelpCommand[] = [
         description: 'Filter list output to entries whose logical keys begin with this prefix.',
       },
     ],
-    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list --namespace secret'],
+    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list env', 'cnos list --namespace secret'],
   },
   {
     id: 'profile',
@@ -302,10 +306,20 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'secret set',
     summary: 'Write a secret securely.',
-    usage: 'cnos secret set <path> <value> [--local|--remote|--ref] [--provider <name>] [--passphrase <value>] [global-options]',
+    usage: 'cnos secret set <path> <value> [--local|--remote|--ref] [--vault <name>] [--provider <name>] [--passphrase <value>] [global-options]',
     description:
-      'Writes a secret reference into the repo and, when --local is used, stores encrypted secret material outside the repo under ~/.cnos/secrets.',
-    examples: ['cnos secret set app.token super-secret --local --passphrase dev-pass'],
+      'Writes a secret reference into the repo and, when --local is used, stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>.',
+    examples: [
+      'cnos secret create vault db --passphrase dev-pass',
+      'cnos secret set app.token super-secret --local --vault db --passphrase dev-pass',
+    ],
+  },
+  {
+    id: 'secret create vault',
+    summary: 'Create a local secret vault.',
+    usage: 'cnos secret create vault <name> --passphrase <value> [global-options]',
+    description: 'Creates a named local secret vault under ~/.cnos/secrets/vaults.',
+    examples: ['cnos secret create vault db --passphrase dev-pass'],
   },
   {
     id: 'secret list',

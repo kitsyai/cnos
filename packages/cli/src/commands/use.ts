@@ -2,10 +2,23 @@ import path from 'node:path';
 
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
-import { saveCliContext } from '../services/context.js';
+import { loadCliContext, saveCliContext } from '../services/context.js';
 
-export async function runUse(options: RuntimeServiceOptions = {}): Promise<string> {
+export async function runUse(args: string[] = [], options: RuntimeServiceOptions = {}): Promise<string> {
   const root = path.resolve(options.root ?? process.cwd());
+  const action = args[0] ?? 'show';
+  const hasUpdates = Boolean(options.workspace || options.profile || options.globalRoot);
+
+  if (action === 'show' || !hasUpdates) {
+    const context = await loadCliContext(root);
+
+    if (options.json) {
+      return printJson(context);
+    }
+
+    return Object.keys(context).length === 0 ? 'no CLI context configured' : printJson(context);
+  }
+
   const result = await saveCliContext({
     root,
     ...(options.workspace ? { workspace: options.workspace } : {}),

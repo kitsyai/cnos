@@ -5,6 +5,7 @@ export interface CommandOptions {
   globalRoot?: string;
   json?: boolean;
   help?: boolean;
+  verbose?: boolean;
   cliArgs: string[];
 }
 
@@ -30,6 +31,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--to',
   '--provider',
   '--passphrase',
+  '--vault',
   '--inherit',
 ]);
 const COMMAND_FLAG_KEYS = new Set(['--flatten', '--public', '--local', '--remote', '--ref']);
@@ -137,6 +139,11 @@ export function parseArgs(argv: string[]): ParsedCommand {
 
     if (token === '--json') {
       options.json = true;
+      continue;
+    }
+
+    if (token === '--verbose') {
+      options.verbose = true;
       continue;
     }
 

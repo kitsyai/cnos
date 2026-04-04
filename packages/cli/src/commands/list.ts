@@ -21,6 +21,14 @@ function normalizeNamespace(value?: string): ListNamespace {
     return 'meta';
   }
 
+  if (value === 'env') {
+    return 'env';
+  }
+
+  if (value === 'public') {
+    return 'public';
+  }
+
   throw new Error(`Unsupported list namespace: ${value}`);
 }
 
@@ -36,6 +44,10 @@ export async function runList(args: string[] = [], options: RuntimeServiceOption
 
   if (options.json) {
     return printJson(entries);
+  }
+
+  if (entries.length === 0) {
+    return '';
   }
 
   return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');

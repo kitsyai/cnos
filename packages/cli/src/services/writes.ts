@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  createSecretVault,
   parseYaml,
   resolveConfigDocumentPath,
+  resolveSecretPassphrase,
   resolveSecretStoreRoot,
   stringifyYaml,
   writeLocalSecret,
@@ -115,6 +116,7 @@ export async function defineValue(
     mode?: 'local' | 'remote' | 'ref';
     provider?: string;
     passphrase?: string;
+    vault?: string;
   } = {},
 ): Promise<{ filePath: string; value: unknown }> {
   if (namespace === 'secret') {
@@ -153,7 +155,32 @@ export interface SecretWriteResult {
   filePath: string;
   ref: string;
   provider: string;
+  vault?: string;
   storePath?: string;
+}
+
+export async function createVault(
+  vault: string,
+  options: RuntimeServiceOptions & { passphrase?: string } = {},
+): Promise<{ vault: string; filePath: string }> {
+  const passphrase =
+    options.passphrase ?? resolveSecretPassphrase(vault, options.processEnv ?? process.env);
+
+  if (!passphrase) {
+    throw new Error('Vault creation requires --passphrase or CNOS_SECRET_PASSPHRASE');
+  }
+
+  const normalizedVault = vault.trim() || 'default';
+  const filePath = await createSecretVault(
+    resolveSecretStoreRoot(options.processEnv),
+    normalizedVault,
+    passphrase,
+  );
+
+  return {
+    vault: normalizedVault,
+    filePath,
+  };
 }
 
 export async function setSecret(
@@ -164,6 +191,7 @@ export async function setSecret(
     mode?: 'local' | 'remote' | 'ref';
     provider?: string;
     passphrase?: string;
+    vault?: string;
   } = {},
 ): Promise<SecretWriteResult> {
   const runtime = await createRuntimeService(options);
@@ -172,34 +200,24 @@ export async function setSecret(
   const filePath = resolveConfigDocumentPath(workspaceRoot, 'secret', configPath, profile);
   const document = await readYamlDocument(filePath);
   const mode = options.mode ?? 'local';
+  const vault = options.vault?.trim() || 'default';
   let reference: SecretReference;
   let storePath: string | undefined;
 
   if (mode === 'local') {
     const passphrase =
-      options.passphrase ??
-      options.processEnv?.CNOS_SECRET_PASSPHRASE ??
-      process.env.CNOS_SECRET_PASSPHRASE;
+      options.passphrase ?? resolveSecretPassphrase(vault, options.processEnv ?? process.env);
 
     if (!passphrase) {
-      throw new Error('Local secret writes require --passphrase or CNOS_SECRET_PASSPHRASE');
+      throw new Error(`Vault "${vault}" requires --passphrase or CNOS_SECRET_PASSPHRASE`);
     }
 
-    const profileSegment = profile && profile !== 'base' ? profile : 'base';
-    const ref = [
-      runtime.manifest.project.name,
-      runtime.graph.workspace.workspaceId,
-      profileSegment,
-      ...configPath.split('.'),
-      randomUUID(),
-    ]
-      .map((segment) => segment.replace(/[^A-Za-z0-9._-]+/g, '-'))
-      .join('/');
-
-    storePath = await writeLocalSecret(resolveSecretStoreRoot(options.processEnv), ref, rawValue, passphrase);
+    const ref = configPath;
+    storePath = await writeLocalSecret(resolveSecretStoreRoot(options.processEnv), ref, rawValue, passphrase, vault);
     reference = {
       provider: 'local',
       ref,
+      vault,
     };
   } else {
     reference = {
@@ -216,6 +234,7 @@ export async function setSecret(
     filePath,
     provider: reference.provider,
     ref: reference.ref,
+    ...(reference.vault ? { vault: reference.vault } : {}),
     ...(storePath ? { storePath } : {}),
   };
 }
@@ -246,7 +265,13 @@ export async function deleteSecret(
 
   if (isSecretReference(secretRef) && secretRef.provider === 'local') {
     const storePath = path
-      .join(resolveSecretStoreRoot(options.processEnv), 'store', ...secretRef.ref.split('/'))
+      .join(
+        resolveSecretStoreRoot(options.processEnv),
+        'vaults',
+        secretRef.vault ?? 'default',
+        'store',
+        ...secretRef.ref.split('/'),
+      )
       .concat('.json');
     await rm(storePath, { force: true });
     removedStore = storePath;

@@ -19,6 +19,7 @@ import { runOnboard } from '../src/commands/onboard.js';
 import { runRead } from '../src/commands/read.js';
 import { runCommand } from '../src/commands/run.js';
 import { runSecret } from '../src/commands/secret.js';
+import { runUse } from '../src/commands/use.js';
 import { runValidate } from '../src/commands/validate.js';
 import { runVersion } from '../src/commands/version.js';
 import { runValue } from '../src/commands/value.js';
@@ -224,6 +225,16 @@ describe('@kitsy/cnos-cli', () => {
     expect(runVersion()).toBe('1.0.1');
   });
 
+  it('shows current CLI context without creating .cnos-workspace.yml', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-use-'));
+    fixtureRoots.push(root);
+
+    await expect(runUse(['show'], { root })).resolves.toBe('no CLI context configured');
+    await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('prints human help for the root CLI and command topics', () => {
     expect(runHelp()).toContain('Commands');
     expect(runHelp()).toContain('help-ai');
@@ -231,7 +242,7 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('@kitsy/cnos-next');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
-    expect(runHelp('list')).toContain('--namespace <value|secret|meta|all>');
+    expect(runHelp('list')).toContain('--namespace <value|secret|meta|env|public|all>');
     expect(runHelp('export env')).toContain('--framework <name>');
   });
 
@@ -280,7 +291,7 @@ describe('@kitsy/cnos-cli', () => {
     );
   });
 
-  it('supports value CRUD and generic list flows', async () => {
+  it('supports value CRUD and generic list flows without leaking ambient env into value listings', async () => {
     const root = await createRuntimeFixture();
 
     await expect(
@@ -302,10 +313,28 @@ describe('@kitsy/cnos-cli', () => {
       runList(['value'], {
         root,
         workspace: 'api',
-        processEnv: {},
+        processEnv: {
+          APP_NAME: 'from-process-env',
+        },
         cliArgs: ['--prefix', 'value.app.'],
       }),
     ).resolves.toContain('value.app.name=cli-fixture');
+    await expect(
+      runList(['value'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APP_NAME: 'from-process-env',
+        },
+      }),
+    ).resolves.not.toContain('from-process-env');
+    await expect(
+      runList(['env'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toBe('API_URL=https://api.local');
     await expect(
       runValue(['delete', 'app.mode'], {
         root,
@@ -376,11 +405,55 @@ describe('@kitsy/cnos-cli', () => {
     ).resolves.toContain('provider: local');
   });
 
+  it('creates vault-backed local secret refs with simple keys', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-secrets-'));
+    fixtureRoots.push(secretHome);
+
+    await expect(
+      runSecret(['create', 'vault', 'db'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--passphrase', 'dev-pass'],
+      }),
+    ).resolves.toContain('created secret vault "db"');
+
+    await expect(
+      runSecret(['set', 'app.token', 'super-secret'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--local', '--vault', 'db'],
+      }),
+    ).resolves.toContain('vault "db"');
+
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'), 'utf8')).resolves.toContain(
+      'ref: app.token',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'), 'utf8')).resolves.toContain(
+      'vault: db',
+    );
+  });
+
   it('exports env projections and dumps snapshot files', async () => {
     const root = await createRuntimeFixture();
     const dumpRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-dump-'));
     fixtureRoots.push(dumpRoot);
 
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toMatchInlineSnapshot(`
+      "API_URL=https://api.local"
+    `);
     await expect(
       runExport('env', {
         root,

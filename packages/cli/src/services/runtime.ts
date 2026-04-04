@@ -6,6 +6,7 @@ export interface RuntimeServiceOptions {
   profile?: string;
   globalRoot?: string;
   json?: boolean;
+  verbose?: boolean;
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
 }

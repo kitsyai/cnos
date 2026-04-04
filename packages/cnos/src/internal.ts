@@ -1,8 +1,12 @@
 export {
+  createSecretVault,
   flattenObject,
+  listSecretVaults,
   parseYaml,
   resolveConfigDocumentPath,
+  resolveSecretPassphrase,
   resolveSecretStoreRoot,
+  resolveSecretVaultFile,
   stringifyYaml,
   validateRuntime,
   writeLocalSecret,

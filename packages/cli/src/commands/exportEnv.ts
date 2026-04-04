@@ -16,7 +16,19 @@ export async function runExportEnv(options: RuntimeServiceOptions = {}): Promise
         ...(framework ? { framework } : {}),
         ...(prefix ? { prefix } : {}),
       })
-    : runtime.toEnv();
+    : Object.fromEntries(
+        Object.entries(runtime.manifest.envMapping.explicit)
+          .map(([envVar, logicalKey]) => [envVar, runtime.read(logicalKey)])
+          .filter((entry): entry is [string, string | number | boolean | bigint | object] => entry[1] !== undefined)
+          .map(([envVar, value]) => [
+            envVar,
+            typeof value === 'string'
+              ? value
+              : typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+                ? String(value)
+                : JSON.stringify(value),
+          ]),
+      );
 
   if (options.json) {
     return printJson(env);
