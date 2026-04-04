@@ -42,6 +42,12 @@ function formatRootHelp(): string {
       .filter((command) => !command.id.includes(' '))
       .map((command) => `  ${command.id.padEnd(12, ' ')} ${command.summary}`),
     '',
+    'Framework integrations',
+    ...HELP_DOCUMENT.integrations.map(
+      (integration) =>
+        `  ${integration.id.padEnd(12, ' ')} ${integration.packageName} via ${integration.entrypoint}`,
+    ),
+    '',
     ...formatOptions('Global options', HELP_DOCUMENT.globalOptions),
     '',
     'Examples',

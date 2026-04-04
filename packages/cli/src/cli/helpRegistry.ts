@@ -19,6 +19,15 @@ export interface HelpCommand {
   examples?: string[];
 }
 
+export interface HelpIntegration {
+  id: string;
+  packageName: string;
+  entrypoint: string;
+  summary: string;
+  usage: string;
+  examples?: string[];
+}
+
 export interface HelpDocument {
   name: string;
   summary: string;
@@ -26,6 +35,7 @@ export interface HelpDocument {
   description: string;
   globalOptions: HelpOption[];
   commands: HelpCommand[];
+  integrations: HelpIntegration[];
   examples: string[];
 }
 
@@ -347,7 +357,11 @@ const COMMANDS: HelpCommand[] = [
         required: true,
       },
     ],
-    examples: ['cnos export env', 'cnos export env --public --framework vite --workspace api'],
+    examples: [
+      'cnos export env',
+      'cnos export env --public --framework vite --workspace api',
+      'cnos export env --public --framework next --workspace webapp',
+    ],
   },
   {
     id: 'export env',
@@ -362,7 +376,7 @@ const COMMANDS: HelpCommand[] = [
       },
       {
         flag: '--framework <name>',
-        description: 'Apply framework-specific public env conventions such as vite or nextjs.',
+        description: 'Apply framework-specific public env conventions such as vite, next, or nuxt.',
       },
       {
         flag: '--prefix <prefix>',
@@ -460,6 +474,25 @@ const COMMANDS: HelpCommand[] = [
   },
 ];
 
+const INTEGRATIONS: HelpIntegration[] = [
+  {
+    id: 'vite',
+    packageName: '@kitsy/cnos-vite',
+    entrypoint: '@kitsy/cnos/plugin/vite',
+    summary: 'Inject CNOS public env into Vite define replacements and import.meta.env.',
+    usage: 'import { createCnosVitePlugin } from "@kitsy/cnos/plugin/vite"',
+    examples: ['cnos export env --public --framework vite', 'vite.config.ts -> plugins: [createCnosVitePlugin()]'],
+  },
+  {
+    id: 'next',
+    packageName: '@kitsy/cnos-next',
+    entrypoint: '@kitsy/cnos/plugin/next',
+    summary: 'Merge CNOS public env into next.config.* using the NEXT_PUBLIC_ convention.',
+    usage: 'import { withCnosNext } from "@kitsy/cnos/plugin/next"',
+    examples: ['cnos export env --public --framework next', 'next.config.mjs -> export default withCnosNext({})'],
+  },
+];
+
 export const HELP_DOCUMENT: HelpDocument = {
   name: 'cnos',
   summary: 'Workspace-aware configuration runtime and CLI for local, global, and promoted environment data.',
@@ -468,10 +501,12 @@ export const HELP_DOCUMENT: HelpDocument = {
     'CNOS resolves one active workspace per invocation, layers local and optional global config roots, and exposes read, write, export, dump, validation, and diagnostics commands.',
   globalOptions: GLOBAL_OPTIONS,
   commands: COMMANDS,
+  integrations: INTEGRATIONS,
   examples: [
     'cnos use --profile stage',
     'cnos doctor --workspace api',
     'cnos export env --public --framework vite',
+    'cnos export env --public --framework next',
     'cnos help-ai --format json',
   ],
 };

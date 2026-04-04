@@ -46,6 +46,11 @@
       "types": "./dist/plugin/vite.d.ts",
       "import": "./dist/plugin/vite.js",
       "require": "./dist/plugin/vite.cjs"
+    },
+    "./plugin/next": {
+      "types": "./dist/plugin/next.d.ts",
+      "import": "./dist/plugin/next.js",
+      "require": "./dist/plugin/next.cjs"
     }
   },
   "files": [
@@ -77,6 +82,7 @@
     "@kitsy/cnos-plugin-env-export": "workspace:*",
     "@kitsy/cnos-plugin-filesystem": "workspace:*",
     "@kitsy/cnos-plugin-process-env": "workspace:*",
+    "@kitsy/cnos-next": "workspace:*",
     "@kitsy/cnos-vite": "workspace:*"
   },
   "scripts": {

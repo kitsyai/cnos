@@ -214,10 +214,12 @@ describe('@kitsy/cnos-cli', () => {
   it('prints human help for the root CLI and command topics', () => {
     expect(runHelp()).toContain('Commands');
     expect(runHelp()).toContain('help-ai');
+    expect(runHelp()).toContain('Framework integrations');
+    expect(runHelp()).toContain('@kitsy/cnos-next');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('list')).toContain('--namespace <value|secret|meta|all>');
-    expect(runHelp('export env')).toContain('--public');
+    expect(runHelp('export env')).toContain('--framework <name>');
   });
 
   it('prints machine-readable help for agents', () => {
@@ -226,10 +228,12 @@ describe('@kitsy/cnos-cli', () => {
 
     expect(rootPayload.cli).toBe('cnos');
     expect(rootPayload.commands.some((command: { id: string }) => command.id === 'doctor')).toBe(true);
+    expect(rootPayload.integrations.some((integration: { id: string }) => integration.id === 'next')).toBe(true);
     expect(commandPayload.command.id).toBe('export env');
     expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
       true,
     );
+    expect(commandPayload.integrations.some((integration: { id: string }) => integration.id === 'vite')).toBe(true);
   });
 
   it('onboards root env files into the workspace env tree without deleting originals by default', async () => {

@@ -17,7 +17,7 @@ In all of these, the critical runtime question is:
 
 > **Which workspace is active for this invocation?**
 
-Once that question exists, workspace cannot be an afterthought. It affects discovery, loading, provenance, write routing, dumping/materialization, and CLI ergonomics.
+Once that question exists, workspace cannot be an afterthought. It affects discovery, loading, provenance, write routing, dumping/materialization, CLI ergonomics, and framework integrations such as Vite or Next.js.
 
 ---
 

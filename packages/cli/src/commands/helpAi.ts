@@ -16,6 +16,7 @@ export function runHelpAi(topic?: string, cliArgs: string[] = []): string {
         cli: HELP_DOCUMENT.name,
         summary: HELP_DOCUMENT.summary,
         globalOptions: HELP_DOCUMENT.globalOptions,
+        integrations: HELP_DOCUMENT.integrations,
         command,
       }
     : {
@@ -25,6 +26,7 @@ export function runHelpAi(topic?: string, cliArgs: string[] = []): string {
         description: HELP_DOCUMENT.description,
         globalOptions: HELP_DOCUMENT.globalOptions,
         commands: HELP_DOCUMENT.commands,
+        integrations: HELP_DOCUMENT.integrations,
       };
 
   if (topic && !command) {

@@ -27,7 +27,7 @@ The invariant:
 
 ## 2. Why CNOS Exists
 
-Configuration gets scattered across `.env` files, shell variables, YAML files, CLI args, CI/CD injected vars, framework-specific public env conventions, and secret files. In monorepos and centralized-config workflows, another question appears: **which app/workspace is active right now?**
+Configuration gets scattered across `.env` files, shell variables, YAML files, CLI args, CI/CD injected vars, framework-specific public env conventions, and secret files. In monorepos and centralized-config workflows, another question appears: **which app/workspace is active right now?** CNOS ships first-party Vite and Next.js integrations on top of the same public env projection model.
 
 This creates recurring problems:
 

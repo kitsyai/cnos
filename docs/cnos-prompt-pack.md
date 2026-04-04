@@ -37,6 +37,7 @@ That means:
 - workspace resolution happens before profile resolution
 - `dump` is separate from env export
 - global writes are supported only through explicit target mode
+- first-party framework integrations can consume the same public export graph without inventing separate config roots
 
 ---
 
