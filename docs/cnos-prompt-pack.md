@@ -30,7 +30,7 @@ CNOS decides where values come from and how they are resolved. Plugins extend bo
 Workspace is first-class in v1.
 
 That means:
-- one authoritative local manifest: `cnos/cnos.yml`
+- one authoritative local manifest: `.cnos/cnos.yml`
 - one active workspace per invocation
 - local repo config is first-class and deployment-authoritative
 - global roots are optional lower-priority data sources
@@ -47,7 +47,7 @@ Create these packages in the pnpm monorepo workspace:
 ```text
 packages/
   cnos-core/
-  cnos/
+  .cnos/
   cnos-cli/
 ```
 
@@ -73,7 +73,7 @@ Build:
    - `ResolvedGraph`
    - all plugin interfaces
    - `WorkspaceContext`
-2. Manifest loader for `cnos/cnos.yml`
+2. Manifest loader for `.cnos/cnos.yml`
 3. `.cnos-workspace.yml` loader
 4. Workspace context resolution:
    - workspace selection precedence:
@@ -225,13 +225,13 @@ These are non-negotiable:
 ## Key Behaviors to Get Right
 
 ### Manifest authority
-- only repo-local `cnos/cnos.yml` defines the active system behavior
+- only repo-local `.cnos/cnos.yml` defines the active system behavior
 - global roots are data sources only in v1
 
 ### Workspace layout
 Local:
 ```text
-cnos/
+.cnos/
   cnos.yml
   workspaces/
     api/
@@ -281,8 +281,8 @@ And only when manifest allows it.
 ### Dump behavior
 Use:
 ```bash
-cnos dump --workspace api --to ./cnos/workspaces/api
-cnos dump --workspace api --flatten --to ./cnos
+cnos dump --workspace api --to ./.cnos/workspaces/api
+cnos dump --workspace api --flatten --to ./.cnos
 ```
 
 Do not overload `export` for this.

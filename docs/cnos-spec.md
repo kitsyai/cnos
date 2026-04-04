@@ -118,7 +118,7 @@ Workspace is first-class in v1.
 
 ### 6.1 Rules
 
-- one authoritative local manifest: `cnos/cnos.yml`
+- one authoritative local manifest: `.cnos/cnos.yml`
 - one active workspace per invocation
 - local repo config is first-class and deployment-authoritative
 - global roots are optional lower-priority data sources
@@ -160,7 +160,7 @@ It is not a second manifest.
 ```ts
 interface WorkspaceContext {
   workspaceId: string;
-  workspaceSource: "cli" | "workspace-file" | "manifest-default" | "project-name";
+  workspaceSource: "cli" | "workspace-file" | "manifest-default" | "implicit";
   globalRoot?: string;
   globalRootSource?: "cli" | "workspace-file" | "manifest" | "CNOS_HOME";
   workspaceChain: string[]; // parents first, selected workspace last
@@ -189,7 +189,7 @@ Sources / Roots → Loader plugins → CNOS core (workspace, namespace, resolve,
 ```text
 packages/
   cnos-core/
-  cnos/
+  .cnos/
   cnos-cli/
 ```
 
@@ -318,7 +318,7 @@ interface InspectContext {
 
 ## 9. Root Manifest
 
-CNOS root manifest: `cnos/cnos.yml`
+CNOS root manifest: `.cnos/cnos.yml`
 
 ### 9.1 Complete v1 shape
 
@@ -411,8 +411,8 @@ writePolicy:
   define:
     defaultProfile: local
     targets:
-      value: ./workspaces/{workspace}/values/{profile}/app.yml
-      secret: ./workspaces/{workspace}/secrets/{profile}/app.yml
+      value: ./values/app.yml
+      secret: ./secrets/app.yml
 
 schema:
   value.server.port:
@@ -449,7 +449,7 @@ Global roots do not override manifest authority in v1.
 ### 10.1 Local layout
 
 ```text
-cnos/
+.cnos/
   cnos.yml
   workspaces/
     api/
@@ -672,8 +672,8 @@ Two modes:
 
 Examples:
 ```bash
-cnos dump --workspace api --to ./cnos/workspaces/api
-cnos dump --workspace api --flatten --to ./cnos
+cnos dump --workspace api --to ./.cnos/workspaces/api
+cnos dump --workspace api --flatten --to ./.cnos
 ```
 
 Dump is a snapshot, not a live redirect.

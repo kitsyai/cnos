@@ -95,6 +95,9 @@ importers:
       '@kitsy/cnos-plugin-process-env':
         specifier: workspace:*
         version: link:../../plugins/process-env
+      '@kitsy/cnos-vite':
+        specifier: workspace:*
+        version: link:../../plugins/vite
 
   packages/core:
     dependencies:
@@ -137,6 +140,33 @@ importers:
       '@kitsy/cnos-core':
         specifier: workspace:*
         version: link:../../packages/core
+
+  plugins/vite:
+    dependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@kitsy/cnos-plugin-basic-schema':
+        specifier: workspace:*
+        version: link:../basic-schema
+      '@kitsy/cnos-plugin-cli-args':
+        specifier: workspace:*
+        version: link:../cli-args
+      '@kitsy/cnos-plugin-dotenv':
+        specifier: workspace:*
+        version: link:../dotenv
+      '@kitsy/cnos-plugin-env-export':
+        specifier: workspace:*
+        version: link:../env-export
+      '@kitsy/cnos-plugin-filesystem':
+        specifier: workspace:*
+        version: link:../filesystem
+      '@kitsy/cnos-plugin-process-env':
+        specifier: workspace:*
+        version: link:../process-env
+      vite:
+        specifier: '>=5'
+        version: 7.3.1(@types/node@24.12.0)(yaml@2.8.3)
 
 packages:
 

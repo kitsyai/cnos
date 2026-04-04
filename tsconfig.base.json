@@ -41,6 +41,9 @@
       ],
       "@kitsy/cnos-plugin-env-export": [
         "plugins/env-export/src/index.ts"
+      ],
+      "@kitsy/cnos-vite": [
+        "plugins/vite/src/index.ts"
       ]
     }
   }

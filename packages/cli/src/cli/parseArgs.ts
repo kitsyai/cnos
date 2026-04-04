@@ -64,6 +64,18 @@ function normalizeCommand(argv: string[]): string[] {
     return ['secret', 'list', ...remaining];
   }
 
+  if ((command === 'create' || command === 'add') && resource === 'value') {
+    return ['value', 'set', ...remaining];
+  }
+
+  if ((command === 'delete' || command === 'remove') && resource === 'value') {
+    return ['value', 'delete', ...remaining];
+  }
+
+  if (command === 'list' && resource === 'value') {
+    return ['value', 'list', ...remaining];
+  }
+
   return [command, ...rest];
 }
 

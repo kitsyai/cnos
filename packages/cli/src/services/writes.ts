@@ -258,3 +258,34 @@ export async function deleteSecret(
     ...(removedStore ? { removedStore } : {}),
   };
 }
+
+export async function deleteValue(
+  namespace: 'value' | 'secret',
+  configPath: string,
+  options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
+): Promise<{ filePath: string; deleted: boolean; removedStore?: string }> {
+  if (namespace === 'secret') {
+    return deleteSecret(configPath, options);
+  }
+
+  const runtime = await createRuntimeService(options);
+  const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
+  const profile = options.profile ?? runtime.graph.profile;
+  const filePath = resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile);
+  const document = await readYamlDocument(filePath);
+  const deleted = unsetNestedValue(document, configPath.split('.'));
+
+  if (!deleted) {
+    return {
+      filePath,
+      deleted: false,
+    };
+  }
+
+  await writeFile(filePath, stringifyYaml(document), 'utf8');
+
+  return {
+    filePath,
+    deleted: true,
+  };
+}

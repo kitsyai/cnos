@@ -26,7 +26,7 @@ Once that question exists, workspace cannot be an afterthought. It affects disco
 ### 2.1 Local manifest is authoritative
 The repo-local manifest remains the control point:
 
-- `cnos/cnos.yml` is the authoritative manifest
+- `.cnos/cnos.yml` is the authoritative manifest
 - plugin graph, precedence, public promotion, schema, write policy, and workspace policy are defined there
 - global config is a lower-priority data source, never an independent manifest authority in v1
 
@@ -70,7 +70,7 @@ Use:
 ## 3. Files Added / Changed
 
 ### 3.1 Authoritative manifest
-- `cnos/cnos.yml`
+- `.cnos/cnos.yml`
 
 ### 3.2 Repo-local workspace override file
 - `.cnos-workspace.yml`
@@ -151,7 +151,7 @@ CNOS introduces a first-class `WorkspaceContext`.
 ```ts
 interface WorkspaceContext {
   workspaceId: string;
-  workspaceSource: "cli" | "workspace-file" | "manifest-default" | "project-name";
+  workspaceSource: "cli" | "workspace-file" | "manifest-default" | "implicit";
   globalRoot?: string;
   globalRootSource?: "cli" | "workspace-file" | "manifest" | "CNOS_HOME";
   workspaceChain: string[]; // parents first, selected workspace last
@@ -172,7 +172,7 @@ This is resolved before profile expansion.
 ### 7.1 Local repo layout
 
 ```text
-cnos/
+.cnos/
   cnos.yml
   workspaces/
     api/
@@ -245,7 +245,7 @@ interface LoaderContext {
   manifestConfig: Record<string, unknown>;
   profile: string;
   profileChain: string[];
-  manifestRoot: string; // repo-local cnos/
+  manifestRoot: string; // repo-local .cnos/
   workspace: WorkspaceContext;
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
@@ -294,12 +294,12 @@ Use `cnos dump` for materialization.
 
 ### 11.1 Workspace-preserving dump
 ```bash
-cnos dump --workspace api --to ./cnos/workspaces/api
+cnos dump --workspace api --to ./.cnos/workspaces/api
 ```
 
 ### 11.2 Standalone flatten dump
 ```bash
-cnos dump --workspace api --flatten --to ./cnos
+cnos dump --workspace api --flatten --to ./.cnos
 ```
 
 Semantics:

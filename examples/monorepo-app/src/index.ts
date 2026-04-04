@@ -27,7 +27,7 @@ export async function runMonorepoAppExample() {
     },
   };
   const runtime = await createCnos({
-    root: fileURLToPath(new URL('../cnos', import.meta.url)),
+    root: fileURLToPath(new URL('../.cnos', import.meta.url)),
     plugins: [fixtureLoader],
   });
 

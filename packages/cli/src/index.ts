@@ -10,6 +10,7 @@ import { runHelp } from './commands/help.js';
 import { runHelpAi } from './commands/helpAi.js';
 import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
+import { runList } from './commands/list.js';
 import { runOnboard } from './commands/onboard.js';
 import { runProfile } from './commands/profile.js';
 import { runRead } from './commands/read.js';
@@ -31,6 +32,17 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
 
   if (
     command === 'secret' &&
+    args[0] &&
+    ['set', 'create', 'add', 'list', 'delete', 'remove'].includes(args[0])
+  ) {
+    return normalizeHelpTopic([
+      command,
+      args[0] === 'remove' ? 'delete' : args[0] === 'create' || args[0] === 'add' ? 'set' : args[0],
+    ]);
+  }
+
+  if (
+    command === 'value' &&
     args[0] &&
     ['set', 'create', 'add', 'list', 'delete', 'remove'].includes(args[0])
   ) {
@@ -105,7 +117,7 @@ export async function main(argv: string[]): Promise<void> {
       process.stdout.write(`${await runRead(args[0] ?? 'value.app.name', runtimeOptions)}\n`);
       return;
     case 'value':
-      process.stdout.write(`${await runValue(args[0] ?? 'app.name', runtimeOptions)}\n`);
+      process.stdout.write(`${await runValue(args.length > 0 ? args : ['app.name'], runtimeOptions)}\n`);
       return;
     case 'secret':
       process.stdout.write(`${await runSecret(args.length > 0 ? args : ['app.token'], runtimeOptions)}\n`);
@@ -115,6 +127,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'profile':
       process.stdout.write(`${await runProfile(args, runtimeOptions)}\n`);
+      return;
+    case 'list':
+      process.stdout.write(`${await runList(args, runtimeOptions)}\n`);
       return;
     case 'define':
       process.stdout.write(

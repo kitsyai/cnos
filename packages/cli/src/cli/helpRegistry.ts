@@ -95,17 +95,52 @@ const COMMANDS: HelpCommand[] = [
   },
   {
     id: 'value',
-    summary: 'Read a value namespace key without the value. prefix.',
-    usage: 'cnos value <path> [global-options]',
-    description: 'Reads value.<path> from the selected workspace and profile.',
+    summary: 'Read, write, list, and delete values.',
+    usage: 'cnos value [get <path> | set <path> <value> | list | delete <path>] [options] [global-options]',
+    description: 'Reads and manages value.<path> entries from the selected workspace and profile.',
     arguments: [
       {
         name: 'path',
         description: 'Value path without the value. namespace prefix.',
-        required: true,
       },
     ],
-    examples: ['cnos value app.name', 'cnos value server.port --profile stage --workspace api'],
+    options: [
+      {
+        flag: '--target <local|global>',
+        description: 'Choose whether writes land in the local project workspace or the configured global root.',
+      },
+      {
+        flag: '--prefix <path>',
+        description: 'Filter value list output to keys that begin with this logical path or key prefix.',
+      },
+    ],
+    examples: [
+      'cnos value app.name',
+      'cnos value set server.port 3000',
+      'cnos add value app.name demo',
+      'cnos value list --prefix app.',
+    ],
+  },
+  {
+    id: 'value set',
+    summary: 'Write a value.',
+    usage: 'cnos value set <path> <value> [--target <local|global>] [global-options]',
+    description: 'Writes a deterministic value document into the selected workspace or explicit global target.',
+    examples: ['cnos value set app.name demo', 'cnos add value server.port 3000 --target global'],
+  },
+  {
+    id: 'value list',
+    summary: 'List resolved values.',
+    usage: 'cnos value list [--prefix <path>] [global-options]',
+    description: 'Lists resolved value keys for the selected workspace and profile.',
+    examples: ['cnos value list', 'cnos value list --prefix app.'],
+  },
+  {
+    id: 'value delete',
+    summary: 'Delete a value entry.',
+    usage: 'cnos value delete <path> [--target <local|global>] [global-options]',
+    description: 'Deletes a value from the selected workspace or explicit global target.',
+    examples: ['cnos value delete app.name', 'cnos remove value server.port'],
   },
   {
     id: 'secret',
@@ -189,6 +224,24 @@ const COMMANDS: HelpCommand[] = [
     description:
       'Writes .cnos-workspace.yml so future CLI invocations can omit repeated workspace/profile/global-root flags.',
     examples: ['cnos use --workspace api --profile stage', 'cnos use --global-root ~/.cnos'],
+  },
+  {
+    id: 'list',
+    summary: 'List resolved config entries.',
+    usage: 'cnos list [value|secret|meta|all] [--prefix <path>] [global-options]',
+    description:
+      'Lists resolved config entries across one namespace or the full effective graph, with optional key-prefix filtering.',
+    options: [
+      {
+        flag: '--namespace <value|secret|meta|all>',
+        description: 'Explicit namespace selector when not using a positional namespace argument.',
+      },
+      {
+        flag: '--prefix <path>',
+        description: 'Filter list output to entries whose logical keys begin with this prefix.',
+      },
+    ],
+    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list --namespace secret'],
   },
   {
     id: 'profile',

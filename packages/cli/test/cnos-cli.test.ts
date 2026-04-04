@@ -14,6 +14,7 @@ import { runHelp } from '../src/commands/help.js';
 import { runHelpAi } from '../src/commands/helpAi.js';
 import { runInit } from '../src/commands/init.js';
 import { runInspect } from '../src/commands/inspect.js';
+import { runList } from '../src/commands/list.js';
 import { runOnboard } from '../src/commands/onboard.js';
 import { runRead } from '../src/commands/read.js';
 import { runCommand } from '../src/commands/run.js';
@@ -128,6 +129,33 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
+  it('normalizes verb-first aliases for value, secret, and profile flows', () => {
+    expect(parseArgs(['add', 'value', 'app.name', 'demo'])).toEqual({
+      command: 'value',
+      args: ['set', 'app.name', 'demo'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['remove', 'secret', 'app.token'])).toEqual({
+      command: 'secret',
+      args: ['delete', 'app.token'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['list', 'value', '--prefix', 'app.'])).toEqual({
+      command: 'value',
+      args: ['list'],
+      options: {
+        cliArgs: ['--prefix', 'app.'],
+      },
+      passthrough: [],
+    });
+  });
+
   it('parses help flags for root and command-level help', () => {
     expect(parseArgs(['--help'])).toEqual({
       command: 'help',
@@ -187,6 +215,8 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('Commands');
     expect(runHelp()).toContain('help-ai');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
+    expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
+    expect(runHelp('list')).toContain('--namespace <value|secret|meta|all>');
     expect(runHelp('export env')).toContain('--public');
   });
 
@@ -231,6 +261,41 @@ describe('@kitsy/cnos-cli', () => {
     await expect(runSecret('app.token', { root, workspace: 'api', processEnv: {} })).resolves.toBe(
       'super-secret',
     );
+  });
+
+  it('supports value CRUD and generic list flows', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runValue(['set', 'app.mode', 'preview'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('set value.app.mode');
+    await expect(
+      runValue(['list'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--prefix', 'app.'],
+      }),
+    ).resolves.toContain('value.app.mode=preview');
+    await expect(
+      runList(['value'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--prefix', 'value.app.'],
+      }),
+    ).resolves.toContain('value.app.name=cli-fixture');
+    await expect(
+      runValue(['delete', 'app.mode'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('deleted value.app.mode');
   });
 
   it('prints inspect output in text and json modes', async () => {

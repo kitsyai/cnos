@@ -8,6 +8,7 @@ CNOS is a plugin-first configuration orchestration system. This repository is a 
 - `@kitsy/cnos`: batteries-included runtime assembly with the official v1 plugins and convenience re-exports under `@kitsy/cnos/plugin/*`.
 - `@kitsy/cnos-cli`: `cnos` executable and command routing.
 - `@kitsy/cnos-plugin-*`: official plugins kept as separate publishable packages.
+- `@kitsy/cnos-vite`: first-party Vite integration for CNOS public env injection.
 
 ## Workspace commands
 
@@ -23,7 +24,7 @@ CNOS is a plugin-first configuration orchestration system. This repository is a 
 
 The workspace uses pnpm workspaces, TypeScript, tsup, Vitest, ESLint, Prettier, and Changesets. Core packages live under `packages/*`, official plugins live under `plugins/*`, examples live under `examples/*`, and long-form specifications stay in `docs/`.
 
-The current v1 CLI is workspace-aware and includes `init`, `onboard`, `read`, `value`, `secret`, `inspect`, `define`, `validate`, `export env`, `dump`, `run`, `diff`, and `doctor`.
+The current v1 CLI is workspace-aware and includes `init`, `onboard`, `use`, `profile`, `list`, `read`, `value`, `secret`, `inspect`, `define`, `validate`, `export env`, `dump`, `run`, `diff`, and `doctor`.
 
 ## Release flow
 
