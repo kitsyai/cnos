@@ -102,8 +102,8 @@ function createExportContext(manifest: NormalizedManifest): ExportContext {
 
 describe('@kitsy/cnos-plugin-env-export', () => {
   it('creates the expected exporter ids', () => {
-    expect(createEnvExportPlugin().id).toBe('env');
-    expect(createPublicEnvExportPlugin().id).toBe('public-env');
+    expect(createEnvExportPlugin().id).toBe('@kitsy/cnos/plugins/env-export');
+    expect(createPublicEnvExportPlugin().id).toBe('@kitsy/cnos/plugins/public-env-export');
   });
 
   it('projects the resolved graph to env vars and skips meta keys', () => {
@@ -181,13 +181,13 @@ describe('@kitsy/cnos-plugin-env-export', () => {
     const context = createExportContext(manifest);
 
     await expect(createEnvExportPlugin().export(graph, context)).resolves.toEqual({
-      pluginId: 'env',
+      pluginId: '@kitsy/cnos/plugins/env-export',
       value: {
         API_URL: 'https://api.example.com',
       },
     });
     await expect(createPublicEnvExportPlugin().export(graph, context)).resolves.toEqual({
-      pluginId: 'public-env',
+      pluginId: '@kitsy/cnos/plugins/public-env-export',
       value: {
         API_URL: 'https://api.example.com',
       },

@@ -1,6 +1,6 @@
 import { envVarToLogicalKey, type ConfigEntry, type EnvMappingConfig, type LoaderPlugin } from '@kitsy/cnos-core';
 
-const PROCESS_ENV_PLUGIN_ID = '@kitsy/cnos-plugin-process-env';
+const PROCESS_ENV_PLUGIN_ID = '@kitsy/cnos/plugins/process-env';
 
 interface ProcessEnvSourceConfig {
   envMapping?: EnvMappingConfig;

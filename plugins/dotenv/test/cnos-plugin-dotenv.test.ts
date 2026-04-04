@@ -62,7 +62,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         value: '3000',
         namespace: 'value',
         sourceId: 'dotenv',
-        pluginId: '@kitsy/cnos-plugin-dotenv',
+        pluginId: '@kitsy/cnos/plugins/dotenv',
         workspaceId: 'default',
         origin: {
           envVar: 'SERVER_PORT',
@@ -74,7 +74,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         value: 'db.internal',
         namespace: 'value',
         sourceId: 'dotenv',
-        pluginId: '@kitsy/cnos-plugin-dotenv',
+        pluginId: '@kitsy/cnos/plugins/dotenv',
         workspaceId: 'default',
         origin: {
           envVar: 'DATABASE_HOST',
@@ -86,7 +86,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
         value: 'top-secret',
         namespace: 'secret',
         sourceId: 'dotenv',
-        pluginId: '@kitsy/cnos-plugin-dotenv',
+        pluginId: '@kitsy/cnos/plugins/dotenv',
         workspaceId: 'default',
         origin: {
           envVar: 'SECRET_INVENTORY_DB_PASSWORD',

@@ -1,6 +1,6 @@
 import { joinConfigPath, type ConfigEntry, type LoaderPlugin, type NamespaceName } from '@kitsy/cnos-core';
 
-const CLI_ARGS_PLUGIN_ID = '@kitsy/cnos-plugin-cli-args';
+const CLI_ARGS_PLUGIN_ID = '@kitsy/cnos/plugins/cli-args';
 
 interface ParsedCliArg {
   key: string;

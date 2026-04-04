@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseYaml, stringifyYaml, type WorkspaceFile } from '@kitsy/cnos-core';
+import { parseYaml, stringifyYaml, type WorkspaceFile } from '@kitsy/cnos/internal';
 
 export interface UseContextOptions {
   root?: string;

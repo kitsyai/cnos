@@ -9,7 +9,7 @@ import {
   stringifyYaml,
   writeLocalSecret,
   type SecretReference,
-} from '@kitsy/cnos-core';
+} from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 

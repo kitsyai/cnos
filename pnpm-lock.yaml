@@ -68,45 +68,36 @@ importers:
       '@kitsy/cnos':
         specifier: workspace:*
         version: link:../cnos
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
 
   packages/cnos:
     dependencies:
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
-      '@kitsy/cnos-next':
-        specifier: workspace:*
-        version: link:../../plugins/next
-      '@kitsy/cnos-plugin-basic-schema':
-        specifier: workspace:*
-        version: link:../../plugins/basic-schema
-      '@kitsy/cnos-plugin-cli-args':
-        specifier: workspace:*
-        version: link:../../plugins/cli-args
-      '@kitsy/cnos-plugin-dotenv':
-        specifier: workspace:*
-        version: link:../../plugins/dotenv
-      '@kitsy/cnos-plugin-env-export':
-        specifier: workspace:*
-        version: link:../../plugins/env-export
-      '@kitsy/cnos-plugin-filesystem':
-        specifier: workspace:*
-        version: link:../../plugins/filesystem
-      '@kitsy/cnos-plugin-process-env':
-        specifier: workspace:*
-        version: link:../../plugins/process-env
-      '@kitsy/cnos-vite':
-        specifier: workspace:*
-        version: link:../../plugins/vite
+      yaml:
+        specifier: ^2.8.3
+        version: 2.8.3
 
   packages/core:
     dependencies:
       yaml:
         specifier: ^2.8.3
         version: 2.8.3
+
+  packages/next:
+    dependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
+      next:
+        specifier: '>=14'
+        version: 16.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+
+  packages/vite:
+    dependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
+      vite:
+        specifier: '>=5'
+        version: 7.3.1(@types/node@24.12.0)(yaml@2.8.3)
 
   plugins/basic-schema:
     dependencies:
@@ -138,65 +129,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
-  plugins/next:
-    dependencies:
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@kitsy/cnos-plugin-basic-schema':
-        specifier: workspace:*
-        version: link:../basic-schema
-      '@kitsy/cnos-plugin-cli-args':
-        specifier: workspace:*
-        version: link:../cli-args
-      '@kitsy/cnos-plugin-dotenv':
-        specifier: workspace:*
-        version: link:../dotenv
-      '@kitsy/cnos-plugin-env-export':
-        specifier: workspace:*
-        version: link:../env-export
-      '@kitsy/cnos-plugin-filesystem':
-        specifier: workspace:*
-        version: link:../filesystem
-      '@kitsy/cnos-plugin-process-env':
-        specifier: workspace:*
-        version: link:../process-env
-      next:
-        specifier: '>=14'
-        version: 16.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-
   plugins/process-env:
     dependencies:
       '@kitsy/cnos-core':
         specifier: workspace:*
         version: link:../../packages/core
-
-  plugins/vite:
-    dependencies:
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@kitsy/cnos-plugin-basic-schema':
-        specifier: workspace:*
-        version: link:../basic-schema
-      '@kitsy/cnos-plugin-cli-args':
-        specifier: workspace:*
-        version: link:../cli-args
-      '@kitsy/cnos-plugin-dotenv':
-        specifier: workspace:*
-        version: link:../dotenv
-      '@kitsy/cnos-plugin-env-export':
-        specifier: workspace:*
-        version: link:../env-export
-      '@kitsy/cnos-plugin-filesystem':
-        specifier: workspace:*
-        version: link:../filesystem
-      '@kitsy/cnos-plugin-process-env':
-        specifier: workspace:*
-        version: link:../process-env
-      vite:
-        specifier: '>=5'
-        version: 7.3.1(@types/node@24.12.0)(yaml@2.8.3)
 
 packages:
 

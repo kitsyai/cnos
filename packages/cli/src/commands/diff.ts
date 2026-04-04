@@ -1,4 +1,4 @@
-import { flattenObject } from '@kitsy/cnos-core';
+import { flattenObject } from '@kitsy/cnos/internal';
 
 import { printJson } from '../format/printJson.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';

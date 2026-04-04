@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-cli",
-  "version": "0.0.1",
+  "version": "1.0.1",
   "description": "CLI entry point and developer tooling for CNOS.",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,8 +36,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@kitsy/cnos": "workspace:*",
-    "@kitsy/cnos-core": "workspace:*"
+    "@kitsy/cnos": "workspace:*"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",

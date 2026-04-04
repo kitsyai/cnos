@@ -73,6 +73,7 @@ export interface CnosCreateOptions {
   profile?: string;
   workspace?: string;
   globalRoot?: string;
+  cnosVersion?: string;
   plugins?: CnosPlugin[];
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;

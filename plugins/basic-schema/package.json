@@ -1,5 +1,6 @@
 {
   "name": "@kitsy/cnos-plugin-basic-schema",
+  "private": true,
   "version": "0.0.1",
   "description": "Basic schema validation plugin scaffold for CNOS.",
   "type": "module",
@@ -31,9 +32,6 @@
     "plugin",
     "schema"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "dependencies": {
     "@kitsy/cnos-core": "workspace:*"
   },

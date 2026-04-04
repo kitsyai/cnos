@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseYaml, stringifyYaml } from '@kitsy/cnos-core';
+import { parseYaml, stringifyYaml } from '@kitsy/cnos/internal';
 
 export async function createProfileDefinition(
   root = process.cwd(),

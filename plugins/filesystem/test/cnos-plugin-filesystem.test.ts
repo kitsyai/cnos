@@ -40,7 +40,7 @@ describe('@kitsy/cnos-plugin-filesystem', () => {
         value: 3000,
         namespace: 'value',
         sourceId: 'filesystem-values',
-        pluginId: '@kitsy/cnos-plugin-filesystem',
+        pluginId: '@kitsy/cnos/plugins/filesystem',
         workspaceId: 'default',
         origin: {
           file: 'cnos/values/local/app.yml',

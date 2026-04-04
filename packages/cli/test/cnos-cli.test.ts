@@ -20,6 +20,7 @@ import { runRead } from '../src/commands/read.js';
 import { runCommand } from '../src/commands/run.js';
 import { runSecret } from '../src/commands/secret.js';
 import { runValidate } from '../src/commands/validate.js';
+import { runVersion } from '../src/commands/version.js';
 import { runValue } from '../src/commands/value.js';
 import { printJson } from '../src/format/printJson.js';
 
@@ -182,6 +183,14 @@ describe('@kitsy/cnos-cli', () => {
       },
       passthrough: [],
     });
+    expect(parseArgs(['--version'])).toEqual({
+      command: 'version',
+      args: [],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
   });
 
   it('scaffolds the workspace-aware starter tree and gitignore entries', async () => {
@@ -209,6 +218,10 @@ describe('@kitsy/cnos-cli', () => {
 
   it('formats json output', () => {
     expect(printJson({ ok: true })).toContain('"ok": true');
+  });
+
+  it('prints the CLI version', () => {
+    expect(runVersion()).toBe('1.0.1');
   });
 
   it('prints human help for the root CLI and command topics', () => {
@@ -312,7 +325,7 @@ describe('@kitsy/cnos-cli', () => {
       profile: base (manifest-default)
       workspace: api (cli)
       workspaceChain: api
-      winner: filesystem-values via @kitsy/cnos-plugin-filesystem @ api
+      winner: filesystem-values via @kitsy/cnos/plugins/filesystem @ api
       winnerOrigin: .cnos/workspaces/api/values/app.yml"
     `);
     await expect(

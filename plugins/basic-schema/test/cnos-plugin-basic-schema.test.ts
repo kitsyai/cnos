@@ -42,7 +42,7 @@ function createGraph(): ResolvedGraph {
 
 describe('@kitsy/cnos-plugin-basic-schema', () => {
   it('creates a named plugin', () => {
-    expect(createBasicSchemaPlugin().id).toBe('basic-schema');
+    expect(createBasicSchemaPlugin().id).toBe('@kitsy/cnos/plugins/basic-schema');
   });
 
   it('validates schema issues against the resolved graph', async () => {
@@ -68,7 +68,7 @@ describe('@kitsy/cnos-plugin-basic-schema', () => {
         schema: manifest.schema,
       }),
     ).resolves.toMatchObject({
-      pluginId: 'basic-schema',
+      pluginId: '@kitsy/cnos/plugins/basic-schema',
       valid: false,
       issues: expect.arrayContaining([
         expect.objectContaining({ code: 'schema.type', key: 'value.server.port' }),

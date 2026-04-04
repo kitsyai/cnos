@@ -1,5 +1,3 @@
-import packageJson from '../../package.json';
-
 import { loadManifest } from '../manifest/loadManifest.js';
 import { loadWorkspaceFile } from '../manifest/loadWorkspaceFile.js';
 import { expandProfileChain } from '../profiles/expandProfileChain.js';
@@ -13,7 +11,7 @@ import { applySchemaRules } from '../validation/basicSchema.js';
 import { runPipeline } from './pipeline.js';
 import { createRuntime } from './runtime.js';
 
-function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
+function buildMetaEntries(graph: ResolvedGraph, cnosVersion?: string): ConfigEntry[] {
   return [
     {
       key: 'meta.profile',
@@ -25,7 +23,7 @@ function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
     },
     {
       key: 'meta.cnos.version',
-      value: packageJson.version,
+      value: cnosVersion ?? '0.0.0-dev',
       namespace: 'meta',
       sourceId: 'core',
       pluginId: 'core',
@@ -90,10 +88,10 @@ function buildMetaEntries(graph: ResolvedGraph): ConfigEntry[] {
   ];
 }
 
-function appendMetaEntries(graph: ResolvedGraph): ResolvedGraph {
+function appendMetaEntries(graph: ResolvedGraph, cnosVersion?: string): ResolvedGraph {
   const nextEntries = new Map(graph.entries);
 
-  for (const entry of buildMetaEntries(graph)) {
+  for (const entry of buildMetaEntries(graph, cnosVersion)) {
     nextEntries.set(entry.key, {
       key: entry.key,
       value: entry.value,
@@ -158,7 +156,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     appendMetaEntries({
       ...schemaApplied.graph,
       profileSource: activeProfile.source,
-    }),
+    }, options.cnosVersion),
     plugins,
   );
 }

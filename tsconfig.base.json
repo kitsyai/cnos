@@ -21,6 +21,9 @@
       "@kitsy/cnos": [
         "packages/cnos/src/index.ts"
       ],
+      "@kitsy/cnos/internal": [
+        "packages/cnos/src/internal.ts"
+      ],
       "@kitsy/cnos-cli": [
         "packages/cli/src/index.ts"
       ],
@@ -43,10 +46,10 @@
         "plugins/env-export/src/index.ts"
       ],
       "@kitsy/cnos-vite": [
-        "plugins/vite/src/index.ts"
+        "packages/vite/src/index.ts"
       ],
       "@kitsy/cnos-next": [
-        "plugins/next/src/index.ts"
+        "packages/next/src/index.ts"
       ]
     }
   }

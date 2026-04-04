@@ -1,0 +1,30 @@
+import { defineConfig } from 'tsup';
+
+const internalPackages = [
+  '@kitsy/cnos-core',
+  '@kitsy/cnos-plugin-basic-schema',
+  '@kitsy/cnos-plugin-cli-args',
+  '@kitsy/cnos-plugin-dotenv',
+  '@kitsy/cnos-plugin-env-export',
+  '@kitsy/cnos-plugin-filesystem',
+  '@kitsy/cnos-plugin-process-env',
+];
+
+export default defineConfig({
+  clean: true,
+  entry: [
+    'src/index.ts',
+    'src/internal.ts',
+    'src/plugin/basic-schema.ts',
+    'src/plugin/cli-args.ts',
+    'src/plugin/dotenv.ts',
+    'src/plugin/env-export.ts',
+    'src/plugin/filesystem.ts',
+    'src/plugin/process-env.ts',
+  ],
+  format: ['esm', 'cjs'],
+  dts: {
+    resolve: true,
+  },
+  noExternal: internalPackages,
+});

@@ -1,4 +1,4 @@
-import { flattenObject } from '@kitsy/cnos-core';
+import { flattenObject } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 

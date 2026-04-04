@@ -10,7 +10,7 @@ import {
   type LoaderPlugin,
 } from '@kitsy/cnos-core';
 
-const DOTENV_PLUGIN_ID = '@kitsy/cnos-plugin-dotenv';
+const DOTENV_PLUGIN_ID = '@kitsy/cnos/plugins/dotenv';
 
 interface DotenvSourceConfig {
   root?: string;

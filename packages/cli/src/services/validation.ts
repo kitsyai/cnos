@@ -1,4 +1,4 @@
-import { validateRuntime, type ValidationSummary } from '@kitsy/cnos-core';
+import { validateRuntime, type ValidationSummary } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 

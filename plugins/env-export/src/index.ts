@@ -5,11 +5,11 @@ export { toPublicEnv } from './toPublicEnv.js';
 
 export function createEnvExportPlugin(): ExporterPlugin {
   return {
-    id: 'env',
+    id: '@kitsy/cnos/plugins/env-export',
     kind: 'exporter',
     async export(graph, context) {
       return {
-        pluginId: 'env',
+        pluginId: '@kitsy/cnos/plugins/env-export',
         value: toEnv(graph, context.manifest),
       };
     },
@@ -18,11 +18,11 @@ export function createEnvExportPlugin(): ExporterPlugin {
 
 export function createPublicEnvExportPlugin(): ExporterPlugin {
   return {
-    id: 'public-env',
+    id: '@kitsy/cnos/plugins/public-env-export',
     kind: 'exporter',
     async export(graph, context) {
       return {
-        pluginId: 'public-env',
+        pluginId: '@kitsy/cnos/plugins/public-env-export',
         value: toPublicEnv(graph, context.manifest),
       };
     },

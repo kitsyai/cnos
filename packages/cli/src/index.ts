@@ -18,6 +18,7 @@ import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
 import { runUse } from './commands/use.js';
 import { runValidate } from './commands/validate.js';
+import { runVersion } from './commands/version.js';
 import { runValue } from './commands/value.js';
 import { normalizeHelpTopic } from './cli/helpRegistry.js';
 
@@ -106,6 +107,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'help-ai':
       process.stdout.write(`${runHelpAi(resolveHelpTopic(command, args), options.cliArgs)}\n`);
+      return;
+    case 'version':
+      process.stdout.write(`${runVersion()}\n`);
       return;
     case 'init':
       process.stdout.write(`${await runInit(runtimeOptions)}\n`);

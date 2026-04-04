@@ -4,12 +4,12 @@ CNOS is a plugin-first configuration orchestration system. This repository is a 
 
 ## Package map
 
-- `@kitsy/cnos-core`: workflow orchestrator, contracts, manifest model, and runtime primitives.
-- `@kitsy/cnos`: batteries-included runtime assembly with the official v1 plugins and convenience re-exports under `@kitsy/cnos/plugin/*`.
-- `@kitsy/cnos-cli`: `cnos` executable and command routing.
-- `@kitsy/cnos-plugin-*`: official plugins kept as separate publishable packages.
+- `@kitsy/cnos`: batteries-included runtime assembly. It bundles the core engine plus the official built-in plugins and re-exports those built-ins under `@kitsy/cnos/plugins/*`.
+- `@kitsy/cnos-cli`: `cnos` executable and command routing. It depends only on `@kitsy/cnos`.
 - `@kitsy/cnos-vite`: first-party Vite integration for CNOS public env injection.
 - `@kitsy/cnos-next`: first-party Next.js integration for CNOS public env injection.
+
+Internal workspaces such as `packages/core` and `plugins/*` remain in the source monorepo for development, but they are not published as standalone npm packages.
 
 ## Workspace commands
 
@@ -27,7 +27,7 @@ The workspace uses pnpm workspaces, TypeScript, tsup, Vitest, ESLint, Prettier, 
 
 The current v1 CLI is workspace-aware and includes `init`, `onboard`, `use`, `profile`, `list`, `read`, `value`, `secret`, `inspect`, `define`, `validate`, `export env`, `dump`, `run`, `diff`, `doctor`, `help`, and `help-ai`.
 
-Framework integrations currently ship for Vite and Next.js through `@kitsy/cnos/plugin/vite` and `@kitsy/cnos/plugin/next`.
+Framework integrations currently ship as `@kitsy/cnos-vite` and `@kitsy/cnos-next`. Official built-ins remain available from `@kitsy/cnos/plugins/*`.
 
 ## Release flow
 

@@ -1,7 +1,7 @@
 # CNOS v1 — Canonical Specification (Workspace-Integrated)
 
 **Project:** `@kitsy/cnos`  
-**Packages:** `@kitsy/cnos-core`, `@kitsy/cnos`, `@kitsy/cnos-cli`  
+**Published packages:** `@kitsy/cnos`, `@kitsy/cnos-cli`, `@kitsy/cnos-vite`, `@kitsy/cnos-next`  
 **Status:** Implementation-ready v1 specification  
 **License intent:** Open source
 
@@ -188,14 +188,16 @@ Sources / Roots → Loader plugins → CNOS core (workspace, namespace, resolve,
 
 ```text
 packages/
-  cnos-core/
-  .cnos/
-  cnos-cli/
+  cnos/
+  cli/
+  vite/
+  next/
 ```
 
-- `@kitsy/cnos-core` → orchestrator, plugin contracts, resolution engine
-- `@kitsy/cnos` → batteries-included entry with default v1 plugins
+- `@kitsy/cnos` → batteries-included entry with the core engine plus default built-in plugins
 - `@kitsy/cnos-cli` → CLI commands and developer workflow surface
+- `@kitsy/cnos-vite` → Vite integration
+- `@kitsy/cnos-next` → Next.js integration
 
 ---
 
@@ -813,7 +815,7 @@ The same namespace/path/profile/workspace/target tuple must always resolve to th
 ## 21. Internal Module Layout
 
 ```text
-packages/cnos-core/src/
+packages/core/src/
   index.ts
   types/
     core.ts

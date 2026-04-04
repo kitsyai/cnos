@@ -99,6 +99,17 @@ export function parseArgs(argv: string[]): ParsedCommand {
     };
   }
 
+  if (argv[0] === '--version' || argv[0] === '-v') {
+    return {
+      command: 'version',
+      args: [],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    };
+  }
+
   const normalizedArgv = normalizeCommand(argv);
   const [command = 'doctor', ...rest] = normalizedArgv;
   const options: Omit<CommandOptions, 'cliArgs'> = {};

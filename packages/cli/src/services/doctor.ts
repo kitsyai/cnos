@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ValidationIssue } from '@kitsy/cnos-core';
+import type { ValidationIssue } from '@kitsy/cnos/internal';
 
 import { createValidationSummary } from './validation.js';
 import type { RuntimeServiceOptions } from './runtime.js';

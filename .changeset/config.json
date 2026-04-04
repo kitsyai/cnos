@@ -4,15 +4,10 @@
   "commit": false,
   "fixed": [
     [
-      "@kitsy/cnos-core",
       "@kitsy/cnos",
       "@kitsy/cnos-cli",
-      "@kitsy/cnos-plugin-filesystem",
-      "@kitsy/cnos-plugin-dotenv",
-      "@kitsy/cnos-plugin-process-env",
-      "@kitsy/cnos-plugin-cli-args",
-      "@kitsy/cnos-plugin-basic-schema",
-      "@kitsy/cnos-plugin-env-export"
+      "@kitsy/cnos-vite",
+      "@kitsy/cnos-next"
     ]
   ],
   "linked": [],

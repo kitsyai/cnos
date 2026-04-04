@@ -29,7 +29,7 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         value: '8080',
         namespace: 'value',
         sourceId: 'process-env',
-        pluginId: '@kitsy/cnos-plugin-process-env',
+        pluginId: '@kitsy/cnos/plugins/process-env',
         workspaceId: 'default',
         origin: {
           envVar: 'SERVER_PORT',
@@ -40,7 +40,7 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         value: 'db.internal',
         namespace: 'value',
         sourceId: 'process-env',
-        pluginId: '@kitsy/cnos-plugin-process-env',
+        pluginId: '@kitsy/cnos/plugins/process-env',
         workspaceId: 'default',
         origin: {
           envVar: 'DATABASE_HOST',
@@ -51,7 +51,7 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         value: 'top-secret',
         namespace: 'secret',
         sourceId: 'process-env',
-        pluginId: '@kitsy/cnos-plugin-process-env',
+        pluginId: '@kitsy/cnos/plugins/process-env',
         workspaceId: 'default',
         origin: {
           envVar: 'SECRET_INVENTORY_DB_PASSWORD',

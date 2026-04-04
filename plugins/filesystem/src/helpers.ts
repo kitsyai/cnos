@@ -15,7 +15,7 @@ import {
 } from '@kitsy/cnos-core';
 
 const YAML_EXTENSIONS = new Set(['.yml', '.yaml']);
-const FILESYSTEM_PLUGIN_ID = '@kitsy/cnos-plugin-filesystem';
+const FILESYSTEM_PLUGIN_ID = '@kitsy/cnos/plugins/filesystem';
 
 export interface FilesystemLoaderFile {
   absolutePath: string;

@@ -1,16 +1,4 @@
-import { createCnos as createCoreCnos, createProvenanceInspector, type CnosCreateOptions } from '@kitsy/cnos-core';
-import { createBasicSchemaPlugin } from '@kitsy/cnos-plugin-basic-schema';
-import { createCliArgsPlugin } from '@kitsy/cnos-plugin-cli-args';
-import { createDotenvPlugin } from '@kitsy/cnos-plugin-dotenv';
-import {
-  createEnvExportPlugin,
-  createPublicEnvExportPlugin,
-} from '@kitsy/cnos-plugin-env-export';
-import {
-  createFilesystemSecretsPlugin,
-  createFilesystemValuesPlugin,
-} from '@kitsy/cnos-plugin-filesystem';
-import { createProcessEnvPlugin } from '@kitsy/cnos-plugin-process-env';
+import { createCnos, type CnosCreateOptions } from '@kitsy/cnos';
 
 export interface NextConfigLike {
   env?: Record<string, string>;
@@ -33,20 +21,6 @@ export interface CnosNextPluginOptions extends CnosCreateOptions {
   profileFromPhase?: (phase: string) => string | undefined;
 }
 
-function defaultPlugins() {
-  return [
-    createFilesystemValuesPlugin(),
-    createFilesystemSecretsPlugin(),
-    createDotenvPlugin(),
-    createProcessEnvPlugin(),
-    createCliArgsPlugin(),
-    createBasicSchemaPlugin(),
-    createEnvExportPlugin(),
-    createPublicEnvExportPlugin(),
-    createProvenanceInspector(),
-  ];
-}
-
 async function resolveBaseConfig(
   config: NextConfigInputLike,
   phase: string,
@@ -66,9 +40,8 @@ export async function loadCnosNextEnv(
   const profile =
     options.profile ??
     options.profileFromPhase?.(phase);
-  const runtime = await createCoreCnos({
+  const runtime = await createCnos({
     ...options,
-    plugins: [...defaultPlugins(), ...(options.plugins ?? [])],
     ...(profile ? { profile } : {}),
   });
 

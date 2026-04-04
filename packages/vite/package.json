@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vite",
-  "version": "0.0.1",
+  "version": "1.0.1",
   "description": "Vite integration for CNOS public config injection.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -20,9 +20,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/kitsyai/cnos.git",
-    "directory": "plugins/vite"
+    "directory": "packages/vite"
   },
-  "homepage": "https://github.com/kitsyai/cnos/tree/main/plugins/vite",
+  "homepage": "https://github.com/kitsyai/cnos/tree/main/packages/vite",
   "bugs": {
     "url": "https://github.com/kitsyai/cnos/issues"
   },
@@ -35,13 +35,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@kitsy/cnos-core": "workspace:*",
-    "@kitsy/cnos-plugin-basic-schema": "workspace:*",
-    "@kitsy/cnos-plugin-cli-args": "workspace:*",
-    "@kitsy/cnos-plugin-dotenv": "workspace:*",
-    "@kitsy/cnos-plugin-env-export": "workspace:*",
-    "@kitsy/cnos-plugin-filesystem": "workspace:*",
-    "@kitsy/cnos-plugin-process-env": "workspace:*"
+    "@kitsy/cnos": "workspace:*"
   },
   "peerDependencies": {
     "vite": ">=5"

@@ -47,15 +47,17 @@ Create these packages in the pnpm monorepo workspace:
 
 ```text
 packages/
-  cnos-core/
-  .cnos/
-  cnos-cli/
+  cnos/
+  cli/
+  vite/
+  next/
 ```
 
 Published as:
-- `@kitsy/cnos-core`
 - `@kitsy/cnos`
 - `@kitsy/cnos-cli`
+- `@kitsy/cnos-vite`
+- `@kitsy/cnos-next`
 
 ---
 
@@ -295,7 +297,7 @@ Do not overload `export` for this.
 Follow the canonical spec module layout, including workspace modules:
 
 ```text
-packages/cnos-core/src/
+packages/core/src/
   index.ts
   types/
     core.ts
