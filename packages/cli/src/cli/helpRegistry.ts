@@ -66,6 +66,20 @@ const COMMANDS: HelpCommand[] = [
     examples: ['cnos init', 'cnos init --workspace api', 'cnos init --root ./apps/api --workspace api --json'],
   },
   {
+    id: 'onboard',
+    summary: 'Onboard an existing repo into CNOS and import root dotenv files.',
+    usage: 'cnos onboard [--workspace <id>] [--root <path>] [--move] [--json]',
+    description:
+      'Scaffolds the CNOS workspace tree and imports root-level .env, .env.<profile>, and .env.*.example files into cnos/workspaces/<workspace>/env.',
+    options: [
+      {
+        flag: '--move',
+        description: 'Move the root env files into CNOS instead of leaving the originals in place.',
+      },
+    ],
+    examples: ['cnos onboard', 'cnos onboard --workspace webapp', 'cnos onboard --root ../my-app --workspace app --move'],
+  },
+  {
     id: 'read',
     summary: 'Read any fully-qualified CNOS key.',
     usage: 'cnos read <key> [global-options]',

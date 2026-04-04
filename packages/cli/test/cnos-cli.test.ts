@@ -14,6 +14,7 @@ import { runHelp } from '../src/commands/help.js';
 import { runHelpAi } from '../src/commands/helpAi.js';
 import { runInit } from '../src/commands/init.js';
 import { runInspect } from '../src/commands/inspect.js';
+import { runOnboard } from '../src/commands/onboard.js';
 import { runRead } from '../src/commands/read.js';
 import { runCommand } from '../src/commands/run.js';
 import { runSecret } from '../src/commands/secret.js';
@@ -163,6 +164,9 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(root, '.gitignore'), 'utf8')).resolves.toContain(
       'cnos/workspaces/*/secrets/',
     );
+    await expect(readFile(path.join(root, '.gitignore'), 'utf8')).resolves.toContain(
+      '!cnos/workspaces/*/env/.env.*.example',
+    );
   });
 
   it('formats json output', () => {
@@ -186,6 +190,23 @@ describe('@kitsy/cnos-cli', () => {
     expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
       true,
     );
+  });
+
+  it('onboards root env files into the workspace env tree without deleting originals by default', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-onboard-'));
+    fixtureRoots.push(root);
+    await writeFile(path.join(root, '.env'), 'VITE_DEPLOY_ENV=local\n');
+    await writeFile(path.join(root, '.env.stage'), 'VITE_DEPLOY_ENV=stage\n');
+    await writeFile(path.join(root, '.env.stage.example'), 'VITE_DEPLOY_ENV=stage\n');
+
+    await expect(runOnboard({ root, workspace: 'webapp' })).resolves.toContain('imported 3 root env files');
+    await expect(readFile(path.join(root, 'cnos', 'workspaces', 'webapp', 'env', '.env'), 'utf8')).resolves.toContain(
+      'VITE_DEPLOY_ENV=local',
+    );
+    await expect(readFile(path.join(root, 'cnos', 'workspaces', 'webapp', 'env', '.env.stage'), 'utf8')).resolves.toContain(
+      'VITE_DEPLOY_ENV=stage',
+    );
+    await expect(readFile(path.join(root, '.env'), 'utf8')).resolves.toContain('VITE_DEPLOY_ENV=local');
   });
 
   it('reads value and secret aliases from the selected workspace', async () => {

@@ -10,6 +10,7 @@ import { runHelp } from './commands/help.js';
 import { runHelpAi } from './commands/helpAi.js';
 import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
+import { runOnboard } from './commands/onboard.js';
 import { runRead } from './commands/read.js';
 import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
@@ -79,6 +80,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'init':
       process.stdout.write(`${await runInit(runtimeOptions)}\n`);
+      return;
+    case 'onboard':
+      process.stdout.write(`${await runOnboard(runtimeOptions)}\n`);
       return;
     case 'read':
       process.stdout.write(`${await runRead(args[0] ?? 'value.app.name', runtimeOptions)}\n`);

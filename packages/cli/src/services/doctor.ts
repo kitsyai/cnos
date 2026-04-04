@@ -14,7 +14,13 @@ export interface DoctorCheck {
 
 async function checkGitignore(root: string): Promise<DoctorCheck> {
   const gitignorePath = path.join(root, '.gitignore');
-  const expected = ['cnos/workspaces/*/secrets/', 'cnos/workspaces/*/env/.env*'];
+  const expected = [
+    'cnos/workspaces/*/secrets/',
+    'cnos/workspaces/*/env/.env',
+    'cnos/workspaces/*/env/.env.*',
+    '!cnos/workspaces/*/env/.env.example',
+    '!cnos/workspaces/*/env/.env.*.example',
+  ];
 
   try {
     const content = await readFile(gitignorePath, 'utf8');
@@ -23,7 +29,10 @@ async function checkGitignore(root: string): Promise<DoctorCheck> {
     return {
       name: 'gitignore',
       ok: missing.length === 0,
-      details: missing.length === 0 ? 'workspace secrets and env files are ignored' : `missing: ${missing.join(', ')}`,
+      details:
+        missing.length === 0
+          ? 'workspace secrets and live env files are ignored while example env files stay trackable'
+          : `missing: ${missing.join(', ')}`,
     };
   } catch {
     return {

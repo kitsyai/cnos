@@ -68,6 +68,9 @@ importers:
       '@kitsy/cnos':
         specifier: workspace:*
         version: link:../cnos
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/cnos:
     dependencies:
