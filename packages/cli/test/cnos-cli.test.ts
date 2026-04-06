@@ -320,7 +320,25 @@ describe('@kitsy/cnos-cli', () => {
       }),
     ).resolves.toContain('value.app.name=cli-fixture');
     await expect(
+      runList(['values'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APP_NAME: 'from-process-env',
+        },
+      }),
+    ).resolves.toContain('value.app.name=cli-fixture');
+    await expect(
       runList(['value'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APP_NAME: 'from-process-env',
+        },
+      }),
+    ).resolves.not.toContain('from-process-env');
+    await expect(
+      runList(['values'], {
         root,
         workspace: 'api',
         processEnv: {

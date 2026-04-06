@@ -36,6 +36,8 @@ Recent DX behavior:
 
 Framework integrations currently ship as `@kitsy/cnos-vite` and `@kitsy/cnos-next`. Official built-ins remain available from `@kitsy/cnos/plugins/*`.
 
+For step-by-step setup flows, see [docs/cnos-how-to.md](/Users/pkvsi/Wks/kitsy/cnos/docs/cnos-how-to.md).
+
 ## Release flow
 
 Versioning and publishing are managed through Changesets.
