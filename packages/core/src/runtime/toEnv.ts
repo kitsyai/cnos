@@ -1,36 +1,6 @@
 import type { NormalizedManifest } from '../types/manifest.js';
 import type { ResolvedGraph, ToEnvOptions } from '../types/core.js';
-import { logicalKeyToEnvVar } from '../utils/envNaming.js';
-
-function fallbackLogicalKeyToEnvVar(key: string): string {
-  if (key.startsWith('value.')) {
-    return key
-      .slice('value.'.length)
-      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-      .replace(/[^A-Za-z0-9]+/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .toUpperCase();
-  }
-
-  if (key.startsWith('secret.')) {
-    const normalized = key
-      .slice('secret.'.length)
-      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-      .replace(/[^A-Za-z0-9]+/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .toUpperCase();
-    return `SECRET_${normalized}`;
-  }
-
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/[^A-Za-z0-9]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toUpperCase();
-}
+import { isSecretReference } from '../utils/secretStore.js';
 
 function normalizeEnvValue(value: unknown): string {
   if (value === undefined || value === null) {
@@ -55,21 +25,25 @@ export function toEnv(
 ): Record<string, string> {
   const includeSecrets = options.includeSecrets ?? true;
   const output: Record<string, string> = {};
-  const resolvedEntries = Array.from(graph.entries.values()).sort((left, right) =>
-    left.key.localeCompare(right.key),
+  const mappedEntries = Object.entries(manifest.envMapping.explicit).sort(([left], [right]) =>
+    left.localeCompare(right),
   );
 
-  for (const entry of resolvedEntries) {
-    if (entry.namespace === 'meta') {
+  for (const [envVar, logicalKey] of mappedEntries) {
+    const entry = graph.entries.get(logicalKey);
+
+    if (!entry) {
       continue;
     }
 
-    if (!includeSecrets && entry.namespace === 'secret') {
+    if (entry.namespace === 'secret' && !includeSecrets) {
       continue;
     }
 
-    const envVar =
-      logicalKeyToEnvVar(entry.key, manifest.envMapping) ?? fallbackLogicalKeyToEnvVar(entry.key);
+    if (isSecretReference(entry.value)) {
+      continue;
+    }
+
     output[envVar] = normalizeEnvValue(entry.value);
   }
 

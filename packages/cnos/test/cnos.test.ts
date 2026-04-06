@@ -115,8 +115,6 @@ describe('@kitsy/cnos', () => {
 
     expect(runtime.toEnv()).toEqual({
       API_URL: 'https://api.example.com',
-      APP_NAME: 'cnos',
-      SECRET_APP_TOKEN: 'secret-token',
     });
     expect(runtime.toPublicEnv({ framework: 'vite' })).toEqual({
       VITE_API_URL: 'https://api.example.com',
@@ -187,7 +185,9 @@ describe('@kitsy/cnos', () => {
         'envMapping:',
         '  convention: SCREAMING_SNAKE',
         '  explicit:',
+        '    SERVER_PORT: value.server.port',
         '    DATABASE_HOST: value.inventory.db.host',
+        '    SECRET_INVENTORY_DB_PASSWORD: secret.inventory.db.password',
         'resolution:',
         '  precedence:',
         '    - filesystem-values',

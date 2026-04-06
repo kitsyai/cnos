@@ -662,7 +662,13 @@ interface InspectResult {
 ## 16. Export / Projection / Dump
 
 ### 16.1 `toEnv()`
-Exports full resolved graph except `meta.*`.
+Exports explicit env mappings only.
+
+Rules:
+- source of truth is `envMapping.explicit`
+- unmapped `value.*` and `secret.*` keys stay private
+- `meta.*` is never exported
+- unresolved local secret refs are skipped
 
 ### 16.2 `toPublicEnv()`
 Exports promoted `value.*` keys only.

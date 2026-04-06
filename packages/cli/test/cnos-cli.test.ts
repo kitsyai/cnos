@@ -60,6 +60,7 @@ async function createRuntimeFixture(): Promise<string> {
       '  convention: SCREAMING_SNAKE',
       '  explicit:',
       '    API_URL: value.api.baseUrl',
+      '    SERVER_PORT: value.server.port',
       'public:',
       '  promote:',
       '    - value.api.baseUrl',
@@ -352,7 +353,7 @@ describe('@kitsy/cnos-cli', () => {
         workspace: 'api',
         processEnv: {},
       }),
-    ).resolves.toBe('API_URL=https://api.local');
+    ).resolves.toBe(['API_URL=https://api.local', 'SERVER_PORT=8080'].join('\n'));
     await expect(
       runValue(['delete', 'app.mode'], {
         root,
@@ -470,7 +471,8 @@ describe('@kitsy/cnos-cli', () => {
         processEnv: {},
       }),
     ).resolves.toMatchInlineSnapshot(`
-      "API_URL=https://api.local"
+      "API_URL=https://api.local
+      SERVER_PORT=8080"
     `);
     await expect(
       runExport('env', {

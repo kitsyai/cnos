@@ -106,7 +106,7 @@ describe('@kitsy/cnos-plugin-env-export', () => {
     expect(createPublicEnvExportPlugin().id).toBe('@kitsy/cnos/plugins/public-env-export');
   });
 
-  it('projects the resolved graph to env vars and skips meta keys', () => {
+  it('projects only explicit env mappings and skips meta keys', () => {
     const manifest = createManifest({
       envMapping: {
         convention: 'SCREAMING_SNAKE',
@@ -123,9 +123,7 @@ describe('@kitsy/cnos-plugin-env-export', () => {
     ]);
 
     expect(toEnv(graph, manifest)).toEqual({
-      APP_NAME: 'cnos',
       DATABASE_HOST: 'db.internal',
-      SECRET_APP_TOKEN: 'secret-token',
     });
   });
 
@@ -192,5 +190,28 @@ describe('@kitsy/cnos-plugin-env-export', () => {
         API_URL: 'https://api.example.com',
       },
     });
+  });
+
+  it('skips unresolved local secret refs from env export', () => {
+    const manifest = createManifest({
+      envMapping: {
+        explicit: {
+          APP_TOKEN: 'secret.app.token',
+        },
+      },
+    });
+    const graph = createGraph([
+      createEntry(
+        'secret.app.token',
+        {
+          provider: 'local',
+          vault: 'default',
+          ref: 'app.token',
+        },
+        'secret',
+      ),
+    ]);
+
+    expect(toEnv(graph, manifest)).toEqual({});
   });
 });

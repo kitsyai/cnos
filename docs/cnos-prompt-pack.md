@@ -141,7 +141,7 @@ Test:
 Build:
 1. profile chain expansion and cycle detection
 2. profile-aware resolver integrating workspace + profile
-3. `toEnv()`
+3. `toEnv()` using explicit env mappings only
 4. `toPublicEnv()`
 5. public promotion validation
 6. `toObject()`
