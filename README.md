@@ -27,6 +27,13 @@ The workspace uses pnpm workspaces, TypeScript, tsup, Vitest, ESLint, Prettier, 
 
 The current v1 CLI is workspace-aware and includes `init`, `onboard`, `use`, `profile`, `list`, `read`, `value`, `secret`, `inspect`, `define`, `validate`, `export env`, `dump`, `run`, `diff`, `doctor`, `help`, and `help-ai`.
 
+Recent DX behavior:
+- `cnos use show` reads the current repo-local CLI context and does not create `.cnos-workspace.yml` unless you persist values.
+- `cnos list value` and `cnos list secret` show stored CNOS config, not ambient shell env winners.
+- `cnos list env` shows only explicitly mapped env exports.
+- `cnos secret create vault <name>` creates a local encrypted secret vault under `~/.cnos/secrets`.
+- command failures are concise by default; pass `--verbose` for stack traces.
+
 Framework integrations currently ship as `@kitsy/cnos-vite` and `@kitsy/cnos-next`. Official built-ins remain available from `@kitsy/cnos/plugins/*`.
 
 ## Release flow
@@ -36,3 +43,5 @@ Versioning and publishing are managed through Changesets.
 1. Add a changeset with `pnpm changeset`.
 2. Prepare versions with `pnpm version-packages`.
 3. Publish from CI with the release workflow or locally with `pnpm release`.
+
+For manual `pnpm publish`, the public packages now rebuild on `prepack` so `dist/` cannot drift from `package.json` version bumps.

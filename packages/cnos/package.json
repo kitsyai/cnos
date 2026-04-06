@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Batteries-included CNOS runtime package wired with the official plugins.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -73,10 +73,11 @@
     "yaml": "^2.8.3"
   },
   "scripts": {
-    "build": "tsup --config tsup.config.ts",
+    "build": "rimraf dist && tsup --config tsup.config.ts",
     "clean": "rimraf dist",
     "dev": "tsup --config tsup.config.ts --watch",
     "lint": "eslint src test",
+    "prepack": "pnpm build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

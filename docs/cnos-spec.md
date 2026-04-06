@@ -544,6 +544,8 @@ This ensures:
 ### 12.2 `filesystem-secrets`
 - reads YAML from all effective workspace roots under `secrets/`
 - outputs `secret.*`
+- local secret material is stored outside the repo in encrypted vault storage
+- repo YAML stores only refs such as `provider`, `vault`, and logical `ref`
 
 ### 12.3 `dotenv`
 - reads env files from all effective workspace roots under `env/`
@@ -665,6 +667,11 @@ Exports full resolved graph except `meta.*`.
 ### 16.2 `toPublicEnv()`
 Exports promoted `value.*` keys only.
 
+CLI note:
+- `cnos export env` should emit only explicitly mapped env exports by default
+- public/browser env output comes from `public.promote` plus framework prefix rules
+- ambient process env is not a list/export surface unless explicitly requested by a future debug mode
+
 ### 16.3 `dump`
 Materializes snapshot config trees to disk.
 
@@ -752,6 +759,8 @@ Reads a resolved key for the selected workspace.
 ### 19.3 `cnos value <path>` / `cnos secret <path>`
 Convenience aliases.
 
+`cnos use show` reads the current repo-local CLI context without mutating `.cnos-workspace.yml`.
+
 ### 19.4 `cnos define <namespace> <path> <value>`
 Default writes to local selected workspace.
 
@@ -775,6 +784,11 @@ Runs schema, public safety, workspace graph, and write-policy checks.
 ### 19.7 `cnos export env`
 Env flattening only.
 
+Rules:
+- default output is explicit env exports only
+- public output requires `--public`
+- framework public output may apply `vite`, `next`, or other configured prefixes
+
 ### 19.8 `cnos dump`
 Filesystem materialization only.
 
@@ -793,6 +807,27 @@ Checks:
 - `.gitignore`
 - mapping collisions
 - global policy consistency
+
+### 19.12 `cnos list`
+Supports:
+- `cnos list value`
+- `cnos list secret`
+- `cnos list meta`
+- `cnos list env`
+- `cnos list public`
+
+Rules:
+- `list value` and `list secret` show stored CNOS config, not ambient process env winners
+- `list env` shows only explicit env exports
+- `list public` shows promoted public env output
+
+### 19.13 `cnos secret create vault <name>`
+Creates a local encrypted secret vault outside the repo.
+
+### 19.14 Error output
+CLI commands print concise error messages by default.
+
+Use `--verbose` to request stack traces and full diagnostics.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-cli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "CLI entry point and developer tooling for CNOS.",
   "type": "module",
   "main": "./dist/index.js",
@@ -43,6 +43,7 @@
     "clean": "rimraf dist",
     "dev": "tsup src/index.ts --watch --format esm --dts",
     "lint": "eslint src test",
+    "prepack": "pnpm build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

@@ -4,7 +4,7 @@ You are implementing CNOS from a fresh start. This is a new implementation with 
 
 ## Authority
 
-The canonical spec is `cnos-v1-canonical-spec-workspace-integrated.md`.
+The canonical spec is `docs/cnos-spec.md`.
 
 This prompt tells you what to build and in what order.  
 If this prompt and the spec conflict, the spec wins.
@@ -177,6 +177,11 @@ Build all commands with workspace support:
 10. `cnos run -- <command>`
 11. `cnos diff`
 12. `cnos doctor`
+13. `cnos use show`
+14. `cnos list env`
+15. `cnos list public`
+16. `cnos secret create vault <name> --passphrase <value>`
+17. concise error output by default, stack traces only with `--verbose`
 
 All relevant commands must accept:
 - `--workspace`
@@ -196,6 +201,9 @@ Test:
 - `dump` works in both modes
 - `run` injects resolved env
 - `doctor` reports workspace/global issues clearly
+- `list value` excludes ambient process env winners
+- `list env` shows only explicit env exports
+- vault-backed local secrets work end to end
 
 ### Phase 5 — Validation + Polish
 
@@ -272,6 +280,12 @@ Do not use a single `cnosRoot` assumption.
 - read `public.promote`
 - export only promoted `value.*`
 - reject `secret.*` promotion always
+
+### Secret vault behavior
+- local secret material lives outside the repo under `~/.cnos/secrets`
+- repo YAML stores only secret refs
+- local refs use `provider: local`, `vault`, and a simple logical `ref`
+- vault passphrases are vault-scoped and may come from env
 
 ### Global write behavior
 Only allow:
