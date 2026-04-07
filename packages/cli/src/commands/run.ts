@@ -1,11 +1,57 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
+import {
+  CNOS_GRAPH_ENV_VAR,
+  serializeRuntimeGraph,
+} from '@kitsy/cnos/internal';
+
+import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
 
 export interface RunCommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+function consumeOptions(args: string[], flag: string): string[] {
+  const values: string[] = [];
+
+  for (let index = 0; index < args.length; ) {
+    const token = args[index];
+
+    if (token === flag) {
+      const value = args[index + 1];
+
+      if (!value) {
+        throw new Error(`Missing value for ${flag}`);
+      }
+
+      values.push(value);
+      args.splice(index, 2);
+      continue;
+    }
+
+    if (token?.startsWith(`${flag}=`)) {
+      values.push(token.slice(flag.length + 1));
+      args.splice(index, 1);
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return values;
+}
+
+function normalizeSetOverrides(values: string[]): string[] {
+  return values.map((value) => {
+    if (!value.includes('=')) {
+      throw new Error('--set requires <logical-key>=<value>');
+    }
+
+    return value.startsWith('--') ? value : `--${value}`;
+  });
 }
 
 export async function runCommand(
@@ -16,10 +62,24 @@ export async function runCommand(
     throw new Error('run requires a command after --');
   }
 
-  const runtime = await createRuntimeService(options);
+  const cliArgs = [...(options.cliArgs ?? [])];
+  const isPublic = consumeFlag(cliArgs, '--public');
+  const framework = consumeOption(cliArgs, '--framework');
+  const prefix = consumeOption(cliArgs, '--prefix');
+  const setOverrides = normalizeSetOverrides(consumeOptions(cliArgs, '--set'));
+  const runtime = await createRuntimeService({
+    ...options,
+    cliArgs: [...cliArgs, ...setOverrides],
+  });
   const env = {
     ...process.env,
-    ...runtime.toEnv(),
+    ...(isPublic
+      ? runtime.toPublicEnv({
+          ...(framework ? { framework } : {}),
+          ...(prefix ? { prefix } : {}),
+        })
+      : runtime.toEnv()),
+    [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph),
   };
 
   return new Promise<RunCommandResult>((resolve, reject) => {

@@ -14,6 +14,7 @@ export default defineConfig({
   entry: [
     'src/index.ts',
     'src/internal.ts',
+    'src/runtime/index.ts',
     'src/plugin/basic-schema.ts',
     'src/plugin/cli-args.ts',
     'src/plugin/dotenv.ts',

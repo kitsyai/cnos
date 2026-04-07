@@ -4,6 +4,7 @@ Developer-friendly CNOS runtime assembly. It bundles the core engine plus the of
 
 Current runtime surface includes:
 - `createCnos()`
+- `@kitsy/cnos/runtime` singleton with `cnos(key)` and `ready()`
 - `read`, `require`, `readOr`
 - `value`, `secret`, `meta`
 - `inspect`

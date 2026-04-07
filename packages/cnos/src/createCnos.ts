@@ -6,11 +6,16 @@ import {
 import packageJson from '../package.json';
 
 import { defaultPlugins } from './defaultPlugins.js';
+import { setSingletonRuntime } from './runtime/state.js';
 
 export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosRuntime> {
-  return createCoreCnos({
+  const runtime = await createCoreCnos({
     ...options,
     cnosVersion: packageJson.version,
     plugins: [...defaultPlugins(), ...(options.plugins ?? [])],
   });
+
+  setSingletonRuntime(runtime);
+
+  return runtime;
 }

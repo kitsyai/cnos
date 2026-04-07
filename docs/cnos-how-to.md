@@ -63,6 +63,15 @@ const port = cnos.value('server.port');
 const dbPassword = cnos.secret('db.password');
 ```
 
+Or, when the process is started through `cnos run`, use the singleton:
+
+```ts
+import cnos from '@kitsy/cnos/runtime';
+
+const port = cnos('value.server.port');
+const dbPassword = cnos.secret('db.password');
+```
+
 ### Run the service with CNOS-injected env
 
 First map explicit env exports in `.cnos/cnos.yml`:
@@ -81,6 +90,7 @@ cnos export env
 cnos export env --to .env.local
 cnos export env --profile stage --to .env.stage
 cnos run -- node server.js
+cnos run --set value.server.port=9999 -- node server.js
 ```
 
 ### Recommended sanity checks

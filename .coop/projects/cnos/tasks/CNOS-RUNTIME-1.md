@@ -3,7 +3,7 @@ id: CNOS-RUNTIME-1
 short_id: b00ff7f66f2f
 title: Singleton runtime and enhanced cnos run
 type: feature
-status: todo
+status: done
 created: 2026-04-07
 updated: 2026-04-07
 aliases: []

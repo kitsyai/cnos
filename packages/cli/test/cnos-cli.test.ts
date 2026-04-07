@@ -167,6 +167,14 @@ describe('@kitsy/cnos-cli', () => {
       },
       passthrough: [],
     });
+    expect(parseArgs(['run', '--set', 'value.server.port=9999', '--', 'node', 'server.js'])).toEqual({
+      command: 'run',
+      args: [],
+      options: {
+        cliArgs: ['--set', 'value.server.port=9999'],
+      },
+      passthrough: ['node', 'server.js'],
+    });
   });
 
   it('parses help flags for root and command-level help', () => {
@@ -687,6 +695,41 @@ describe('@kitsy/cnos-cli', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('https://api.local|8080');
+    const overrideResult = await runCommand(
+      [
+        process.execPath,
+        '-e',
+        "process.stdout.write(`${process.env.API_URL}|${process.env.SERVER_PORT}|${process.env.__CNOS_GRAPH__ ? 'yes' : 'no'}`)",
+      ],
+      {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--set', 'value.server.port=9999'],
+        stdio: 'pipe',
+      },
+    );
+
+    expect(overrideResult.exitCode).toBe(0);
+    expect(overrideResult.stdout).toBe('https://api.local|9999|yes');
+    const publicResult = await runCommand(
+      [
+        process.execPath,
+        '-e',
+        "process.stdout.write(`${process.env.NEXT_PUBLIC_API_BASE_URL}|${String(process.env.SERVER_PORT)}|${process.env.__CNOS_GRAPH__ ? 'yes' : 'no'}`)",
+      ],
+      {
+        root,
+        workspace: 'api',
+        profile: 'stage',
+        processEnv: {},
+        cliArgs: ['--public', '--framework', 'next'],
+        stdio: 'pipe',
+      },
+    );
+
+    expect(publicResult.exitCode).toBe(0);
+    expect(publicResult.stdout).toBe('https://api.stage|undefined|yes');
     await expect(runDiff('base', 'stage', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
       'value.server.port: 8080 -> 9090',
     );

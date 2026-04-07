@@ -512,10 +512,33 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'run',
     summary: 'Run a child process with CNOS env injected.',
-    usage: 'cnos run [global-options] -- <command...>',
+    usage: 'cnos run [--public] [--framework <name>] [--set <logical-key=value>] [global-options] -- <command...>',
     description:
-      'Resolves the active workspace and profile, injects runtime env variables, and executes the command after --.',
-    examples: ['cnos run -- node server.js', 'cnos run --workspace api -- pnpm dev'],
+      'Resolves the active workspace and profile, injects runtime env variables, bootstraps __CNOS_GRAPH__ for singleton runtime reads, and executes the command after --.',
+    options: [
+      {
+        flag: '--set <logical-key=value>',
+        description: 'Apply inline logical-key overrides for this run without touching repo config files.',
+      },
+      {
+        flag: '--public',
+        description: 'Inject only promoted public env variables into the child process.',
+      },
+      {
+        flag: '--framework <name>',
+        description: 'When used with --public, apply framework-specific prefixes such as vite or next.',
+      },
+      {
+        flag: '--prefix <prefix>',
+        description: 'Override the generated public env prefix for --public runs.',
+      },
+    ],
+    examples: [
+      'cnos run -- node server.js',
+      'cnos run --profile stage -- node server.js',
+      'cnos run --set value.server.port=9999 -- node server.js',
+      'cnos run --public --framework vite -- pnpm build',
+    ],
   },
   {
     id: 'diff',

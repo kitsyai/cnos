@@ -17,6 +17,11 @@
       "import": "./dist/internal.js",
       "require": "./dist/internal.cjs"
     },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js",
+      "require": "./dist/runtime/index.cjs"
+    },
     "./plugins/filesystem": {
       "types": "./dist/plugin/filesystem.d.ts",
       "import": "./dist/plugin/filesystem.js",
