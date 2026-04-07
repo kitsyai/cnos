@@ -115,4 +115,27 @@ describe('@kitsy/cnos-plugin-filesystem', () => {
     expect(runtime.inspect('value.server.port').winner.workspaceId).toBe('default');
     expect(runtime.inspect('value.server.port').winner.origin?.file).toBe('cnos/values/local/app.yml');
   });
+
+  it('resolves github-secrets refs from process env during secret loading', async () => {
+    const root = await createFixtureRoot();
+    await mkdir(path.join(root, 'cnos', 'secrets', 'base'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      ['version: 1', 'project:', '  name: filesystem-fixture', 'vaults:', '  github-ci:', '    provider: github-secrets'].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'secrets', 'base', 'app.yml'),
+      ['db:', '  password:', '    provider: github-secrets', '    vault: github-ci', '    ref: DB_PASSWORD'].join('\n'),
+    );
+
+    const runtime = await createCnos({
+      root,
+      plugins: [createFilesystemSecretsPlugin()],
+      processEnv: {
+        DB_PASSWORD: 'ci-secret',
+      },
+    });
+
+    expect(runtime.require('secret.db.password')).toBe('ci-secret');
+  });
 });

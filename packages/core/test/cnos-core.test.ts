@@ -66,12 +66,38 @@ describe('@kitsy/cnos-core', () => {
       source: 'envMapping',
       shareable: true,
     });
+    expect(loadedManifest.manifest.vaults).toEqual({});
   });
 
   it('rejects invalid manifests with a clear error', async () => {
     const root = await createFixtureRoot('version: 1\nproject: {}\n');
 
     await expect(loadManifest({ root })).rejects.toThrow('project.name');
+  });
+
+  it('normalizes manifest-defined vaults', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'vaults:',
+        '  local-dev:',
+        '    provider: local',
+        '    passphrase: env:CNOS_SECRET_PASSPHRASE',
+        '  github-ci:',
+        '    provider: github-secrets',
+      ].join('\n'),
+    );
+    const loadedManifest = await loadManifest({ root });
+
+    expect(loadedManifest.manifest.vaults['local-dev']).toEqual({
+      provider: 'local',
+      passphrase: 'env:CNOS_SECRET_PASSPHRASE',
+    });
+    expect(loadedManifest.manifest.vaults['github-ci']).toEqual({
+      provider: 'github-secrets',
+    });
   });
 
   it('creates a runtime with flat precedence, read helpers, and meta keys', async () => {

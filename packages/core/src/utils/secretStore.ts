@@ -3,12 +3,18 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { CnosManifestError } from '../errors.js';
+import type { VaultDefinition } from '../types/manifest.js';
 import { expandHomePath } from './path.js';
 
 export interface SecretReference {
   provider: string;
   ref: string;
   vault?: string;
+}
+
+export interface ResolvedVaultDefinition extends VaultDefinition {
+  name: string;
+  requiresPassphrase: boolean;
 }
 
 interface EncryptedSecretDocument {
@@ -69,6 +75,62 @@ export function resolveSecretPassphrase(
     .toUpperCase();
 
   return processEnv[`CNOS_SECRET_PASSPHRASE_${vaultToken}`] ?? processEnv.CNOS_SECRET_PASSPHRASE;
+}
+
+export function getVaultPassphraseEnvVar(vault = 'default'): string {
+  const vaultToken = vault
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+
+  return vaultToken && vaultToken !== 'DEFAULT'
+    ? `CNOS_SECRET_PASSPHRASE_${vaultToken}`
+    : 'CNOS_SECRET_PASSPHRASE';
+}
+
+export function isPassphraseEnvRef(value: string | undefined): boolean {
+  return typeof value === 'string' && value.startsWith('env:') && value.length > 4;
+}
+
+export function resolveConfiguredVaultPassphrase(
+  definition: VaultDefinition | undefined,
+  vault = 'default',
+  processEnv: Record<string, string | undefined> = process.env,
+): string | undefined {
+  if (definition?.provider !== 'local') {
+    return undefined;
+  }
+
+  const passphraseRef = definition.passphrase;
+
+  if (typeof passphraseRef === 'string' && passphraseRef.startsWith('env:') && passphraseRef.length > 4) {
+    return processEnv[passphraseRef.slice(4)];
+  }
+
+  if (passphraseRef) {
+    return passphraseRef;
+  }
+
+  return resolveSecretPassphrase(vault, processEnv);
+}
+
+export function resolveVaultDefinition(
+  vaults: Record<string, VaultDefinition> | undefined,
+  vault = 'default',
+): ResolvedVaultDefinition {
+  const definition = vaults?.[vault];
+  const provider = definition?.provider ?? 'local';
+
+  return {
+    name: vault,
+    provider,
+    ...(definition?.passphrase
+      ? {
+          passphrase: definition.passphrase,
+        }
+      : {}),
+    requiresPassphrase: provider === 'local',
+  };
 }
 
 function encryptDocument(value: string, passphrase: string): EncryptedSecretDocument {

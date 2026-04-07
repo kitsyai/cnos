@@ -180,7 +180,8 @@ Build all commands with workspace support:
 13. `cnos use show`
 14. `cnos list env`
 15. `cnos list public`
-16. `cnos secret create vault <name> --passphrase <value>`
+16. `cnos vault create <name> --passphrase <value>`
+17. `cnos vault create github-ci --provider github-secrets --no-passphrase`
 17. concise error output by default, stack traces only with `--verbose`
 
 All relevant commands must accept:
@@ -286,6 +287,7 @@ Do not use a single `cnosRoot` assumption.
 - repo YAML stores only secret refs
 - local refs use `provider: local`, `vault`, and a simple logical `ref`
 - vault passphrases are vault-scoped and may come from env
+- manifest-defined providers may change resolution behavior; `github-secrets` resolves refs from `process.env`
 
 ### Global write behavior
 Only allow:

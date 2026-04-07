@@ -2,17 +2,18 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  createSecretVault,
+  getVaultPassphraseEnvVar,
   parseYaml,
   resolveConfigDocumentPath,
-  resolveSecretPassphrase,
-  resolveSecretStoreRoot,
   stringifyYaml,
   writeLocalSecret,
+  resolveConfiguredVaultPassphrase,
+  resolveSecretStoreRoot,
   type SecretReference,
 } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
+import { createVaultDefinition } from './vaults.js';
 
 function setNestedValue(target: Record<string, unknown>, pathSegments: string[], value: unknown): void {
   const [head, ...tail] = pathSegments;
@@ -161,25 +162,13 @@ export interface SecretWriteResult {
 
 export async function createVault(
   vault: string,
-  options: RuntimeServiceOptions & { passphrase?: string } = {},
+  options: RuntimeServiceOptions & { passphrase?: string; provider?: string; noPassphrase?: boolean } = {},
 ): Promise<{ vault: string; filePath: string }> {
-  const passphrase =
-    options.passphrase ?? resolveSecretPassphrase(vault, options.processEnv ?? process.env);
-
-  if (!passphrase) {
-    throw new Error('Vault creation requires --passphrase or CNOS_SECRET_PASSPHRASE');
-  }
-
-  const normalizedVault = vault.trim() || 'default';
-  const filePath = await createSecretVault(
-    resolveSecretStoreRoot(options.processEnv),
-    normalizedVault,
-    passphrase,
-  );
+  const result = await createVaultDefinition(vault, options);
 
   return {
-    vault: normalizedVault,
-    filePath,
+    vault: result.name,
+    filePath: result.manifestPath,
   };
 }
 
@@ -199,17 +188,41 @@ export async function setSecret(
   const profile = options.profile ?? runtime.graph.profile;
   const filePath = resolveConfigDocumentPath(workspaceRoot, 'secret', configPath, profile);
   const document = await readYamlDocument(filePath);
-  const mode = options.mode ?? 'local';
   const vault = options.vault?.trim() || 'default';
+  const vaultDefinition = runtime.manifest.vaults[vault];
+  const inferredProvider = vaultDefinition?.provider ?? options.provider;
+  const mode =
+    options.mode ??
+    (inferredProvider === 'local'
+      ? 'local'
+      : inferredProvider === 'github-secrets'
+        ? 'ref'
+        : 'local');
   let reference: SecretReference;
   let storePath: string | undefined;
 
   if (mode === 'local') {
-    const passphrase =
-      options.passphrase ?? resolveSecretPassphrase(vault, options.processEnv ?? process.env);
+    const provider = inferredProvider ?? 'local';
+
+    if (provider !== 'local') {
+      throw new Error(`Vault "${vault}" uses provider "${provider}" and cannot store local secret material`);
+    }
+
+    const passphrase = resolveConfiguredVaultPassphrase(
+      vaultDefinition ? { provider: 'local', ...(vaultDefinition.passphrase ? { passphrase: vaultDefinition.passphrase } : {}) } : { provider: 'local' },
+      vault,
+      {
+        ...(options.processEnv ?? process.env),
+        ...(options.passphrase
+          ? {
+              [getVaultPassphraseEnvVar(vault)]: options.passphrase,
+            }
+          : {}),
+      },
+    ) ?? options.passphrase;
 
     if (!passphrase) {
-      throw new Error(`Vault "${vault}" requires --passphrase or CNOS_SECRET_PASSPHRASE`);
+      throw new Error(`Vault "${vault}" requires --passphrase or its configured passphrase env var`);
     }
 
     const ref = configPath;
@@ -221,8 +234,13 @@ export async function setSecret(
     };
   } else {
     reference = {
-      provider: options.provider ?? (mode === 'ref' ? 'ref' : 'remote'),
-      ref: rawValue,
+      provider: inferredProvider ?? (mode === 'ref' ? 'ref' : 'remote'),
+      ref: rawValue || configPath.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase(),
+      ...(vaultDefinition || vault !== 'default'
+        ? {
+            vault,
+          }
+        : {}),
     };
   }
 

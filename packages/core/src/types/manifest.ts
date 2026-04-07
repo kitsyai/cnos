@@ -6,6 +6,7 @@ import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from './workspace.j
 export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
 export type NamespaceKind = 'data' | 'projection' | 'system';
 export type NamespaceProjectionSource = 'promote' | 'envMapping';
+export type VaultProviderName = 'local' | 'github-secrets' | (string & {});
 
 export interface NamespaceDefinition {
   kind: NamespaceKind;
@@ -13,6 +14,11 @@ export interface NamespaceDefinition {
   sensitive?: boolean;
   readonly?: boolean;
   source?: NamespaceProjectionSource;
+}
+
+export interface VaultDefinition {
+  provider: VaultProviderName;
+  passphrase?: string;
 }
 
 export interface ManifestFile {
@@ -54,6 +60,7 @@ export interface ManifestFile {
     frameworks?: Record<string, string>;
   };
   namespaces?: Record<string, Partial<NamespaceDefinition>>;
+  vaults?: Record<string, Partial<VaultDefinition>>;
   writePolicy?: {
     define?: {
       defaultProfile?: string;
@@ -102,6 +109,7 @@ export interface NormalizedManifest {
     frameworks: Record<string, string>;
   };
   namespaces: Record<string, NamespaceDefinition>;
+  vaults: Record<string, VaultDefinition>;
   writePolicy: {
     define: {
       defaultProfile: string;

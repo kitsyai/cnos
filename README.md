@@ -31,7 +31,7 @@ Recent DX behavior:
 - `cnos use show` reads the current repo-local CLI context and does not create `.cnos-workspace.yml` unless you persist values.
 - `cnos list value` and `cnos list secret` show stored CNOS config, not ambient shell env winners.
 - `cnos list env` shows only explicitly mapped env exports.
-- `cnos secret create vault <name>` creates a local encrypted secret vault under `~/.cnos/secrets`.
+- `cnos vault create <name>` creates a manifest-defined vault and, for local vaults, initializes encrypted secret storage under `~/.cnos/secrets`.
 - command failures are concise by default; pass `--verbose` for stack traces.
 
 Framework integrations currently ship as `@kitsy/cnos-vite` and `@kitsy/cnos-next`. Official built-ins remain available from `@kitsy/cnos/plugins/*`.

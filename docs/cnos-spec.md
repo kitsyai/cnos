@@ -546,6 +546,7 @@ This ensures:
 - outputs `secret.*`
 - local secret material is stored outside the repo in encrypted vault storage
 - repo YAML stores only refs such as `provider`, `vault`, and logical `ref`
+- manifest-defined vault providers may resolve refs differently; `github-secrets` resolves from `process.env` without local encryption
 
 ### 12.3 `dotenv`
 - reads env files from all effective workspace roots under `env/`
@@ -828,9 +829,25 @@ Rules:
 - `list public` shows promoted public env output
 
 ### 19.13 `cnos secret create vault <name>`
-Creates a local encrypted secret vault outside the repo.
+Alias for `cnos vault create <name>`.
 
-### 19.14 Error output
+### 19.14 `cnos vault create|list|remove`
+Manages manifest-defined vaults.
+
+Examples:
+```bash
+cnos vault create local-dev --passphrase dev-pass
+cnos vault create github-ci --provider github-secrets --no-passphrase
+cnos vault list
+cnos vault remove local-dev
+```
+
+Rules:
+- local vaults require a passphrase policy and store encrypted material outside the repo
+- `github-secrets` vaults are passwordless and resolve refs from `process.env`
+- secret flows may use `--vault <name>` to infer provider behavior
+
+### 19.15 Error output
 CLI commands print concise error messages by default.
 
 Use `--verbose` to request stack traces and full diagnostics.

@@ -9,16 +9,41 @@ export interface ListEntry {
   value: unknown;
 }
 
+interface StoredCandidate {
+  sourceId: string;
+  value: unknown;
+  metadata?: Record<string, unknown>;
+}
+
 interface StoredResolvedEntry {
   key: string;
-  winner: {
-    sourceId: string;
-    value: unknown;
-  };
-  overridden: Array<{
-    sourceId: string;
-    value: unknown;
-  }>;
+  winner: StoredCandidate;
+  overridden: StoredCandidate[];
+}
+
+interface SecretListFilter {
+  prefix?: string;
+  vault?: string;
+  provider?: string;
+}
+
+function matchesSecretFilter(candidate: StoredCandidate, filter: SecretListFilter): boolean {
+  const secretRef = candidate.metadata?.secretRef as
+    | {
+        provider?: unknown;
+        vault?: unknown;
+      }
+    | undefined;
+
+  if (filter.vault && secretRef?.vault !== filter.vault) {
+    return false;
+  }
+
+  if (filter.provider && secretRef?.provider !== filter.provider) {
+    return false;
+  }
+
+  return true;
 }
 
 function matchesPrefix(key: string, prefix?: string): boolean {
@@ -29,7 +54,11 @@ function matchesPrefix(key: string, prefix?: string): boolean {
   return key.startsWith(prefix) || key.split('.').slice(1).join('.').startsWith(prefix);
 }
 
-function toStoredEntry(namespace: 'value' | 'secret', entry: StoredResolvedEntry): ListEntry | undefined {
+function toStoredEntry(
+  namespace: 'value' | 'secret',
+  entry: StoredResolvedEntry,
+  filter: SecretListFilter = {},
+): ListEntry | undefined {
   const sourceId = namespace === 'value' ? 'filesystem-values' : 'filesystem-secrets';
   const candidates = [entry.winner, ...entry.overridden].filter((candidate) => candidate.sourceId === sourceId);
 
@@ -37,20 +66,27 @@ function toStoredEntry(namespace: 'value' | 'secret', entry: StoredResolvedEntry
     return undefined;
   }
 
+  const selectedCandidate =
+    namespace === 'secret' ? candidates.find((candidate) => matchesSecretFilter(candidate, filter)) : candidates[0];
+
+  if (!selectedCandidate) {
+    return undefined;
+  }
+
   return {
     key: entry.key,
-    value: candidates[0]?.value,
+    value: selectedCandidate.value,
   };
 }
 
 function listStoredNamespace(
   namespace: 'value' | 'secret',
-  options: RuntimeServiceOptions & { prefix?: string },
+  options: RuntimeServiceOptions & SecretListFilter,
 ): Promise<ListEntry[]> {
   return createRuntimeService(options).then((runtime) =>
     Array.from(runtime.graph.entries.values())
       .filter((entry) => entry.namespace === namespace)
-      .map((entry) => toStoredEntry(namespace, entry))
+      .map((entry) => toStoredEntry(namespace, entry, options))
       .filter((entry): entry is ListEntry => Boolean(entry))
       .filter((entry) => matchesPrefix(entry.key, options.prefix))
       .sort((left, right) => left.key.localeCompare(right.key)),

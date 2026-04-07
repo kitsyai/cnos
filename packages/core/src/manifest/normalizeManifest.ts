@@ -1,5 +1,5 @@
 import { CnosManifestError } from '../errors.js';
-import type { ManifestFile, NamespaceDefinition, NormalizedManifest } from '../types/manifest.js';
+import type { ManifestFile, NamespaceDefinition, NormalizedManifest, VaultDefinition } from '../types/manifest.js';
 import type { ProfileResolveFrom } from '../types/profile.js';
 import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from '../types/workspace.js';
 
@@ -100,6 +100,32 @@ function normalizeNamespaces(
   };
 }
 
+function normalizeVaults(
+  vaults?: Record<string, Partial<VaultDefinition>>,
+): Record<string, VaultDefinition> {
+  return Object.fromEntries(
+    Object.entries(vaults ?? {}).map(([name, definition]) => {
+      const provider = definition.provider?.trim();
+
+      if (!provider) {
+        throw new CnosManifestError(`Vault "${name}" requires a provider`);
+      }
+
+      return [
+        name,
+        {
+          provider,
+          ...(definition.passphrase?.trim()
+            ? {
+                passphrase: definition.passphrase.trim(),
+              }
+            : {}),
+        } satisfies VaultDefinition,
+      ];
+    }),
+  );
+}
+
 export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
   const version = manifest.version ?? 1;
 
@@ -196,6 +222,7 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
       },
     },
     namespaces: normalizeNamespaces(manifest.namespaces),
+    vaults: normalizeVaults(manifest.vaults),
     writePolicy: {
       define: {
         defaultProfile: manifest.writePolicy?.define?.defaultProfile ?? defaultProfile,

@@ -22,6 +22,7 @@ import { runCommand } from '../src/commands/run.js';
 import { runSecret } from '../src/commands/secret.js';
 import { runUse } from '../src/commands/use.js';
 import { runValidate } from '../src/commands/validate.js';
+import { runVault } from '../src/commands/vault.js';
 import { runVersion } from '../src/commands/version.js';
 import { runValue } from '../src/commands/value.js';
 import { printJson } from '../src/format/printJson.js';
@@ -158,6 +159,14 @@ describe('@kitsy/cnos-cli', () => {
       },
       passthrough: [],
     });
+    expect(parseArgs(['create', 'vault', 'github-ci', '--provider', 'github-secrets', '--no-passphrase'])).toEqual({
+      command: 'vault',
+      args: ['create', 'github-ci'],
+      options: {
+        cliArgs: ['--provider', 'github-secrets', '--no-passphrase'],
+      },
+      passthrough: [],
+    });
   });
 
   it('parses help flags for root and command-level help', () => {
@@ -243,8 +252,10 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('Framework integrations');
     expect(runHelp()).toContain('@kitsy/cnos-next');
     expect(runHelp()).toContain('promote');
+    expect(runHelp()).toContain('vault');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
     expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
+    expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('list')).toContain('--namespace <value|secret|meta|env|public|all>');
     expect(runHelp('export env')).toContain('--framework <name>');
@@ -459,14 +470,14 @@ describe('@kitsy/cnos-cli', () => {
     fixtureRoots.push(secretHome);
 
     await expect(
-      runSecret(['create', 'vault', 'db'], {
+      runVault(['create', 'db'], {
         root,
         processEnv: {
           CNOS_SECRET_HOME: secretHome,
         },
         cliArgs: ['--passphrase', 'dev-pass'],
       }),
-    ).resolves.toContain('created secret vault "db"');
+    ).resolves.toContain('created vault "db"');
 
     await expect(
       runSecret(['set', 'app.token', 'super-secret'], {
@@ -486,6 +497,76 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'), 'utf8')).resolves.toContain(
       'vault: db',
     );
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+      'vaults:',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+      'provider: local',
+    );
+  });
+
+  it('manages manifest-defined vaults and github-secrets secret flows', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runVault(['create', 'github-ci'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--provider', 'github-secrets', '--no-passphrase'],
+      }),
+    ).resolves.toContain('created vault "github-ci"');
+
+    await expect(
+      runVault(['list'], {
+        root,
+        processEnv: {},
+      }),
+    ).resolves.toContain('github-ci provider=github-secrets passphrase=none');
+
+    await expect(
+      runSecret(['set', 'db.password', 'DB_PASSWORD'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--vault', 'github-ci'],
+      }),
+    ).resolves.toContain('via github-secrets');
+
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'db.yml'), 'utf8')).resolves.toContain(
+      'provider: github-secrets',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'db.yml'), 'utf8')).resolves.toContain(
+      'vault: github-ci',
+    );
+
+    await expect(
+      runSecret(['get', 'db.password'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          DB_PASSWORD: 'ci-secret',
+        },
+        cliArgs: ['--vault', 'github-ci'],
+      }),
+    ).resolves.toBe('ci-secret');
+
+    await expect(
+      runSecret(['list'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          DB_PASSWORD: 'ci-secret',
+        },
+        cliArgs: ['--vault', 'github-ci'],
+      }),
+    ).resolves.toContain('secret.db.password=ci-secret');
+
+    await expect(
+      runVault(['remove', 'github-ci'], {
+        root,
+        processEnv: {},
+      }),
+    ).resolves.toContain('removed vault "github-ci"');
   });
 
   it('exports env projections and dumps snapshot files', async () => {

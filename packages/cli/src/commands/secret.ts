@@ -2,8 +2,9 @@ import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
-import { createVault, deleteSecret, setSecret } from '../services/writes.js';
+import { deleteSecret, setSecret } from '../services/writes.js';
 import { listConfigEntries } from '../services/listing.js';
+import { runVault } from './vault.js';
 
 function isSecretRef(value: unknown): value is { provider: string; ref: string; vault?: string } {
   return Boolean(
@@ -53,27 +54,19 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   const cliArgs = [...(options.cliArgs ?? [])];
 
   if (action === 'create-vault') {
-    const vault = tail[0] ?? 'default';
-    const passphrase = consumeOption(cliArgs, '--passphrase');
-    const result = await createVault(vault, {
-      ...options,
-      cliArgs,
-      ...(passphrase ? { passphrase } : {}),
-    });
-
-    if (options.json) {
-      return printJson(result);
-    }
-
-    return `created secret vault "${result.vault}" in ${result.filePath}`;
+    return runVault(['create', tail[0] ?? 'default'], options);
   }
 
   if (action === 'list') {
     const prefix = consumeOption(cliArgs, '--prefix');
+    const vault = consumeOption(cliArgs, '--vault');
+    const provider = consumeOption(cliArgs, '--provider');
     const entries = await listConfigEntries('secret', {
       ...options,
       cliArgs,
       ...(prefix ? { prefix } : {}),
+      ...(vault ? { vault } : {}),
+      ...(provider ? { provider } : {}),
     });
 
     if (options.json) {
@@ -93,13 +86,13 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const provider = consumeOption(cliArgs, '--provider');
     const passphrase = consumeOption(cliArgs, '--passphrase');
     const vault = consumeOption(cliArgs, '--vault') ?? 'default';
-    const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : 'local';
+    const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : undefined;
     const result = await setSecret(secretPath ?? 'app.token', rawValue, {
       ...options,
       cliArgs,
       target,
-      mode,
       vault,
+      ...(mode ? { mode } : {}),
       ...(provider ? { provider } : {}),
       ...(passphrase ? { passphrase } : {}),
     });
@@ -132,22 +125,40 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   }
 
   const runtime = await createRuntimeService(options);
-  const value = runtime.secret(tail[0] ?? 'app.token');
+  const secretPath = tail[0] ?? 'app.token';
+  const expectedVault = consumeOption(cliArgs, '--vault');
+  const entry = runtime.graph.entries.get(`secret.${secretPath}`);
+  const secretRef = entry?.winner.metadata?.secretRef as { provider?: string; ref?: string; vault?: string } | undefined;
+  const value = runtime.secret(secretPath);
 
   if (value === undefined) {
-    throw new Error(`Missing CNOS secret path: ${tail[0] ?? 'app.token'}`);
+    throw new Error(`Missing CNOS secret path: ${secretPath}`);
+  }
+
+  if (expectedVault && secretRef?.vault && secretRef.vault !== expectedVault) {
+    throw new Error(`Secret ${secretPath} belongs to vault "${secretRef.vault}", not "${expectedVault}"`);
   }
 
   if (isSecretRef(value)) {
-    const vault = value.vault ?? 'default';
-    throw new Error(
-      `Secret ${tail[0] ?? 'app.token'} is stored in vault "${vault}" as ref "${value.ref}". Provide the correct vault passphrase to resolve it.`,
-    );
+    if (value.provider === 'local') {
+      const vault = value.vault ?? 'default';
+      throw new Error(
+        `Secret ${secretPath} is stored in vault "${vault}" as ref "${value.ref}". Provide the correct vault passphrase to resolve it.`,
+      );
+    }
+
+    if (value.provider === 'github-secrets') {
+      throw new Error(
+        `Secret ${secretPath} is backed by GitHub secrets via ref "${value.ref}". Set that env var in the current process or CI job to resolve it.`,
+      );
+    }
+
+    throw new Error(`Secret ${secretPath} is stored as a ${value.provider} reference "${value.ref}" and is not resolved.`);
   }
 
   if (options.json) {
     return printJson({
-      key: `secret.${tail[0] ?? 'app.token'}`,
+      key: `secret.${secretPath}`,
       value,
     });
   }

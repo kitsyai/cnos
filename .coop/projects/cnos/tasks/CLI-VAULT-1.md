@@ -3,7 +3,7 @@ id: CLI-VAULT-1
 short_id: 0ae16d87bd41
 title: Vault CLI refinement and provider model
 type: feature
-status: todo
+status: done
 created: 2026-04-07
 updated: 2026-04-07
 aliases: []

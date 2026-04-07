@@ -47,8 +47,8 @@ cnos value set app.name my-service
 ### Define a local secret
 
 ```powershell
-cnos secret create vault db --passphrase dev-pass
-cnos secret set db.password super-secret --local --vault db --passphrase dev-pass
+cnos vault create db --passphrase dev-pass
+cnos secret set db.password super-secret --vault db
 ```
 
 ### Read config in code
@@ -275,8 +275,8 @@ cnos list values --workspace webapp
 Recommended local secret flow:
 
 ```powershell
-cnos secret create vault default --passphrase dev-pass
-cnos secret set app.token super-secret --local --vault default --passphrase dev-pass
+cnos vault create default --passphrase dev-pass
+cnos secret set app.token super-secret --vault default
 ```
 
 Repo YAML stores only refs, for example:
@@ -297,10 +297,18 @@ You can avoid passing the passphrase every time by setting:
 $env:CNOS_SECRET_PASSPHRASE='dev-pass'
 ```
 
-Or vault-specific:
+For CI-style passwordless refs, create a GitHub-backed vault:
 
 ```powershell
-$env:CNOS_SECRET_PASSPHRASE_DB='dev-pass'
+cnos vault create github-ci --provider github-secrets --no-passphrase
+cnos secret set app.token APP_TOKEN --vault github-ci
+```
+
+At runtime, CNOS resolves that ref from the current process environment:
+
+```powershell
+$env:APP_TOKEN='ci-secret'
+cnos secret get app.token --vault github-ci
 ```
 
 ## Smoke Test Checklist
@@ -320,8 +328,11 @@ cnos inspect value.app.id
 cnos list values
 cnos list env
 cnos profile create stage --inherit base
-cnos secret create vault default --passphrase dev-pass
-cnos secret set app.token super-secret --local --vault default --passphrase dev-pass
+cnos vault create default --passphrase dev-pass
+cnos secret set app.token super-secret --vault default
+cnos vault create github-ci --provider github-secrets --no-passphrase
+cnos secret set ci.token APP_TOKEN --vault github-ci
+cnos secret list --vault github-ci
 cnos validate
 cnos export env
 ```

@@ -19,6 +19,7 @@ import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
 import { runUse } from './commands/use.js';
 import { runValidate } from './commands/validate.js';
+import { runVault } from './commands/vault.js';
 import { runVersion } from './commands/version.js';
 import { runValue } from './commands/value.js';
 import { normalizeHelpTopic } from './cli/helpRegistry.js';
@@ -30,6 +31,14 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
 
   if (command === 'export' && args[0] === 'env') {
     return normalizeHelpTopic([command, args[0]]);
+  }
+
+  if (
+    command === 'vault' &&
+    args[0] &&
+    ['create', 'add', 'list', 'delete', 'remove'].includes(args[0])
+  ) {
+    return normalizeHelpTopic([command, args[0] === 'delete' ? 'remove' : args[0] === 'add' ? 'create' : args[0]]);
   }
 
   if (
@@ -135,6 +144,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'secret':
       process.stdout.write(`${await runSecret(args.length > 0 ? args : ['app.token'], runtimeOptions)}\n`);
+      return;
+    case 'vault':
+      process.stdout.write(`${await runVault(args, runtimeOptions)}\n`);
       return;
     case 'use':
       process.stdout.write(`${await runUse(args, runtimeOptions)}\n`);
