@@ -25,6 +25,7 @@ id:
       default: CNOS
     feat:
       values:
+        - BROWSER
         - EXPORT
         - LOAD
         - ORCH

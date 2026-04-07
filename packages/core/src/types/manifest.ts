@@ -4,6 +4,16 @@ import type { SchemaRule } from './schema.js';
 import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from './workspace.js';
 
 export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
+export type NamespaceKind = 'data' | 'projection' | 'system';
+export type NamespaceProjectionSource = 'promote' | 'envMapping';
+
+export interface NamespaceDefinition {
+  kind: NamespaceKind;
+  shareable: boolean;
+  sensitive?: boolean;
+  readonly?: boolean;
+  source?: NamespaceProjectionSource;
+}
 
 export interface ManifestFile {
   version?: number;
@@ -43,6 +53,7 @@ export interface ManifestFile {
     promote?: LogicalKey[];
     frameworks?: Record<string, string>;
   };
+  namespaces?: Record<string, Partial<NamespaceDefinition>>;
   writePolicy?: {
     define?: {
       defaultProfile?: string;
@@ -90,6 +101,7 @@ export interface NormalizedManifest {
     promote: LogicalKey[];
     frameworks: Record<string, string>;
   };
+  namespaces: Record<string, NamespaceDefinition>;
   writePolicy: {
     define: {
       defaultProfile: string;

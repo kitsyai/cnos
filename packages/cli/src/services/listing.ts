@@ -66,15 +66,14 @@ function listProjectedNamespace(
       namespace === 'meta'
         ? flattenObject(runtime.toNamespace('meta'))
         : namespace === 'env'
-          ? runtime
-              .manifest.envMapping.explicit
+          ? runtime.toEnv()
           : runtime.toPublicEnv();
 
     const entries =
       namespace === 'env'
-        ? Object.entries(projected).map(([envVar, logicalKey]) => ({
+        ? Object.entries(projected).map(([envVar, value]) => ({
             key: envVar,
-            value: runtime.read(logicalKey as string),
+            value,
           }))
         : Object.entries(projected).map(([key, value]) => ({
             key: namespace === 'meta' ? `meta.${key}` : key,

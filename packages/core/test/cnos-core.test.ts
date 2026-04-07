@@ -56,6 +56,16 @@ describe('@kitsy/cnos-core', () => {
     expect(loadedManifest.manifest.project.name).toBe('fixture');
     expect(loadedManifest.manifest.profiles.default).toBe('base');
     expect(loadedManifest.manifest.plugins.resolver).toBe('profile-aware');
+    expect(loadedManifest.manifest.namespaces.public).toMatchObject({
+      kind: 'projection',
+      source: 'promote',
+      shareable: true,
+    });
+    expect(loadedManifest.manifest.namespaces.env).toMatchObject({
+      kind: 'projection',
+      source: 'envMapping',
+      shareable: true,
+    });
   });
 
   it('rejects invalid manifests with a clear error', async () => {
@@ -359,6 +369,8 @@ describe('@kitsy/cnos-core', () => {
         '  name: fixture',
         'envMapping:',
         '  convention: SCREAMING_SNAKE',
+        '  explicit:',
+        '    DB_PASSWORD: secret.app.token',
         'public:',
         '  promote:',
         '    - secret.app.token',
@@ -391,6 +403,68 @@ describe('@kitsy/cnos-core', () => {
         code: 'env-mapping.collision',
       }),
     ]);
+  });
+
+  it('mirrors promoted entries into a readable public namespace', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'public:',
+        '  promote:',
+        '    - value.flag.auth.upi_enabled',
+        '    - flag.payments.upi_enabled',
+        'namespaces:',
+        '  flag:',
+        '    kind: data',
+        '    shareable: true',
+      ].join('\n'),
+    );
+    const runtime = await createCnos({
+      root,
+      plugins: [
+        createFixtureLoader('seed', [
+          {
+            key: 'value.flag.auth.upi_enabled',
+            value: true,
+            namespace: 'value',
+            sourceId: 'seed',
+            pluginId: 'seed',
+            workspaceId: 'fixture',
+          },
+          {
+            key: 'flag.payments.upi_enabled',
+            value: false,
+            namespace: 'flag',
+            sourceId: 'seed',
+            pluginId: 'seed',
+            workspaceId: 'fixture',
+          },
+        ]),
+      ],
+    });
+
+    expect(runtime.read('public.flag.auth.upi_enabled')).toBe(true);
+    expect(runtime.read('public.flag.payments.upi_enabled')).toBe(false);
+  });
+
+  it('fails fast when a sensitive namespace is promoted to public or env', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: fixture',
+        'public:',
+        '  promote:',
+        '    - secret.db.password',
+        'envMapping:',
+        '  explicit:',
+        '    DB_PASSWORD: secret.db.password',
+      ].join('\n'),
+    );
+
+    await expect(createCnos({ root })).rejects.toThrow('sensitive');
   });
 
   it('reports workspace safety policy mismatches', async () => {

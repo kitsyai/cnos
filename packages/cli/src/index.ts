@@ -13,6 +13,7 @@ import { runInspect } from './commands/inspect.js';
 import { runList } from './commands/list.js';
 import { runOnboard } from './commands/onboard.js';
 import { runProfile } from './commands/profile.js';
+import { runPromote } from './commands/promote.js';
 import { runRead } from './commands/read.js';
 import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
@@ -140,6 +141,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'profile':
       process.stdout.write(`${await runProfile(args, runtimeOptions)}\n`);
+      return;
+    case 'promote':
+      process.stdout.write(`${await runPromote(args, runtimeOptions)}\n`);
       return;
     case 'list':
       process.stdout.write(`${await runList(args, runtimeOptions)}\n`);

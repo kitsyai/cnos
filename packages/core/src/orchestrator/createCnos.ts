@@ -1,6 +1,8 @@
 import { loadManifest } from '../manifest/loadManifest.js';
 import { loadWorkspaceFile } from '../manifest/loadWorkspaceFile.js';
 import { expandProfileChain } from '../profiles/expandProfileChain.js';
+import { promoteToPublic } from '../promotions/promoteToPublic.js';
+import { ensureProjectionAllowed } from '../promotions/validatePromotion.js';
 import { resolveActiveProfile } from '../profiles/resolveActiveProfile.js';
 import { createProfileAwareResolver } from '../resolvers/profileAwareResolver.js';
 import type { CnosCreateOptions, CnosRuntime, ResolvedEntry, ResolvedGraph } from '../types/core.js';
@@ -109,6 +111,9 @@ function appendMetaEntries(graph: ResolvedGraph, cnosVersion?: string): Resolved
 
 export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosRuntime> {
   const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  for (const key of loadedManifest.manifest.public.promote) {
+    ensureProjectionAllowed(loadedManifest.manifest, key, 'public');
+  }
   const workspaceFile = await loadWorkspaceFile(loadedManifest.repoRoot);
   const workspace = await resolveWorkspaceContext(loadedManifest.manifest, {
     manifestRoot: loadedManifest.manifestRoot,
@@ -150,11 +155,12 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     workspace,
   });
   const schemaApplied = applySchemaRules(graph, loadedManifest.manifest.schema);
+  const promotedGraph = promoteToPublic(schemaApplied.graph, loadedManifest.manifest);
 
   return createRuntime(
     loadedManifest.manifest,
     appendMetaEntries({
-      ...schemaApplied.graph,
+      ...promotedGraph,
       profileSource: activeProfile.source,
     }, options.cnosVersion),
     plugins,

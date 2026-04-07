@@ -1,5 +1,6 @@
 import {
   normalizeManifest,
+  promoteToPublic,
   type ConfigEntry,
   type ExportContext,
   type NormalizedManifest,
@@ -142,13 +143,14 @@ describe('@kitsy/cnos-plugin-env-export', () => {
       createEntry('value.api.baseUrl', 'https://api.example.com', 'value'),
       createEntry('secret.app.token', 'secret-token', 'secret'),
     ]);
+    const promotedGraph = promoteToPublic(graph, manifest);
 
-    expect(toPublicEnv(graph, manifest, { framework: 'next' })).toEqual({
-      NEXT_PUBLIC_API_URL: 'https://api.example.com',
+    expect(toPublicEnv(promotedGraph, manifest, { framework: 'next' })).toEqual({
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
       NEXT_PUBLIC_APP_NAME: 'cnos',
     });
-    expect(toPublicEnv(graph, manifest, { prefix: 'PUBLIC_' })).toEqual({
-      PUBLIC_API_URL: 'https://api.example.com',
+    expect(toPublicEnv(promotedGraph, manifest, { prefix: 'PUBLIC_' })).toEqual({
+      PUBLIC_API_BASE_URL: 'https://api.example.com',
       PUBLIC_APP_NAME: 'cnos',
     });
   });
@@ -162,7 +164,7 @@ describe('@kitsy/cnos-plugin-env-export', () => {
       createEntry('secret.app.token', 'secret-token', 'secret'),
     ]);
 
-    expect(() => toPublicEnv(graph, manifest)).toThrow('public.promote');
+    expect(() => promoteToPublic(graph, manifest)).toThrow('sensitive');
   });
 
   it('backs exporter plugins with the shared projection helpers', async () => {
@@ -175,7 +177,10 @@ describe('@kitsy/cnos-plugin-env-export', () => {
       },
       promote: ['value.api.baseUrl'],
     });
-    const graph = createGraph([createEntry('value.api.baseUrl', 'https://api.example.com', 'value')]);
+    const graph = promoteToPublic(
+      createGraph([createEntry('value.api.baseUrl', 'https://api.example.com', 'value')]),
+      manifest,
+    );
     const context = createExportContext(manifest);
 
     await expect(createEnvExportPlugin().export(graph, context)).resolves.toEqual({
@@ -187,7 +192,7 @@ describe('@kitsy/cnos-plugin-env-export', () => {
     await expect(createPublicEnvExportPlugin().export(graph, context)).resolves.toEqual({
       pluginId: '@kitsy/cnos/plugins/public-env-export',
       value: {
-        API_URL: 'https://api.example.com',
+        API_BASE_URL: 'https://api.example.com',
       },
     });
   });

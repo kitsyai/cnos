@@ -8,6 +8,8 @@ export * from './orchestrator/pipeline.js';
 export * from './orchestrator/runtime.js';
 export * from './profiles/expandProfileChain.js';
 export * from './profiles/expandProfileGraph.js';
+export * from './promotions/promoteToPublic.js';
+export * from './promotions/validatePromotion.js';
 export * from './profiles/resolveActiveProfile.js';
 export * from './runtime/inspect.js';
 export * from './runtime/dump.js';

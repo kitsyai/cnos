@@ -1,5 +1,5 @@
 import { CnosManifestError } from '../errors.js';
-import type { ManifestFile, NormalizedManifest } from '../types/manifest.js';
+import type { ManifestFile, NamespaceDefinition, NormalizedManifest } from '../types/manifest.js';
 import type { ProfileResolveFrom } from '../types/profile.js';
 import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from '../types/workspace.js';
 
@@ -18,6 +18,34 @@ const DEFAULT_FRAMEWORK_PREFIXES = {
   next: 'NEXT_PUBLIC_',
   vite: 'VITE_',
   nuxt: 'NUXT_PUBLIC_',
+};
+const DEFAULT_NAMESPACES: Record<string, NamespaceDefinition> = {
+  value: {
+    kind: 'data',
+    shareable: true,
+  },
+  secret: {
+    kind: 'data',
+    shareable: false,
+    sensitive: true,
+  },
+  meta: {
+    kind: 'system',
+    shareable: false,
+    readonly: true,
+  },
+  public: {
+    kind: 'projection',
+    source: 'promote',
+    shareable: true,
+    readonly: true,
+  },
+  env: {
+    kind: 'projection',
+    source: 'envMapping',
+    shareable: true,
+    readonly: true,
+  },
 };
 
 function validateResolveFrom(resolveFrom: ProfileResolveFrom[]): ProfileResolveFrom[] {
@@ -48,6 +76,28 @@ function normalizeWorkspaceItems(
       } satisfies NormalizedWorkspaceItem,
     ]),
   );
+}
+
+function normalizeNamespaces(
+  namespaces?: Record<string, Partial<NamespaceDefinition>>,
+): Record<string, NamespaceDefinition> {
+  const normalized = Object.fromEntries(
+    Object.entries(namespaces ?? {}).map(([namespace, definition]) => [
+      namespace,
+      {
+        kind: definition.kind ?? 'data',
+        shareable: definition.shareable ?? false,
+        ...(definition.sensitive !== undefined ? { sensitive: definition.sensitive } : {}),
+        ...(definition.readonly !== undefined ? { readonly: definition.readonly } : {}),
+        ...(definition.source ? { source: definition.source } : {}),
+      } satisfies NamespaceDefinition,
+    ]),
+  );
+
+  return {
+    ...DEFAULT_NAMESPACES,
+    ...normalized,
+  };
 }
 
 export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
@@ -145,6 +195,7 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
         ...(manifest.public?.frameworks ?? {}),
       },
     },
+    namespaces: normalizeNamespaces(manifest.namespaces),
     writePolicy: {
       define: {
         defaultProfile: manifest.writePolicy?.define?.defaultProfile ?? defaultProfile,

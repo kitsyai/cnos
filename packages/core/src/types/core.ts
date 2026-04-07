@@ -5,7 +5,7 @@ import type { WorkspaceContext } from './workspace.js';
 
 export type LogicalKey = string;
 
-export type NamespaceName = 'value' | 'secret' | 'meta';
+export type NamespaceName = string;
 
 export interface ConfigOrigin {
   file?: string;

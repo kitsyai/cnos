@@ -17,6 +17,7 @@ import { runInspect } from '../src/commands/inspect.js';
 import { runList } from '../src/commands/list.js';
 import { runOnboard } from '../src/commands/onboard.js';
 import { runRead } from '../src/commands/read.js';
+import { runPromote } from '../src/commands/promote.js';
 import { runCommand } from '../src/commands/run.js';
 import { runSecret } from '../src/commands/secret.js';
 import { runUse } from '../src/commands/use.js';
@@ -241,7 +242,9 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('help-ai');
     expect(runHelp()).toContain('Framework integrations');
     expect(runHelp()).toContain('@kitsy/cnos-next');
+    expect(runHelp()).toContain('promote');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
+    expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('list')).toContain('--namespace <value|secret|meta|env|public|all>');
     expect(runHelp('export env')).toContain('--framework <name>');
@@ -363,6 +366,32 @@ describe('@kitsy/cnos-cli', () => {
     ).resolves.toContain('deleted value.app.mode');
   });
 
+  it('promotes keys into public and env manifest surfaces', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runPromote(['value.app.name'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'public'],
+      }),
+    ).resolves.toContain('promoted value.app.name to public');
+    await expect(
+      runPromote(['value.server.port'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'env', '--as', 'PORT'],
+      }),
+    ).resolves.toContain('promoted value.server.port to env as PORT');
+
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+      '- value.app.name',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+      'PORT: value.server.port',
+    );
+  });
+
   it('prints inspect output in text and json modes', async () => {
     const root = await createRuntimeFixture();
 
@@ -482,7 +511,7 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--public', '--framework', 'vite'],
       }),
     ).resolves.toMatchInlineSnapshot(`
-      "VITE_API_URL=https://api.local"
+      "VITE_API_BASE_URL=https://api.local"
     `);
     await expect(
       runDump({

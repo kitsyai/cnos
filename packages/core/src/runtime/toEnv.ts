@@ -1,6 +1,7 @@
 import type { NormalizedManifest } from '../types/manifest.js';
 import type { ResolvedGraph, ToEnvOptions } from '../types/core.js';
 import { isSecretReference } from '../utils/secretStore.js';
+import { getNamespaceDefinition } from '../promotions/validatePromotion.js';
 
 function normalizeEnvValue(value: unknown): string {
   if (value === undefined || value === null) {
@@ -33,6 +34,12 @@ export function toEnv(
     const entry = graph.entries.get(logicalKey);
 
     if (!entry) {
+      continue;
+    }
+
+    const namespaceDefinition = getNamespaceDefinition(manifest, entry.namespace);
+
+    if (namespaceDefinition.kind !== 'data' || !namespaceDefinition.shareable || namespaceDefinition.sensitive) {
       continue;
     }
 

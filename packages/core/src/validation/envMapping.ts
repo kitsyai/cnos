@@ -2,6 +2,7 @@ import type { ResolvedGraph } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
 import type { ValidationIssue } from '../types/plugin.js';
 import { logicalKeyToEnvVar } from '../utils/envNaming.js';
+import { getNamespaceDefinition } from '../promotions/validatePromotion.js';
 
 function fallbackLogicalKeyToEnvVar(key: string): string {
   return key
@@ -26,7 +27,9 @@ export function validateEnvMappingCollisions(
   const collisions = new Map<string, string[]>();
 
   for (const key of candidates) {
-    if (key.startsWith('meta.')) {
+    const definition = getNamespaceDefinition(manifest, key);
+
+    if (definition.kind !== 'data') {
       continue;
     }
 

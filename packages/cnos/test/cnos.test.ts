@@ -116,8 +116,10 @@ describe('@kitsy/cnos', () => {
     expect(runtime.toEnv()).toEqual({
       API_URL: 'https://api.example.com',
     });
+    expect(runtime.read('public.api.baseUrl')).toBe('https://api.example.com');
+    expect(runtime.read('public.app.name')).toBe('cnos');
     expect(runtime.toPublicEnv({ framework: 'vite' })).toEqual({
-      VITE_API_URL: 'https://api.example.com',
+      VITE_API_BASE_URL: 'https://api.example.com',
       VITE_APP_NAME: 'cnos',
     });
 

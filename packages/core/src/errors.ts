@@ -11,6 +11,12 @@ export class CnosManifestError extends CnosError {
   }
 }
 
+export class CnosSecurityError extends CnosError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 export class CnosKeyNotFoundError extends CnosError {
   constructor(readonly key: string) {
     super(`Missing required CNOS config key: ${key}`);

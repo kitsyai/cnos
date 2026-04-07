@@ -304,6 +304,27 @@ const COMMANDS: HelpCommand[] = [
     examples: ['cnos profile delete stage'],
   },
   {
+    id: 'promote',
+    summary: 'Promote shareable config into public or env projection surfaces.',
+    usage: 'cnos promote <key...> --to <public|env> [--as <ENV_VAR>] [global-options]',
+    description:
+      'Adds keys to public.promote or envMapping.explicit in .cnos/cnos.yml. Sensitive or non-shareable namespaces are rejected.',
+    options: [
+      {
+        flag: '--to <public|env>',
+        description: 'Choose whether the keys are promoted to the public surface or env export surface.',
+      },
+      {
+        flag: '--as <ENV_VAR>',
+        description: 'Required for --to env. Sets the exported env var name for the promoted key.',
+      },
+    ],
+    examples: [
+      'cnos promote value.flag.auth.upi_enabled --to public',
+      'cnos promote value.server.port --to env --as PORT',
+    ],
+  },
+  {
     id: 'secret set',
     summary: 'Write a secret securely.',
     usage: 'cnos secret set <path> <value> [--local|--remote|--ref] [--vault <name>] [--provider <name>] [--passphrase <value>] [global-options]',

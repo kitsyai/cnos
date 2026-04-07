@@ -33,6 +33,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--passphrase',
   '--vault',
   '--inherit',
+  '--as',
 ]);
 const COMMAND_FLAG_KEYS = new Set(['--flatten', '--public', '--local', '--remote', '--ref']);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
