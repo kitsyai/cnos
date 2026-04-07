@@ -142,6 +142,9 @@ export default defineConfig({
 Read in client code:
 
 ```ts
+import cnos from '@kitsy/cnos/browser';
+
+console.log(cnos('public.app.apiBaseUrl'));
 console.log(import.meta.env.VITE_APP_API_BASE_URL);
 ```
 
@@ -205,6 +208,9 @@ export default withCnosNext({});
 Browser-safe values land as:
 
 ```ts
+import cnos from '@kitsy/cnos/browser';
+
+cnos('public.app.apiBaseUrl');
 process.env.NEXT_PUBLIC_APP_API_BASE_URL
 ```
 
@@ -243,6 +249,14 @@ Browser-facing side:
 
 ```powershell
 cnos export env --public
+```
+
+Or use the browser runtime when your bundler integration embeds CNOS browser data:
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const apiBaseUrl = cnos('public.app.apiBaseUrl');
 ```
 
 Recommended split:

@@ -76,7 +76,17 @@ describe('@kitsy/cnos-vite', () => {
     expect(config).toEqual({
       define: {
         __EXISTING__: 'true',
+        'globalThis.__CNOS_BROWSER_DATA__': JSON.stringify(
+          JSON.stringify({
+            'public.app.apiUrl': 'https://api.stage',
+          }),
+        ),
         'import.meta.env.VITE_APP_API_URL': JSON.stringify('https://api.stage'),
+        'process.env.__CNOS_BROWSER_DATA__': JSON.stringify(
+          JSON.stringify({
+            'public.app.apiUrl': 'https://api.stage',
+          }),
+        ),
         'process.env.VITE_APP_API_URL': JSON.stringify('https://api.stage'),
       },
       envPrefix: ['APP_', 'VITE_'],

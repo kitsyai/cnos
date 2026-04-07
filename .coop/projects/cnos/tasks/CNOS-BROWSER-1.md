@@ -3,7 +3,7 @@ id: CNOS-BROWSER-1
 short_id: 55a40278371d
 title: Browser runtime and build-time public embedding
 type: feature
-status: todo
+status: done
 created: 2026-04-07
 updated: 2026-04-07
 aliases: []

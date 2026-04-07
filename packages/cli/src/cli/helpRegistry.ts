@@ -615,17 +615,25 @@ const INTEGRATIONS: HelpIntegration[] = [
     id: 'vite',
     packageName: '@kitsy/cnos-vite',
     entrypoint: '@kitsy/cnos-vite',
-    summary: 'Inject CNOS public env into Vite define replacements and import.meta.env.',
+    summary: 'Inject CNOS public env into Vite and embed browser-readable CNOS public data.',
     usage: 'import { createCnosVitePlugin } from "@kitsy/cnos-vite"',
-    examples: ['cnos export env --public --framework vite', 'vite.config.ts -> plugins: [createCnosVitePlugin()]'],
+    examples: [
+      'cnos export env --public --framework vite',
+      'vite.config.ts -> plugins: [createCnosVitePlugin()]',
+      'browser code -> import cnos from "@kitsy/cnos/browser"',
+    ],
   },
   {
     id: 'next',
     packageName: '@kitsy/cnos-next',
     entrypoint: '@kitsy/cnos-next',
-    summary: 'Merge CNOS public env into next.config.* using the NEXT_PUBLIC_ convention.',
+    summary: 'Merge CNOS public env into Next and embed browser-readable CNOS public data.',
     usage: 'import { withCnosNext } from "@kitsy/cnos-next"',
-    examples: ['cnos export env --public --framework next', 'next.config.mjs -> export default withCnosNext({})'],
+    examples: [
+      'cnos export env --public --framework next',
+      'next.config.mjs -> export default withCnosNext({})',
+      'browser code -> import cnos from "@kitsy/cnos/browser"',
+    ],
   },
 ];
 

@@ -74,6 +74,9 @@ describe('@kitsy/cnos-next', () => {
     expect(resolved).toEqual({
       reactStrictMode: true,
       env: {
+        __CNOS_BROWSER_DATA__: JSON.stringify({
+          'public.app.apiUrl': 'https://api.stage',
+        }),
         NEXT_PUBLIC_APP_NAME: 'demo',
         NEXT_PUBLIC_APP_API_URL: 'https://api.stage',
       },

@@ -1,4 +1,4 @@
-import { createCnos, type CnosCreateOptions } from '@kitsy/cnos';
+import { createCnos, resolveBrowserData, type CnosCreateOptions } from '@kitsy/cnos';
 
 export interface NextConfigLike {
   env?: Record<string, string>;
@@ -21,6 +21,20 @@ export interface CnosNextPluginOptions extends CnosCreateOptions {
   profileFromPhase?: (phase: string) => string | undefined;
 }
 
+function resolveRuntimeOptions(
+  options: CnosNextPluginOptions,
+  phase: string,
+): CnosCreateOptions {
+  const profile =
+    options.profile ??
+    options.profileFromPhase?.(phase);
+
+  return {
+    ...options,
+    ...(profile ? { profile } : {}),
+  };
+}
+
 async function resolveBaseConfig(
   config: NextConfigInputLike,
   phase: string,
@@ -37,13 +51,7 @@ export async function loadCnosNextEnv(
   options: CnosNextPluginOptions = {},
   phase = 'phase-production-build',
 ): Promise<Record<string, string>> {
-  const profile =
-    options.profile ??
-    options.profileFromPhase?.(phase);
-  const runtime = await createCnos({
-    ...options,
-    ...(profile ? { profile } : {}),
-  });
+  const runtime = await createCnos(resolveRuntimeOptions(options, phase));
 
   return runtime.toPublicEnv({
     framework: 'next',
@@ -56,15 +64,17 @@ export function withCnosNext(
   options: CnosNextPluginOptions = {},
 ): NextConfigFactoryLike {
   return async (phase, context) => {
-    const [baseConfig, publicEnv] = await Promise.all([
+    const [baseConfig, publicEnv, browserData] = await Promise.all([
       resolveBaseConfig(config, phase, context),
       loadCnosNextEnv(options, phase),
+      resolveBrowserData(resolveRuntimeOptions(options, phase)),
     ]);
 
     return {
       ...baseConfig,
       env: {
         ...(baseConfig.env ?? {}),
+        __CNOS_BROWSER_DATA__: JSON.stringify(browserData),
         ...publicEnv,
       },
     };

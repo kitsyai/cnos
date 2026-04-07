@@ -23,3 +23,4 @@ export {
   toPublicEnv,
   writeDump,
 } from '@kitsy/cnos-core';
+export { resolveBrowserData } from './build/index.js';
