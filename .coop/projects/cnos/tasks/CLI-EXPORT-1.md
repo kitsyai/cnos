@@ -3,7 +3,7 @@ id: CLI-EXPORT-1
 short_id: 2cde1b3da54c
 title: Env file export bridge and profile-targeted export
 type: feature
-status: todo
+status: done
 created: 2026-04-07
 updated: 2026-04-07
 aliases: []

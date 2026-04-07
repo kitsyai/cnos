@@ -78,6 +78,8 @@ Then:
 
 ```powershell
 cnos export env
+cnos export env --to .env.local
+cnos export env --profile stage --to .env.stage
 cnos run -- node server.js
 ```
 
@@ -138,6 +140,7 @@ Useful checks:
 ```powershell
 cnos list public
 cnos export env --public --framework vite
+cnos export env --public --framework vite --to .env.local
 ```
 
 ### Webpack or other bundlers
@@ -208,6 +211,7 @@ Checks:
 
 ```powershell
 cnos export env --public --framework next
+cnos export env --public --framework next --to .env.production
 cnos inspect value.app.apiBaseUrl
 ```
 

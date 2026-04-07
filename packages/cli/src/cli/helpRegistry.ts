@@ -299,7 +299,7 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'list',
     summary: 'List resolved config entries.',
-    usage: 'cnos list [value|secret|meta|env|public|all] [--prefix <path>] [global-options]',
+    usage: 'cnos list [value|secret|meta|env|public|all] [--prefix <path>] [--framework <name>] [global-options]',
     description:
       'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering.',
     options: [
@@ -311,8 +311,12 @@ const COMMANDS: HelpCommand[] = [
         flag: '--prefix <path>',
         description: 'Filter list output to entries whose logical keys begin with this prefix.',
       },
+      {
+        flag: '--framework <name>',
+        description: 'When listing public output, apply framework-specific prefixes such as vite or next.',
+      },
     ],
-    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list env', 'cnos list --namespace secret'],
+    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list env', 'cnos list public --framework vite'],
   },
   {
     id: 'profile',
@@ -460,7 +464,7 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'export env',
     summary: 'Render environment variables for the selected workspace.',
-    usage: 'cnos export env [--public] [--framework <name>] [--prefix <prefix>] [global-options]',
+    usage: 'cnos export env [--public] [--framework <name>] [--prefix <prefix>] [--to <path>] [global-options]',
     description:
       'Exports the effective environment as KEY=VALUE lines, or only promoted public values when --public is set.',
     options: [
@@ -476,8 +480,16 @@ const COMMANDS: HelpCommand[] = [
         flag: '--prefix <prefix>',
         description: 'Override the generated public env prefix.',
       },
+      {
+        flag: '--to <path>',
+        description: 'Write the rendered KEY=VALUE output to a file instead of stdout.',
+      },
     ],
-    examples: ['cnos export env', 'cnos export env --public --framework vite --workspace api'],
+    examples: [
+      'cnos export env',
+      'cnos export env --to .env.local',
+      'cnos export env --public --framework vite --to .env.local --workspace api',
+    ],
   },
   {
     id: 'dump',

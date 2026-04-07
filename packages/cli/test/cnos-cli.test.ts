@@ -258,7 +258,9 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('list')).toContain('--namespace <value|secret|meta|env|public|all>');
+    expect(runHelp('list')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--framework <name>');
+    expect(runHelp('export env')).toContain('--to <path>');
   });
 
   it('prints machine-readable help for agents', () => {
@@ -368,6 +370,14 @@ describe('@kitsy/cnos-cli', () => {
         processEnv: {},
       }),
     ).resolves.toBe(['API_URL=https://api.local', 'SERVER_PORT=8080'].join('\n'));
+    await expect(
+      runList(['public'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--framework', 'vite'],
+      }),
+    ).resolves.toBe('VITE_API_BASE_URL=https://api.local');
     await expect(
       runValue(['delete', 'app.mode'], {
         root,
@@ -572,7 +582,9 @@ describe('@kitsy/cnos-cli', () => {
   it('exports env projections and dumps snapshot files', async () => {
     const root = await createRuntimeFixture();
     const dumpRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-dump-'));
+    const exportRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-export-'));
     fixtureRoots.push(dumpRoot);
+    fixtureRoots.push(exportRoot);
 
     await expect(
       runExport('env', {
@@ -594,6 +606,56 @@ describe('@kitsy/cnos-cli', () => {
     ).resolves.toMatchInlineSnapshot(`
       "VITE_API_BASE_URL=https://api.local"
     `);
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APPDATA: 'ambient',
+        },
+        cliArgs: ['--to', path.join(exportRoot, '.env.local')],
+      }),
+    ).resolves.toContain('.env.local');
+    await expect(readFile(path.join(exportRoot, '.env.local'), 'utf8')).resolves.toBe(
+      ['API_URL=https://api.local', 'SERVER_PORT=8080'].join('\n'),
+    );
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        profile: 'stage',
+        processEnv: {
+          APPDATA: 'ambient',
+        },
+        cliArgs: ['--to', path.join(exportRoot, '.env.stage')],
+      }),
+    ).resolves.toContain('.env.stage');
+    await expect(readFile(path.join(exportRoot, '.env.stage'), 'utf8')).resolves.toBe(
+      ['API_URL=https://api.stage', 'SERVER_PORT=9090'].join('\n'),
+    );
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--public', '--framework', 'vite', '--to', path.join(exportRoot, '.env.vite')],
+      }),
+    ).resolves.toContain('.env.vite');
+    await expect(readFile(path.join(exportRoot, '.env.vite'), 'utf8')).resolves.toBe(
+      'VITE_API_BASE_URL=https://api.local',
+    );
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        profile: 'stage',
+        processEnv: {},
+        cliArgs: ['--public', '--framework', 'next', '--to', path.join(exportRoot, '.env.next')],
+      }),
+    ).resolves.toContain('.env.next');
+    await expect(readFile(path.join(exportRoot, '.env.next'), 'utf8')).resolves.toBe(
+      'NEXT_PUBLIC_API_BASE_URL=https://api.stage',
+    );
     await expect(
       runDump({
         root,

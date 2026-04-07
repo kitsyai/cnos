@@ -25,6 +25,7 @@ interface SecretListFilter {
   prefix?: string;
   vault?: string;
   provider?: string;
+  framework?: string;
 }
 
 function matchesSecretFilter(candidate: StoredCandidate, filter: SecretListFilter): boolean {
@@ -95,7 +96,7 @@ function listStoredNamespace(
 
 function listProjectedNamespace(
   namespace: 'meta' | 'env' | 'public',
-  options: RuntimeServiceOptions & { prefix?: string },
+  options: RuntimeServiceOptions & { prefix?: string; framework?: string },
 ): Promise<ListEntry[]> {
   return createRuntimeService(options).then((runtime) => {
     const projected =
@@ -103,7 +104,13 @@ function listProjectedNamespace(
         ? flattenObject(runtime.toNamespace('meta'))
         : namespace === 'env'
           ? runtime.toEnv()
-          : runtime.toPublicEnv();
+          : runtime.toPublicEnv({
+              ...(options.framework
+                ? {
+                    framework: options.framework,
+                  }
+                : {}),
+            });
 
     const entries =
       namespace === 'env'
@@ -125,7 +132,7 @@ function listProjectedNamespace(
 
 export async function listConfigEntries(
   namespace: ListNamespace,
-  options: RuntimeServiceOptions & { prefix?: string } = {},
+  options: RuntimeServiceOptions & { prefix?: string; framework?: string } = {},
 ): Promise<ListEntry[]> {
   if (namespace === 'value' || namespace === 'secret') {
     return listStoredNamespace(namespace, options);
