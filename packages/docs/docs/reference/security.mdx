@@ -1,0 +1,14 @@
+---
+title: Security
+description: Secret storage, masking, vault auth sessions, and safe output rules.
+---
+
+# Security
+
+CNOS secret rules:
+
+- repo files store refs, not plaintext secret material
+- local vault material is encrypted outside the repo
+- reads are masked by default
+- browser and public outputs never expose `secret.*`
+- `vault auth` manages session-based access to local vaults

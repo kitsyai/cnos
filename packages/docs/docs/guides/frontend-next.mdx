@@ -1,0 +1,14 @@
+---
+title: Frontend with Next.js
+description: Use CNOS public projection with Next.js builds and browser-safe runtime reads.
+---
+
+# Frontend with Next.js
+
+```ts
+import { withCnosNext } from '@kitsy/cnos-next';
+
+export default withCnosNext({});
+```
+
+Browser-safe values remain under `public.promote` and are exposed as `NEXT_PUBLIC_*` plus browser-runtime data for `@kitsy/cnos/browser`.

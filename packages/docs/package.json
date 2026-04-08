@@ -1,0 +1,34 @@
+{
+  "name": "@kitsy/cnos-docs",
+  "version": "1.3.0",
+  "description": "Source-of-truth CNOS documentation content for Astro Starlight and other static docs consumers.",
+  "type": "module",
+  "exports": {
+    "./manifest": "./manifest.yml",
+    "./docs/*": "./docs/*",
+    "./assets/*": "./assets/*"
+  },
+  "files": [
+    "docs",
+    "assets",
+    "manifest.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "cnos",
+    "documentation",
+    "starlight",
+    "astro"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "validate": "node scripts/validate-docs.mjs",
+    "build": "node scripts/validate-docs.mjs",
+    "lint": "node scripts/validate-docs.mjs",
+    "test": "node scripts/validate-docs.mjs",
+    "typecheck": "node scripts/validate-docs.mjs"
+  }
+}

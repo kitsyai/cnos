@@ -1,0 +1,34 @@
+---
+title: Frontend with Vite
+description: Project browser-safe CNOS values into Vite and use the browser runtime.
+---
+
+# Frontend with Vite
+
+Promote browser-safe values:
+
+```yaml
+public:
+  promote:
+    - value.app.apiBaseUrl
+```
+
+Use the Vite plugin:
+
+```ts
+import { defineConfig } from 'vite';
+import { createCnosVitePlugin } from '@kitsy/cnos-vite';
+
+export default defineConfig({
+  plugins: [createCnosVitePlugin()],
+});
+```
+
+Read in client code:
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+console.log(cnos('public.app.apiBaseUrl'));
+console.log(import.meta.env.VITE_APP_API_BASE_URL);
+```

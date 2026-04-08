@@ -1,0 +1,111 @@
+product: cnos
+title: CNOS Documentation
+tagline: Configuration orchestration for apps, monorepos, and deployment pipelines
+version: "1.3"
+
+sidebar:
+  - group: Getting Started
+    items:
+      - path: getting-started/index
+        label: Overview
+      - path: getting-started/installation
+        label: Installation
+      - path: getting-started/quick-start
+        label: Quick Start
+      - path: getting-started/your-first-project
+        label: Your First Project
+
+  - group: Guides
+    items:
+      - path: guides/backend
+        label: Backend Projects
+      - path: guides/frontend-vite
+        label: Frontend with Vite
+      - path: guides/frontend-next
+        label: Frontend with Next.js
+      - path: guides/ssr
+        label: SSR Projects
+      - path: guides/ci-cd
+        label: CI/CD Pipelines
+      - path: guides/workspaces
+        label: Workspaces and Monorepos
+      - path: guides/profiles
+        label: Profiles and Environments
+      - path: guides/secrets
+        label: Secrets and Vaults
+      - path: guides/migration
+        label: Migrating from .env
+
+  - group: CLI Reference
+    collapsed: true
+    items:
+      - path: cli/index
+        label: Overview
+      - path: cli/init
+        label: cnos init
+      - path: cli/value
+        label: cnos value
+      - path: cli/secret
+        label: cnos secret
+      - path: cli/read
+        label: cnos read
+      - path: cli/inspect
+        label: cnos inspect
+      - path: cli/validate
+        label: cnos validate
+      - path: cli/export
+        label: cnos export
+      - path: cli/run
+        label: cnos run
+      - path: cli/diff
+        label: cnos diff
+      - path: cli/dump
+        label: cnos dump
+      - path: cli/doctor
+        label: cnos doctor
+      - path: cli/promote
+        label: cnos promote
+      - path: cli/vault
+        label: cnos vault
+      - path: cli/codegen
+        label: cnos codegen
+      - path: cli/watch
+        label: cnos watch
+      - path: cli/migrate
+        label: cnos migrate
+      - path: cli/drift
+        label: cnos drift
+
+  - group: API Reference
+    collapsed: true
+    items:
+      - path: api/index
+        label: Overview
+      - path: api/create-cnos
+        label: createCnos()
+      - path: api/runtime
+        label: Singleton Runtime
+      - path: api/browser
+        label: Browser Runtime
+      - path: api/types
+        label: Types
+
+  - group: Reference
+    collapsed: true
+    items:
+      - path: reference/manifest
+        label: Manifest
+      - path: reference/namespaces
+        label: Namespaces
+      - path: reference/resolution
+        label: Resolution
+      - path: reference/security
+        label: Security
+
+  - group: Concepts
+    collapsed: true
+    items:
+      - path: concepts/how-it-works
+        label: How CNOS Works
+      - path: concepts/config-spectrum
+        label: The Config Spectrum

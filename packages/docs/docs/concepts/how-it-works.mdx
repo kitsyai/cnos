@@ -1,0 +1,13 @@
+---
+title: How CNOS Works
+description: Mental model for how sources become a resolved graph and then user-facing surfaces.
+---
+
+# How CNOS Works
+
+Conceptually:
+
+1. CNOS discovers the repo and workspace context.
+2. Loaders contribute entries from files, env, args, and vault-backed refs.
+3. CNOS resolves one winning graph.
+4. The graph is exposed through runtime APIs, CLI inspection, env export, and browser projection.

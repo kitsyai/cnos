@@ -1,0 +1,15 @@
+---
+title: createCnos()
+description: Explicitly create a CNOS runtime with options and plugins.
+---
+
+# createCnos()
+
+```ts
+import { createCnos } from '@kitsy/cnos/configure';
+
+const runtime = await createCnos({
+  workspace: 'api',
+  profile: 'stage',
+});
+```

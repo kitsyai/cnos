@@ -1,0 +1,35 @@
+---
+title: Your First Project
+description: Set up a simple CNOS project with values, a profile, and a local vault.
+---
+
+# Your First Project
+
+Create the project structure:
+
+```bash
+cnos init
+cnos doctor
+```
+
+Add values:
+
+```bash
+cnos value set app.name my-service
+cnos value set server.port 3000
+```
+
+Create a profile:
+
+```bash
+cnos profile create stage --inherit base
+cnos use --profile stage
+```
+
+Create a local vault and authenticate it:
+
+```bash
+cnos vault create default
+cnos vault auth default
+cnos secret set app.token super-secret --vault default
+```

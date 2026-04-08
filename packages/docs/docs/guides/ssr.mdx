@@ -1,0 +1,14 @@
+---
+title: SSR Projects
+description: Combine CNOS server reads with browser-safe projection in SSR applications.
+---
+
+# SSR Projects
+
+Use `@kitsy/cnos` on the server and `@kitsy/cnos/browser` only for promoted public values.
+
+Typical split:
+
+- server: `cnos.value(...)`, `cnos.secret(...)`
+- browser: `cnos('public.some.key')`
+- framework build: `@kitsy/cnos-vite` or `@kitsy/cnos-next`

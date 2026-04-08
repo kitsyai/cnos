@@ -1,0 +1,22 @@
+---
+title: Workspaces and Monorepos
+description: Use CNOS workspaces to model multiple apps inside one repo.
+---
+
+# Workspaces and Monorepos
+
+In single-project mode, CNOS stays simple.
+
+For monorepos:
+
+```bash
+cnos init --workspace api
+cnos use --workspace api
+cnos list values
+```
+
+Override per command when needed:
+
+```bash
+cnos list values --workspace webapp
+```

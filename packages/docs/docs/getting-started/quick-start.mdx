@@ -1,0 +1,32 @@
+---
+title: Quick Start
+description: Go from zero to a running CNOS-backed project in a few minutes.
+---
+
+# Quick Start
+
+```bash
+cnos init
+cnos value set app.name demo
+cnos value set server.port 3000
+cnos read value.app.name
+cnos run -- node server.js
+```
+
+In app code:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+console.log(cnos('value.app.name'));
+```
+
+For explicit creation:
+
+```ts
+import { createCnos } from '@kitsy/cnos/configure';
+
+const runtime = await createCnos();
+console.log(runtime.value('app.name'));
+```

@@ -1,0 +1,21 @@
+---
+title: CI/CD Pipelines
+description: Use CNOS in build and deploy pipelines without committing generated env files.
+---
+
+# CI/CD Pipelines
+
+Common patterns:
+
+```bash
+cnos export env --profile stage --to .env.stage
+cnos export env --public --framework vite --profile stage --to .env.stage
+cnos run --profile stage -- pnpm build
+```
+
+For CI-backed vaults:
+
+```bash
+cnos vault create github-ci --provider github-secrets --no-passphrase
+cnos secret set app.token APP_TOKEN --vault github-ci
+```

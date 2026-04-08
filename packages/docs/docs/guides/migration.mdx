@@ -1,0 +1,21 @@
+---
+title: Migrating from .env
+description: Move existing env-based projects onto CNOS without losing current workflows.
+---
+
+# Migrating from .env
+
+Use the migration assistant:
+
+```bash
+cnos migrate --scan src --dry-run
+cnos migrate --apply
+cnos migrate --apply --rewrite
+```
+
+Bridge to existing tooling:
+
+```bash
+cnos export env --to .env.local
+cnos export env --profile stage --to .env.stage
+```

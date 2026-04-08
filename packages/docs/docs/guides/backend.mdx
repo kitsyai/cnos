@@ -1,0 +1,29 @@
+---
+title: Backend Projects
+description: Use CNOS in pure backend services, workers, and APIs.
+---
+
+# Backend Projects
+
+Backend projects usually use one of two patterns:
+
+- `cnos run -- <command>` for zero-code-change adoption
+- `import cnos from '@kitsy/cnos'` for direct runtime reads
+
+Example:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+
+const port = cnos.value('server.port');
+const token = cnos.secret('app.token');
+```
+
+Env export bridge:
+
+```bash
+cnos export env --to .env.local
+cnos export env --profile stage --to .env.stage
+```

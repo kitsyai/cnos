@@ -1,0 +1,16 @@
+---
+title: Singleton Runtime
+description: Use the default CNOS runtime singleton from the root package.
+---
+
+# Singleton Runtime
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+
+cnos('value.app.name');
+cnos.value('app.name');
+cnos.secret('app.token');
+```

@@ -1,0 +1,15 @@
+---
+title: Profiles and Environments
+description: Create explicit overlays for stage, prod, and other environments.
+---
+
+# Profiles and Environments
+
+Profiles are explicit overlays, not implicit defaults.
+
+```bash
+cnos profile create stage --inherit base
+cnos use --profile stage
+cnos value set app.apiBaseUrl https://api.stage
+cnos diff base stage
+```
