@@ -21,6 +21,10 @@ function normalizeNamespace(value?: string): ListNamespace {
     return 'meta';
   }
 
+  if (value === 'process') {
+    return 'process';
+  }
+
   if (value === 'env') {
     return 'env';
   }

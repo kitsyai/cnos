@@ -66,6 +66,11 @@ describe('@kitsy/cnos-core', () => {
       source: 'envMapping',
       shareable: true,
     });
+    expect(loadedManifest.manifest.namespaces.process).toMatchObject({
+      kind: 'system',
+      shareable: false,
+      readonly: true,
+    });
     expect(loadedManifest.manifest.vaults).toEqual({});
   });
 

@@ -2,7 +2,7 @@ import { flattenObject } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 
-export type ListNamespace = 'all' | 'value' | 'secret' | 'meta' | 'env' | 'public';
+export type ListNamespace = 'all' | 'value' | 'secret' | 'meta' | 'env' | 'public' | 'process';
 type StoredNamespace = string;
 
 export interface ListEntry {
@@ -96,7 +96,7 @@ function listStoredNamespace(
 }
 
 function listProjectedNamespace(
-  namespace: 'meta' | 'env' | 'public',
+  namespace: 'meta' | 'env' | 'public' | 'process',
   options: RuntimeServiceOptions & { prefix?: string; framework?: string },
 ): Promise<ListEntry[]> {
   return createRuntimeService(options).then((runtime) => {
@@ -105,13 +105,15 @@ function listProjectedNamespace(
         ? flattenObject(runtime.toNamespace('meta'))
         : namespace === 'env'
           ? runtime.toEnv()
-          : runtime.toPublicEnv({
-              ...(options.framework
-                ? {
-                    framework: options.framework,
-                  }
-                : {}),
-            });
+          : namespace === 'public'
+            ? runtime.toPublicEnv({
+                ...(options.framework
+                  ? {
+                      framework: options.framework,
+                    }
+                  : {}),
+              })
+            : flattenObject(runtime.toNamespace(namespace));
 
     const entries =
       namespace === 'env'
@@ -120,7 +122,7 @@ function listProjectedNamespace(
             value,
           }))
         : Object.entries(projected).map(([key, value]) => ({
-            key: namespace === 'meta' ? `meta.${key}` : key,
+            key: namespace === 'meta' || namespace === 'process' ? `${namespace}.${key}` : key,
             value,
           }));
 
@@ -139,7 +141,7 @@ export async function listConfigEntries(
     return listStoredNamespace(namespace, options);
   }
 
-  if (namespace === 'meta' || namespace === 'env' || namespace === 'public') {
+  if (namespace === 'meta' || namespace === 'env' || namespace === 'public' || namespace === 'process') {
     return listProjectedNamespace(namespace, options);
   }
 

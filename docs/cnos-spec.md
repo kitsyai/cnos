@@ -87,12 +87,13 @@ CNOS operates on logical namespaces:
 | `value.*` | non-secret configuration values | `value.inventory.db.host` |
 | `secret.*` | sensitive configuration values | `secret.inventory.db.password` |
 | `meta.*` | resolution and workspace metadata | `meta.profile`, `meta.workspace` |
+| `process.*` | server-only ambient runtime state | `process.cwd`, `process.env.PATH` |
 
 ### 5.2 Public as Promotion, Not a Namespace Primitive
 
 `public` is not a namespace primitive. It is a promotion mechanism.
 
-Any `value.*` key may be promoted to public surfaces through manifest rules. `secret.*` keys can never be promoted.
+Any shareable, non-sensitive data key may be promoted to public surfaces through manifest rules. `secret.*` and system namespaces such as `process.*` can never be promoted.
 
 ### 5.3 Workspace and Meta Keys
 
@@ -669,6 +670,7 @@ Rules:
 - source of truth is `envMapping.explicit`
 - unmapped `value.*` and `secret.*` keys stay private
 - `meta.*` is never exported
+- `process.*` is never exported
 - unresolved local secret refs are skipped
 
 ### 16.2 `toPublicEnv()`
@@ -678,6 +680,7 @@ CLI note:
 - `cnos export env` should emit only explicitly mapped env exports by default
 - public/browser env output comes from `public.promote` plus framework prefix rules
 - ambient process env is not a list/export surface unless explicitly requested by a future debug mode
+- `process.*` is readable at runtime but is not a promotion/export surface
 
 ### 16.3 `dump`
 Materializes snapshot config trees to disk.

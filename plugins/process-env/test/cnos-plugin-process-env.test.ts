@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createProcessEnvPlugin, processEnvEntriesFromObject } from '../src/index.js';
+import { createProcessEnvPlugin, processEnvEntriesFromObject, processNamespaceEntriesFromContext } from '../src/index.js';
 
 describe('@kitsy/cnos-plugin-process-env', () => {
   it('creates a named plugin', () => {
@@ -58,5 +58,35 @@ describe('@kitsy/cnos-plugin-process-env', () => {
         },
       },
     ]);
+  });
+
+  it('emits server-only process namespace entries', () => {
+    const entries = processNamespaceEntriesFromContext(
+      {
+        PATH: 'C:/tools',
+        APPDATA: 'C:/Users/test/AppData/Roaming',
+        __CNOS_GRAPH__: 'omit-me',
+      },
+      'fixture',
+    );
+
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'process.env.PATH',
+          value: 'C:/tools',
+          namespace: 'process',
+        }),
+        expect.objectContaining({
+          key: 'process.cwd',
+          namespace: 'process',
+        }),
+        expect.objectContaining({
+          key: 'process.node.version',
+          namespace: 'process',
+        }),
+      ]),
+    );
+    expect(entries.some((entry) => entry.key === 'process.env.__CNOS_GRAPH__')).toBe(false);
   });
 });

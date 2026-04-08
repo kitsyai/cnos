@@ -231,6 +231,8 @@ describe('@kitsy/cnos', () => {
     expect(runtime.require('value.server.port')).toBe('7000');
     expect(runtime.require('value.inventory.db.host')).toBe('process-db');
     expect(runtime.require('secret.inventory.db.password')).toBe('cli-secret');
+    expect(runtime.require('process.env.DATABASE_HOST')).toBe('process-db');
+    expect(runtime.require('process.cwd')).toBe(process.cwd());
     expect(runtime.inspect('value.server.port')).toMatchObject({
       profile: 'base',
       winner: {

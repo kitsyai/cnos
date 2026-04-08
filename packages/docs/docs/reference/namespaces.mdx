@@ -10,6 +10,7 @@ Primary namespaces:
 - `value.*`
 - `secret.*`
 - `meta.*`
+- `process.*` for server-only ambient runtime state
 - custom data namespaces such as `flags.*` or `config.*` when declared in `.cnos/cnos.yml`
 
 Derived surfaces:
@@ -23,3 +24,14 @@ Custom data namespaces can be:
 - written through the CLI with `cnos set flags.upi_enabled false`
 - promoted to `public.*` when the namespace is `shareable: true`
 - exported through `envMapping.explicit`
+
+`process.*` is built in and read-only. Typical keys include:
+
+- `process.cwd`
+- `process.platform`
+- `process.arch`
+- `process.node.version`
+- `process.args.raw`
+- `process.env.PATH`
+
+`process.*` cannot be promoted or exported.

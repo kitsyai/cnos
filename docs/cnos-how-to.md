@@ -24,6 +24,7 @@ Core concepts:
 - public/browser exposure comes from `public.promote`.
 - shell env export comes from `envMapping.explicit`.
 - custom data namespaces such as `flags.*` can be written and promoted in v1 when declared under `namespaces`.
+- `process.*` is a built-in server-only namespace for ambient runtime state such as `process.env.*`, `process.cwd`, and `process.node.version`.
 - local secret material is stored outside the repo under `~/.cnos/secrets`.
 
 ## 1. Pure Backend Project
@@ -105,6 +106,22 @@ cnos list env
 cnos inspect value.server.port
 cnos validate
 ```
+
+### Process namespace
+
+Use `process.*` when you need to inspect ambient server runtime state without mixing it into CNOS export surfaces.
+
+```powershell
+cnos read process.cwd
+cnos list process --prefix env.PATH
+cnos inspect process.env.PATH
+```
+
+Rules:
+- `process.*` is read-only
+- `process.*` is server-only
+- `process.*` cannot be promoted to `public.*`
+- `process.*` cannot be exported through `envMapping.explicit`
 
 ### Custom data namespaces
 

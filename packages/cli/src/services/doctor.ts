@@ -153,6 +153,10 @@ export async function evaluateDoctor(options: RuntimeServiceOptions = {}): Promi
   const { runtime, summary } = await createValidationSummary(options);
   const localRoot = runtime.graph.workspace.workspaceRoots.find((entry) => entry.scope === 'local');
   const globalRoot = runtime.graph.workspace.workspaceRoots.find((entry) => entry.scope === 'global');
+  const declaredCustomNamespaces = Object.entries(runtime.manifest.namespaces)
+    .filter(([namespace]) => !['value', 'secret', 'meta', 'process', 'public', 'env'].includes(namespace))
+    .map(([namespace, definition]) => `${namespace}(${definition.kind}${definition.shareable ? ',shareable' : ''}${definition.readonly ? ',readonly' : ''})`)
+    .sort((left, right) => left.localeCompare(right));
 
   return [
     {
@@ -164,6 +168,14 @@ export async function evaluateDoctor(options: RuntimeServiceOptions = {}): Promi
       name: 'workspace',
       ok: true,
       details: `${runtime.graph.workspace.workspaceId} via ${runtime.graph.workspace.workspaceSource}`,
+    },
+    {
+      name: 'namespaces',
+      ok: true,
+      details:
+        declaredCustomNamespaces.length === 0
+          ? 'built-ins: value, secret, meta, process, public, env'
+          : `built-ins: value, secret, meta, process, public, env | custom: ${declaredCustomNamespaces.join(', ')}`,
     },
     {
       name: 'source-roots',

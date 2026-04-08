@@ -338,7 +338,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'List resolved config entries.',
     usage: 'cnos list [<namespace>|all] [--prefix <path>] [--framework <name>] [global-options]',
     description:
-      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering. Custom data namespaces such as flags are supported.',
+      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering. Custom data namespaces such as flags are supported, and process exposes server-only ambient runtime state.',
     options: [
       {
         flag: '--namespace <name>',
@@ -353,7 +353,7 @@ const COMMANDS: HelpCommand[] = [
         description: 'When listing public output, apply framework-specific prefixes such as vite or next.',
       },
     ],
-    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list flags', 'cnos list env', 'cnos list public --framework vite'],
+    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list flags', 'cnos list process --prefix env.PATH', 'cnos list env', 'cnos list public --framework vite'],
   },
   {
     id: 'profile',

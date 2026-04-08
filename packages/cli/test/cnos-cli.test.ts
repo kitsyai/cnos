@@ -376,6 +376,7 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('list')).toContain('--namespace <name>');
     expect(runHelp('list')).toContain('cnos list flags');
+    expect(runHelp('list')).toContain('cnos list process');
     expect(runHelp('list')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--to <path>');
@@ -616,6 +617,36 @@ describe('@kitsy/cnos-cli', () => {
         processEnv: {},
       }),
     ).resolves.toContain('deleted value.app.mode');
+  });
+
+  it('lists built-in process namespace entries without mixing them into env/public exports', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runList(['process'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          PATH: 'C:/tools',
+          APPDATA: 'C:/Users/test/AppData/Roaming',
+        },
+        cliArgs: ['--prefix', 'env.PATH'],
+      }),
+    ).resolves.toContain('process.env.PATH=C:/tools');
+    await expect(
+      runRead('process.cwd', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toBe(process.cwd());
+    await expect(
+      runDoctor({
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('built-ins: value, secret, meta, process, public, env');
   });
 
   it('promotes keys into public and env manifest surfaces', async () => {

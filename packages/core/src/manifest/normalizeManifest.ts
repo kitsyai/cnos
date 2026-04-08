@@ -40,6 +40,11 @@ const DEFAULT_NAMESPACES: Record<string, NamespaceDefinition> = {
     shareable: false,
     readonly: true,
   },
+  process: {
+    kind: 'system',
+    shareable: false,
+    readonly: true,
+  },
   public: {
     kind: 'projection',
     source: 'promote',
