@@ -12,7 +12,7 @@ track: v1
 depends_on:
   - CORE-SECRET-1
   - CORE-SECRET-2
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - Vault auth chain resolves from vault-specific env, global env, OS keychain,
     and secure prompt in the design order.

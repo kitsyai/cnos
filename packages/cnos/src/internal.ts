@@ -53,3 +53,10 @@ export {
   serializeSecretPayload,
   serializeRuntimeGraph,
 } from './runtime/bootstrap.js';
+export { generateCodegenContent } from './codegen/generateTypes.js';
+export { resolveCodegenPaths, writeCodegenOutput } from './codegen/writeOutput.js';
+export { watchSchema } from './codegen/watchSchema.js';
+export { compareSchemaToGraph } from './drift/compareSchemaToGraph.js';
+export { formatDriftReport } from './drift/formatDriftReport.js';
+export { diffGraphs } from './watch/diffGraphs.js';
+export { watchFiles } from './watch/watchFiles.js';

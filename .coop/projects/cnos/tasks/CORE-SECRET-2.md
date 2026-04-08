@@ -11,7 +11,7 @@ priority: p0
 track: v1
 depends_on:
   - CORE-SECRET-1
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - Local vault storage uses the new meta.yml plus keystore.enc format under
     ~/.cnos/secrets/vaults/<vault>.

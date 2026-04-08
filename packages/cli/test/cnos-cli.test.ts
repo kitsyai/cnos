@@ -6,9 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseArgs } from '../src/cli/parseArgs.js';
 import { runDefine } from '../src/commands/define.js';
+import { runDrift } from '../src/commands/drift.js';
 import { runDiff } from '../src/commands/diff.js';
 import { runDoctor } from '../src/commands/doctor.js';
 import { runDump } from '../src/commands/dump.js';
+import { runCodegen } from '../src/commands/codegen.js';
 import { runExport } from '../src/commands/export.js';
 import { runHelp } from '../src/commands/help.js';
 import { runHelpAi } from '../src/commands/helpAi.js';
@@ -25,6 +27,7 @@ import { runValidate } from '../src/commands/validate.js';
 import { runVault } from '../src/commands/vault.js';
 import { runVersion } from '../src/commands/version.js';
 import { runValue } from '../src/commands/value.js';
+import { startWatchLoop } from '../src/commands/watch.js';
 import { printJson } from '../src/format/printJson.js';
 
 const fixtureRoots: string[] = [];
@@ -32,6 +35,22 @@ const fixtureRoots: string[] = [];
 afterEach(async () => {
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+async function waitForCondition(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 4000,
+  intervalMs = 50,
+): Promise<void> {
+  const startedAt = Date.now();
+
+  while (!(await predicate())) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out after ${timeoutMs}ms`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
 
 async function createRuntimeFixture(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-'));
@@ -275,6 +294,9 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('help-ai');
     expect(runHelp()).toContain('Framework integrations');
     expect(runHelp()).toContain('@kitsy/cnos-next');
+    expect(runHelp()).toContain('codegen');
+    expect(runHelp()).toContain('drift');
+    expect(runHelp()).toContain('watch');
     expect(runHelp()).toContain('promote');
     expect(runHelp()).toContain('vault');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
@@ -285,6 +307,9 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('list')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--to <path>');
+    expect(runHelp('codegen')).toContain('Usage: cnos codegen [--out <path>] [--watch]');
+    expect(runHelp('drift')).toContain('Usage: cnos drift');
+    expect(runHelp('watch')).toContain('Usage: cnos watch [--signal]');
   });
 
   it('prints machine-readable help for agents', () => {
@@ -316,6 +341,33 @@ describe('@kitsy/cnos-cli', () => {
       'VITE_DEPLOY_ENV=stage',
     );
     await expect(readFile(path.join(root, '.env'), 'utf8')).resolves.toContain('VITE_DEPLOY_ENV=local');
+  });
+
+  it('generates typed config files from schema with default and custom outputs', async () => {
+    const root = await createRuntimeFixture();
+    const customRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-codegen-'));
+    fixtureRoots.push(customRoot);
+
+    await expect(runCodegen({ root })).resolves.toContain('generated types from 2 schema entries');
+    await expect(readFile(path.join(root, '.cnos', 'types', 'cnos.d.ts'), 'utf8')).resolves.toContain(
+      'export interface CnosValueConfig',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'types', 'runtime.ts'), 'utf8')).resolves.toContain(
+      'import type { TypedCnosRuntime } from "./cnos";',
+    );
+
+    await expect(
+      runCodegen({
+        root,
+        cliArgs: ['--out', path.join('generated', 'typed-cnos.d.ts')],
+      }),
+    ).resolves.toContain('generated\\typed-cnos.d.ts');
+    await expect(readFile(path.join(root, 'generated', 'typed-cnos.d.ts'), 'utf8')).resolves.toContain(
+      '"server.port": number;',
+    );
+    await expect(readFile(path.join(root, 'generated', 'runtime.ts'), 'utf8')).resolves.toContain(
+      'import type { TypedCnosRuntime } from "./typed-cnos";',
+    );
   });
 
   it('reads value and secret aliases from the selected workspace', async () => {
@@ -865,4 +917,101 @@ describe('@kitsy/cnos-cli', () => {
       '"gitignore"',
     );
   });
+
+  it('reports schema drift against the resolved graph', async () => {
+    const root = await createRuntimeFixture();
+    await writeFile(
+      path.join(root, '.cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: cli-fixture',
+        'workspaces:',
+        '  default: api',
+        '  global:',
+        '    enabled: true',
+        '    allowWrite: true',
+        '  items:',
+        '    api: {}',
+        'envMapping:',
+        '  convention: SCREAMING_SNAKE',
+        '  explicit:',
+        '    API_URL: value.api.baseUrl',
+        '    SERVER_PORT: value.server.port',
+        'public:',
+        '  promote:',
+        '    - value.api.baseUrl',
+        'schema:',
+        '  value.server.port:',
+        '    type: number',
+        '    required: true',
+        '  value.server.host:',
+        '    type: string',
+        '    default: localhost',
+        '  secret.db.password:',
+        '    type: string',
+        '    required: true',
+      ].join('\n'),
+    );
+
+    await expect(runDrift({ root, workspace: 'api', processEnv: {} })).resolves.toContain('secret.db.password');
+    await expect(runDrift({ root, workspace: 'api', processEnv: {}, json: true })).resolves.toContain(
+      '"mismatches"',
+    );
+  });
+
+  it(
+    'watches config changes in signal mode and restart mode',
+    async () => {
+      const root = await createRuntimeFixture();
+      const changed: string[][] = [];
+      const signalHandle = await startWatchLoop({
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--signal', '--debounce', '25'],
+        onSignal(payload) {
+          changed.push(payload.changedKeys);
+        },
+      });
+
+      try {
+        await writeFile(
+          path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+          ['app:', '  name: cli-fixture', 'server:', '  port: "8181"', 'api:', '  baseUrl: https://api.local'].join('\n'),
+        );
+        await waitForCondition(() => changed.some((keys) => keys.includes('value.server.port')));
+      } finally {
+        await signalHandle.close();
+      }
+
+      const restartRoot = await createRuntimeFixture();
+      const restarted: string[][] = [];
+      const restartHandle = await startWatchLoop({
+        root: restartRoot,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--debounce', '25'],
+        command: [
+          process.execPath,
+          '-e',
+          'setTimeout(() => process.exit(0), 50)',
+        ],
+        onRestart(payload) {
+          restarted.push(payload.changedKeys);
+        },
+      });
+
+      try {
+        await writeFile(
+          path.join(restartRoot, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+          ['app:', '  name: cli-fixture', 'server:', '  port: "9191"', 'api:', '  baseUrl: https://api.local'].join('\n'),
+        );
+        await waitForCondition(() => restarted.some((keys) => keys.includes('value.server.port')));
+      } finally {
+        await restartHandle.close();
+      }
+    },
+    15000,
+  );
 });

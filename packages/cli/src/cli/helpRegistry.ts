@@ -94,6 +94,24 @@ const COMMANDS: HelpCommand[] = [
     examples: ['cnos onboard', 'cnos onboard --workspace webapp', 'cnos onboard --root ../my-app --workspace app --move'],
   },
   {
+    id: 'codegen',
+    summary: 'Generate typed CNOS access wrappers from schema.',
+    usage: 'cnos codegen [--out <path>] [--watch] [--root <path>]',
+    description:
+      'Reads schema from .cnos/cnos.yml and generates typed CNOS declaration output plus a typed createCnos wrapper.',
+    options: [
+      {
+        flag: '--out <path>',
+        description: 'Custom path for the generated type declaration file. runtime.ts is emitted beside it.',
+      },
+      {
+        flag: '--watch',
+        description: 'Watch the manifest schema and regenerate output when it changes.',
+      },
+    ],
+    examples: ['cnos codegen', 'cnos codegen --out src/cnos-config.d.ts', 'cnos codegen --watch'],
+  },
+  {
     id: 'read',
     summary: 'Read any fully-qualified CNOS key.',
     usage: 'cnos read <key> [global-options]',
@@ -567,6 +585,32 @@ const COMMANDS: HelpCommand[] = [
     description:
       'Checks manifest/workspace setup, gitignore coverage, and related diagnostics for the selected workspace.',
     examples: ['cnos doctor', 'cnos doctor --workspace api --json'],
+  },
+  {
+    id: 'drift',
+    summary: 'Compare resolved config against schema and report drift.',
+    usage: 'cnos drift [--workspace <id>] [--profile <name>] [--json]',
+    description:
+      'Reports missing required keys, undeclared keys, type mismatches, and defaults applied for the selected workspace/profile.',
+    examples: ['cnos drift', 'cnos drift --workspace api --profile stage', 'cnos drift --json'],
+  },
+  {
+    id: 'watch',
+    summary: 'Watch CNOS inputs and either restart a process or emit changed keys.',
+    usage: 'cnos watch [--signal] [--debounce <ms>] [global-options] -- <command...>',
+    description:
+      'Watches the active manifest, workspace roots, env files, and config documents. In restart mode it respawns the child command after changes; in signal mode it prints changed keys as JSON.',
+    options: [
+      {
+        flag: '--signal',
+        description: 'Emit changed keys as JSON instead of restarting a child process.',
+      },
+      {
+        flag: '--debounce <ms>',
+        description: 'Debounce change handling before re-resolving the graph. Defaults to 300ms.',
+      },
+    ],
+    examples: ['cnos watch -- node server.js', 'cnos watch --signal', 'cnos watch --debounce 100 -- node server.js'],
   },
   {
     id: 'help',

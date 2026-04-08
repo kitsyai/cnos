@@ -12,7 +12,7 @@ track: v1
 depends_on:
   - CORE-SECRET-1
   - CORE-AUTH-1
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - createCnos() resolves secret refs through the authenticated provider cache
     in eager mode by default, with lazy mode only where supported by the design.

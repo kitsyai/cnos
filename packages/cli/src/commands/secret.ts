@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';

@@ -12,7 +12,7 @@ track: v1
 depends_on:
   - CLI-SECRET-1
   - CNOS-SECRET-1
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - doctor detects legacy vault format, tracked plaintext secret material,
     invalid vault config, missing keychain backend, and unauthenticated required

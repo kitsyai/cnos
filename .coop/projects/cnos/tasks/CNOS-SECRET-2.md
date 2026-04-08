@@ -11,7 +11,7 @@ priority: p1
 track: v1
 depends_on:
   - CLI-SECRET-2
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - Spec, how-to, examples, and prompt/help docs reflect the 1.4 auth-session
     and secret-security model.

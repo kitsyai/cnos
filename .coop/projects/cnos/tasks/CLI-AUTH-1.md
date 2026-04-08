@@ -11,7 +11,7 @@ priority: p0
 track: v1
 depends_on:
   - CORE-AUTH-1
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - cnos vault auth and cnos vault logout manage vault auth sessions with
     prompt, env, and keychain flows.

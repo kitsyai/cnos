@@ -9,7 +9,7 @@ updated: 2026-04-08
 aliases: []
 priority: p0
 track: v1
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - Provider abstraction exists for local and github-secrets vaults with
     authenticate, isAuthenticated, batchGet, get, set, delete, list, and
@@ -27,5 +27,4 @@ origin:
   authority_refs:
     - docs/cnos-secret-security-design.md
     - docs/daily-use-cases.md
-  derived_refs: []
 ---

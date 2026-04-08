@@ -12,7 +12,7 @@ track: v1
 depends_on:
   - CORE-AUTH-1
   - CLI-AUTH-1
-delivery: v1-4
+delivery: v1-3
 acceptance:
   - cnos secret set|get|list|remove and verb-first aliases run through the new
     provider and auth path.

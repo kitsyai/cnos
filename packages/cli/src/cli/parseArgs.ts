@@ -35,6 +35,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--inherit',
   '--as',
   '--set',
+  '--debounce',
 ]);
 const COMMAND_FLAG_KEYS = new Set([
   '--flatten',
@@ -48,6 +49,10 @@ const COMMAND_FLAG_KEYS = new Set([
   '--auth',
   '--all',
   '--store-keychain',
+  '--watch',
+  '--dry-run',
+  '--apply',
+  '--signal',
 ]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
 

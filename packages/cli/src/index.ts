@@ -2,9 +2,11 @@
 
 import { parseArgs } from './cli/parseArgs.js';
 import { runDefine } from './commands/define.js';
+import { runDrift } from './commands/drift.js';
 import { runDiff } from './commands/diff.js';
 import { runDoctor } from './commands/doctor.js';
 import { runDump } from './commands/dump.js';
+import { runCodegen } from './commands/codegen.js';
 import { runExport } from './commands/export.js';
 import { runHelp } from './commands/help.js';
 import { runHelpAi } from './commands/helpAi.js';
@@ -22,6 +24,7 @@ import { runValidate } from './commands/validate.js';
 import { runVault } from './commands/vault.js';
 import { runVersion } from './commands/version.js';
 import { runValue } from './commands/value.js';
+import { runWatch } from './commands/watch.js';
 import { normalizeHelpTopic } from './cli/helpRegistry.js';
 
 function resolveHelpTopic(command: string, args: string[]): string | undefined {
@@ -136,6 +139,9 @@ export async function main(argv: string[]): Promise<void> {
     case 'onboard':
       process.stdout.write(`${await runOnboard(runtimeOptions)}\n`);
       return;
+    case 'codegen':
+      process.stdout.write(`${await runCodegen(runtimeOptions)}\n`);
+      return;
     case 'read':
       process.stdout.write(`${await runRead(args[0] ?? 'value.app.name', runtimeOptions)}\n`);
       return;
@@ -185,8 +191,14 @@ export async function main(argv: string[]): Promise<void> {
       process.exitCode = result.exitCode;
       return;
     }
+    case 'watch':
+      process.stdout.write(`${await runWatch(passthrough.length > 0 ? passthrough : args, runtimeOptions)}\n`);
+      return;
     case 'diff':
       process.stdout.write(`${await runDiff(args[0] ?? 'local', args[1] ?? 'stage', runtimeOptions)}\n`);
+      return;
+    case 'drift':
+      process.stdout.write(`${await runDrift(runtimeOptions)}\n`);
       return;
     case 'doctor':
       process.stdout.write(`${await runDoctor(runtimeOptions)}\n`);
