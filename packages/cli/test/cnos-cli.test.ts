@@ -19,6 +19,7 @@ import { runInspect } from '../src/commands/inspect.js';
 import { runList } from '../src/commands/list.js';
 import { runMigrate } from '../src/commands/migrate.js';
 import { runOnboard } from '../src/commands/onboard.js';
+import { runProfile } from '../src/commands/profile.js';
 import { runRead } from '../src/commands/read.js';
 import { runPromote } from '../src/commands/promote.js';
 import { runCommand } from '../src/commands/run.js';
@@ -187,6 +188,38 @@ describe('@kitsy/cnos-cli', () => {
       },
       passthrough: [],
     });
+    expect(parseArgs(['get', 'value.app.name'])).toEqual({
+      command: 'value',
+      args: ['get', 'app.name'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['set', 'value.app.name', 'demo'])).toEqual({
+      command: 'value',
+      args: ['set', 'app.name', 'demo'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['get', 'secret.app.token'])).toEqual({
+      command: 'secret',
+      args: ['get', 'app.token'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['remove', 'secret.app.token'])).toEqual({
+      command: 'secret',
+      args: ['delete', 'app.token'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
     expect(parseArgs(['list', 'value', '--prefix', 'app.'])).toEqual({
       command: 'value',
       args: ['list'],
@@ -288,6 +321,21 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  it('persists CLI context updates via cnos use flags and shows them afterwards', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-use-update-'));
+    fixtureRoots.push(root);
+
+    await expect(
+      runUse([], {
+        root,
+        profile: 'stage',
+      }),
+    ).resolves.toBe('updated CLI context in .cnos-workspace.yml');
+
+    await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).resolves.toContain('profile: stage');
+    await expect(runUse(['show'], { root })).resolves.toContain('"profile": "stage"');
   });
 
   it('prints human help for the root CLI and command topics', () => {
@@ -598,7 +646,7 @@ describe('@kitsy/cnos-cli', () => {
         workspace: 'api',
         processEnv: {},
       }),
-    ).resolves.toContain('defined value.server.port');
+    ).resolves.toBe('defined value.server.port in .cnos\\workspaces\\api\\values\\server.yml');
     await expect(
       readFile(path.join(root, '.cnos', 'workspaces', 'api', 'values', 'server.yml'), 'utf8'),
     ).resolves.toContain('3001');
@@ -636,6 +684,28 @@ describe('@kitsy/cnos-cli', () => {
     await expect(
       readFile(path.join(globalRoot, 'workspaces', 'api', 'secrets', 'app.yml'), 'utf8'),
     ).resolves.toContain('provider: local');
+  });
+
+  it('prints local profile and vault paths relative to the repo root', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-relative-secrets-'));
+    fixtureRoots.push(secretHome);
+
+    await expect(
+      runProfile(['create', 'stage'], {
+        root,
+      }),
+    ).resolves.toBe('created profile stage at .cnos\\profiles\\stage.yml');
+
+    await expect(
+      runVault(['create', 'local-dev'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+      }),
+    ).resolves.toBe('created vault "local-dev" with provider "local" in .cnos\\cnos.yml');
   });
 
   it('creates vault-backed local secret refs with simple keys', async () => {

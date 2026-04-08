@@ -1,4 +1,7 @@
+import path from 'node:path';
+
 import { consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
 import { listConfigEntries } from '../services/listing.js';
@@ -37,6 +40,7 @@ export async function runValue(argsOrPath: string | string[], options: RuntimeSe
   const args = Array.isArray(argsOrPath) ? argsOrPath : [argsOrPath];
   const { action, tail } = normalizeValueCommand(args);
   const cliArgs = [...(options.cliArgs ?? [])];
+  const root = path.resolve(options.root ?? process.cwd());
 
   if (action === 'list') {
     const prefix = consumeOption(cliArgs, '--prefix');
@@ -73,7 +77,7 @@ export async function runValue(argsOrPath: string | string[], options: RuntimeSe
       });
     }
 
-    return `set value.${valuePath} in ${result.filePath}`;
+    return `set value.${valuePath} in ${displayPath(result.filePath, root)}`;
   }
 
   if (action === 'delete') {
@@ -90,8 +94,8 @@ export async function runValue(argsOrPath: string | string[], options: RuntimeSe
     }
 
     return result.deleted
-      ? `deleted value.${valuePath} from ${result.filePath}`
-      : `no value.${valuePath} found in ${result.filePath}`;
+      ? `deleted value.${valuePath} from ${displayPath(result.filePath, root)}`
+      : `no value.${valuePath} found in ${displayPath(result.filePath, root)}`;
   }
 
   const runtime = await createRuntimeService(options);

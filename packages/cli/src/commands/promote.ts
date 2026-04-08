@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
 
 import {
@@ -7,6 +8,7 @@ import {
 } from '@kitsy/cnos/internal';
 
 import { consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 
@@ -28,6 +30,7 @@ export async function runPromote(
   args: string[] = [],
   options: RuntimeServiceOptions = {},
 ): Promise<string> {
+  const root = path.resolve(options.root ?? process.cwd());
   const cliArgs = [...(options.cliArgs ?? [])];
   const target = normalizeTarget(consumeOption(cliArgs, '--to'));
   const alias = consumeOption(cliArgs, '--as');
@@ -86,6 +89,6 @@ export async function runPromote(
   }
 
   return target === 'public'
-    ? `promoted ${keys.join(', ')} to public in ${loadedManifest.manifestPath}`
-    : `promoted ${keys[0]} to env as ${alias} in ${loadedManifest.manifestPath}`;
+    ? `promoted ${keys.join(', ')} to public in ${displayPath(loadedManifest.manifestPath, root)}`
+    : `promoted ${keys[0]} to env as ${alias} in ${displayPath(loadedManifest.manifestPath, root)}`;
 }

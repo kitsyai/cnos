@@ -1,4 +1,7 @@
+import path from 'node:path';
+
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
 import { maskSecretValue } from '../format/maskSecret.js';
@@ -52,6 +55,7 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   const args = Array.isArray(argsOrPath) ? argsOrPath : [argsOrPath];
   const { action, tail } = normalizeSecretCommand(args);
   const cliArgs = [...(options.cliArgs ?? [])];
+  const root = path.resolve(options.root ?? process.cwd());
 
   if (consumeOption(cliArgs, '--passphrase')) {
     throw new Error('The --passphrase option is not supported in CNOS 1.4. Use env, keychain, or prompt-based auth.');
@@ -123,8 +127,8 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     }
 
     return result.provider === 'local'
-      ? `set secret.${secretPath} in vault "${result.vault ?? 'default'}" with ref "${result.ref}" and repo pointer ${result.filePath}`
-      : `set secret.${secretPath} via ${result.provider} in ${result.filePath}`;
+      ? `set secret.${secretPath} in vault "${result.vault ?? 'default'}" with ref "${result.ref}" and repo pointer ${displayPath(result.filePath, root)}`
+      : `set secret.${secretPath} via ${result.provider} in ${displayPath(result.filePath, root)}`;
   }
 
   if (action === 'delete') {
@@ -141,8 +145,8 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     }
 
     return result.deleted
-      ? `deleted secret.${secretPath} from ${result.filePath}`
-      : `no secret.${secretPath} found in ${result.filePath}`;
+      ? `deleted secret.${secretPath} from ${displayPath(result.filePath, root)}`
+      : `no secret.${secretPath} found in ${displayPath(result.filePath, root)}`;
   }
 
   const runtime = await createRuntimeService(options);

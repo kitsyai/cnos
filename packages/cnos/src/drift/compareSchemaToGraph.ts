@@ -53,6 +53,10 @@ function shouldTrackKey(key: string): boolean {
   return key.startsWith('value.') || key.startsWith('secret.');
 }
 
+function isTransientRuntimeSource(entry: ResolvedEntry): boolean {
+  return entry.winner.sourceId === 'process-env' || entry.winner.sourceId === 'cli-args';
+}
+
 export function compareSchemaToGraph(runtime: CnosRuntime): DriftReport {
   const schema = runtime.manifest.schema;
   const missing: DriftIssue[] = [];
@@ -106,7 +110,13 @@ export function compareSchemaToGraph(runtime: CnosRuntime): DriftReport {
   }
 
   const undeclared = Array.from(runtime.graph.entries.values())
-    .filter((entry) => shouldTrackKey(entry.key) && !schema[entry.key] && !isSchemaDefault(entry))
+    .filter(
+      (entry) =>
+        shouldTrackKey(entry.key) &&
+        !schema[entry.key] &&
+        !isSchemaDefault(entry) &&
+        !isTransientRuntimeSource(entry),
+    )
     .map((entry) => {
       const issue: DriftIssue = {
         key: entry.key,

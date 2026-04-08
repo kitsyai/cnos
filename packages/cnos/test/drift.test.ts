@@ -23,6 +23,8 @@ async function createDriftFixture(): Promise<string> {
       'version: 1',
       'project:',
       '  name: drift-fixture',
+      'envMapping:',
+      '  convention: SCREAMING_SNAKE',
       'schema:',
       '  value.server.port:',
       '    type: number',
@@ -78,5 +80,28 @@ describe('@kitsy/cnos drift', () => {
     expect(formatted).toContain('Missing (required, not defined):');
     expect(formatted).toContain('value.server.port (schema: number, actual: string "3000")');
     expect(formatted).toContain('value.server.host (using default: "localhost")');
+  });
+
+  it('ignores transient process env keys in undeclared drift output but still checks declared keys', async () => {
+    const root = await createDriftFixture();
+    const runtime = await createCnos({
+      root,
+      processEnv: {
+        ANDROID_HOME: 'C:\\Android\\Sdk',
+        SERVER_PORT: 'not-a-number',
+      },
+    });
+
+    const report = compareSchemaToGraph(runtime);
+
+    expect(report.undeclared.some((issue) => issue.key === 'value.android.home')).toBe(false);
+    expect(report.mismatches).toEqual([
+      expect.objectContaining({
+        key: 'value.server.port',
+        expectedType: 'number',
+        actualType: 'string',
+        value: 'not-a-number',
+      }),
+    ]);
   });
 });

@@ -1,4 +1,7 @@
+import path from 'node:path';
+
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import {
@@ -38,6 +41,7 @@ function normalizeVaultAction(args: string[]): { action: 'create' | 'list' | 're
 export async function runVault(args: string[] = [], options: RuntimeServiceOptions = {}): Promise<string> {
   const { action, tail } = normalizeVaultAction(args);
   const cliArgs = [...(options.cliArgs ?? [])];
+  const root = path.resolve(options.root ?? process.cwd());
 
   if (consumeOption(cliArgs, '--passphrase')) {
     throw new Error('The --passphrase option is not supported in CNOS 1.4. Use env, keychain, or prompt-based auth.');
@@ -58,7 +62,7 @@ export async function runVault(args: string[] = [], options: RuntimeServiceOptio
       return printJson(result);
     }
 
-    return `created vault "${result.name}" with provider "${result.provider}" in ${result.manifestPath}`;
+    return `created vault "${result.name}" with provider "${result.provider}" in ${displayPath(result.manifestPath, root)}`;
   }
 
   if (action === 'auth') {

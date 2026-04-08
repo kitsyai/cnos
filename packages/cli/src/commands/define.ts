@@ -1,4 +1,7 @@
+import path from 'node:path';
+
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import { defineValue } from '../services/writes.js';
@@ -10,6 +13,7 @@ export async function runDefine(
   options: RuntimeServiceOptions = {},
 ): Promise<string> {
   const cliArgs = [...(options.cliArgs ?? [])];
+  const root = path.resolve(options.root ?? process.cwd());
   const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
   const local = consumeFlag(cliArgs, '--local');
   const remote = consumeFlag(cliArgs, '--remote');
@@ -39,5 +43,5 @@ export async function runDefine(
     });
   }
 
-  return `defined ${namespace}.${configPath} in ${result.filePath}`;
+  return `defined ${namespace}.${configPath} in ${displayPath(result.filePath, root)}`;
 }

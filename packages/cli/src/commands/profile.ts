@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import { saveCliContext } from '../services/context.js';
@@ -41,7 +42,7 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
       return printJson(result);
     }
 
-    return `created profile ${profile} at ${result.filePath}`;
+    return `created profile ${profile} at ${displayPath(result.filePath, root)}`;
   }
 
   if (action === 'use') {
@@ -55,7 +56,7 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
       return printJson(result);
     }
 
-    return `active profile set to ${profile} in ${result.filePath}`;
+    return `active profile set to ${profile} in ${displayPath(result.filePath, root)}`;
   }
 
   if (action === 'delete') {
