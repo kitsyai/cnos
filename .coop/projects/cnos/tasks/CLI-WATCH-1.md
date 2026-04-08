@@ -3,12 +3,12 @@ id: CLI-WATCH-1
 short_id: 07daaf6a8e43
 title: Config watch and reload loop
 type: feature
-status: in_review
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []
 priority: p2
-track: unassigned
+track: v1
 delivery: v1-3
 acceptance:
   - cnos watch resolves the contributing config file set, watches for changes,

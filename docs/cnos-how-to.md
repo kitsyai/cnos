@@ -259,6 +259,105 @@ import cnos from '@kitsy/cnos/browser';
 const apiBaseUrl = cnos('public.app.apiBaseUrl');
 ```
 
+## 4. Daily Maintenance Workflows
+
+These commands are useful once CNOS is already adopted in a repo.
+
+### Generate typed accessors
+
+Use `codegen` when your manifest schema is stable enough that you want generated types checked into the repo or consumed in app code.
+
+```powershell
+cnos codegen
+cnos codegen --out src/cnos-config.d.ts
+cnos codegen --watch
+```
+
+This generates:
+- `.cnos/types/cnos.d.ts`
+- `.cnos/types/runtime.ts`
+
+Typical use:
+- run after schema changes
+- run in CI to keep generated types current
+- use `--watch` while shaping the config model
+
+### Watch config and restart processes
+
+Use `watch` when a local dev process should restart or react when `.cnos` files change.
+
+```powershell
+cnos watch -- node server.js
+cnos watch --debounce 100 -- pnpm dev
+cnos watch --signal
+```
+
+Modes:
+- restart mode: reruns the child process with updated CNOS env/runtime bootstrap
+- signal mode: prints changed logical keys as JSON and does not spawn a child
+
+Use signal mode when another tool is responsible for reloads.
+
+### Detect schema drift
+
+Use `drift` to compare the resolved graph against the declared schema.
+
+```powershell
+cnos drift
+cnos drift --profile stage
+cnos drift --json
+```
+
+Drift reports:
+- missing required keys
+- undeclared keys
+- type mismatches
+- defaults applied from schema
+
+This is useful in CI before release or deploy.
+
+### Migrate existing env usage
+
+Use `migrate` when adopting CNOS in a repo that still relies on `process.env` or `import.meta.env`.
+
+```powershell
+cnos migrate
+cnos migrate --scan src --dry-run
+cnos migrate --apply
+cnos migrate --apply --rewrite
+```
+
+Behavior:
+- dry-run reports discovered env usage and proposed CNOS mappings
+- apply mode updates `.cnos/cnos.yml` with `envMapping.explicit` and `public.promote`
+- rewrite mode creates `.bak` backups and rewrites directly supported `process.env.*` usages
+
+Recommended migration flow:
+1. `cnos migrate --scan src --dry-run`
+2. inspect the proposed mappings
+3. `cnos migrate --apply`
+4. `cnos migrate --apply --rewrite`
+5. run `cnos validate` and `cnos drift`
+
+## 5. Help Surfaces
+
+For humans:
+
+```powershell
+cnos help
+cnos <command> --help
+```
+
+For agents and tooling:
+
+```powershell
+cnos help-ai --format json
+cnos help-ai migrate --format json
+cnos help-ai watch --format json
+```
+
+`help` and `help-ai` are generated from the same command registry, so new command help should stay aligned with the CLI surface.
+
 Recommended split:
 - server-only config stays under `value.*` or `secret.*`
 - browser-safe config is promoted with `public.promote`

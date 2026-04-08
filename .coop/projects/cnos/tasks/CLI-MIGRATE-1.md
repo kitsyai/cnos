@@ -3,12 +3,12 @@ id: CLI-MIGRATE-1
 short_id: 8160a29175b1
 title: Env usage migration assistant
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []
 priority: p2
-track: unassigned
+track: v1
 delivery: v1-3
 acceptance:
   - cnos migrate scans JS/TS source for process.env and import.meta.env usage

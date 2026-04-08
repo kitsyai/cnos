@@ -3,12 +3,12 @@ id: CLI-DRIFT-1
 short_id: c25727571e66
 title: Schema drift reporting and env file bridge polish
 type: feature
-status: in_review
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []
 priority: p2
-track: unassigned
+track: v1
 delivery: v1-3
 acceptance:
   - cnos drift compares schema against the resolved graph and reports missing

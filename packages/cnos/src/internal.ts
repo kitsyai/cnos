@@ -58,5 +58,9 @@ export { resolveCodegenPaths, writeCodegenOutput } from './codegen/writeOutput.j
 export { watchSchema } from './codegen/watchSchema.js';
 export { compareSchemaToGraph } from './drift/compareSchemaToGraph.js';
 export { formatDriftReport } from './drift/formatDriftReport.js';
+export { applyManifestMappings } from './migrate/applyManifest.js';
+export { proposeMapping } from './migrate/proposeMapping.js';
+export { rewriteSourceFiles } from './migrate/rewriteSource.js';
+export { scanEnvUsage } from './migrate/scanEnvUsage.js';
 export { diffGraphs } from './watch/diffGraphs.js';
 export { watchFiles } from './watch/watchFiles.js';

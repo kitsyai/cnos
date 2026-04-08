@@ -17,6 +17,7 @@ import { runHelpAi } from '../src/commands/helpAi.js';
 import { runInit } from '../src/commands/init.js';
 import { runInspect } from '../src/commands/inspect.js';
 import { runList } from '../src/commands/list.js';
+import { runMigrate } from '../src/commands/migrate.js';
 import { runOnboard } from '../src/commands/onboard.js';
 import { runRead } from '../src/commands/read.js';
 import { runPromote } from '../src/commands/promote.js';
@@ -296,6 +297,7 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('@kitsy/cnos-next');
     expect(runHelp()).toContain('codegen');
     expect(runHelp()).toContain('drift');
+    expect(runHelp()).toContain('migrate');
     expect(runHelp()).toContain('watch');
     expect(runHelp()).toContain('promote');
     expect(runHelp()).toContain('vault');
@@ -309,6 +311,7 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('export env')).toContain('--to <path>');
     expect(runHelp('codegen')).toContain('Usage: cnos codegen [--out <path>] [--watch]');
     expect(runHelp('drift')).toContain('Usage: cnos drift');
+    expect(runHelp('migrate')).toContain('Usage: cnos migrate');
     expect(runHelp('watch')).toContain('Usage: cnos watch [--signal]');
   });
 
@@ -957,6 +960,43 @@ describe('@kitsy/cnos-cli', () => {
     await expect(runDrift({ root, workspace: 'api', processEnv: {} })).resolves.toContain('secret.db.password');
     await expect(runDrift({ root, workspace: 'api', processEnv: {}, json: true })).resolves.toContain(
       '"mismatches"',
+    );
+  });
+
+  it('scans env usage, updates the manifest, and rewrites source files with backups', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-migrate-'));
+    fixtureRoots.push(root);
+    await mkdir(path.join(root, '.cnos'), { recursive: true });
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    await writeFile(
+      path.join(root, '.cnos', 'cnos.yml'),
+      ['version: 1', 'project:', '  name: migrate-cli'].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'src', 'config.ts'),
+      ['const host = process.env.DATABASE_HOST;', 'const publicUrl = import.meta.env.VITE_API_URL;'].join('\n'),
+    );
+
+    await expect(
+      runMigrate({
+        root,
+        cliArgs: ['--scan', 'src'],
+      }),
+    ).resolves.toContain('DATABASE_HOST -> value.database.host');
+    await expect(
+      runMigrate({
+        root,
+        cliArgs: ['--scan', 'src', '--apply', '--rewrite'],
+      }),
+    ).resolves.toContain('Updated');
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+      'DATABASE_HOST: value.database.host',
+    );
+    await expect(readFile(path.join(root, 'src', 'config.ts'), 'utf8')).resolves.toContain(
+      "import cnos from '@kitsy/cnos/runtime';",
+    );
+    await expect(readFile(path.join(root, 'src', 'config.ts.bak'), 'utf8')).resolves.toContain(
+      'process.env.DATABASE_HOST',
     );
   });
 

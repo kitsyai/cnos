@@ -8,7 +8,7 @@ created: 2026-04-08
 updated: 2026-04-08
 aliases: []
 priority: p1
-track: unassigned
+track: v1
 delivery: v1-3
 acceptance:
   - cnos codegen writes .cnos/types/cnos.d.ts and .cnos/types/runtime.ts from

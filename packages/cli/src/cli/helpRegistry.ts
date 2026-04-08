@@ -613,6 +613,37 @@ const COMMANDS: HelpCommand[] = [
     examples: ['cnos watch -- node server.js', 'cnos watch --signal', 'cnos watch --debounce 100 -- node server.js'],
   },
   {
+    id: 'migrate',
+    summary: 'Scan env usage and propose CNOS manifest mappings.',
+    usage: 'cnos migrate [--scan <path>] [--dry-run] [--apply] [--rewrite] [global-options]',
+    description:
+      'Scans JS/TS source for process.env and import.meta.env usage, proposes logical CNOS mappings, updates envMapping/public promote entries, and can rewrite supported source files with backups.',
+    options: [
+      {
+        flag: '--scan <path>',
+        description: 'Directory to scan. Defaults to ./src relative to the repo root.',
+      },
+      {
+        flag: '--dry-run',
+        description: 'Preview the proposed mappings without changing the manifest.',
+      },
+      {
+        flag: '--apply',
+        description: 'Write proposed env mappings and public promotions into .cnos/cnos.yml.',
+      },
+      {
+        flag: '--rewrite',
+        description: 'With --apply, rewrite supported process.env usages in source files and create .bak backups.',
+      },
+    ],
+    examples: [
+      'cnos migrate',
+      'cnos migrate --scan src --dry-run',
+      'cnos migrate --scan apps/api/src --apply',
+      'cnos migrate --apply --rewrite',
+    ],
+  },
+  {
     id: 'help',
     summary: 'Show human-readable CLI help.',
     usage: 'cnos help [command]',

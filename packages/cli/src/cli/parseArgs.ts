@@ -27,6 +27,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--format',
   '--framework',
   '--prefix',
+  '--scan',
   '--target',
   '--to',
   '--provider',
@@ -52,6 +53,7 @@ const COMMAND_FLAG_KEYS = new Set([
   '--watch',
   '--dry-run',
   '--apply',
+  '--rewrite',
   '--signal',
 ]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];

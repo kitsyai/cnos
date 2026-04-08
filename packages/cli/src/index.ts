@@ -13,6 +13,7 @@ import { runHelpAi } from './commands/helpAi.js';
 import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runList } from './commands/list.js';
+import { runMigrate } from './commands/migrate.js';
 import { runOnboard } from './commands/onboard.js';
 import { runProfile } from './commands/profile.js';
 import { runPromote } from './commands/promote.js';
@@ -138,6 +139,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'onboard':
       process.stdout.write(`${await runOnboard(runtimeOptions)}\n`);
+      return;
+    case 'migrate':
+      process.stdout.write(`${await runMigrate(runtimeOptions)}\n`);
       return;
     case 'codegen':
       process.stdout.write(`${await runCodegen(runtimeOptions)}\n`);
