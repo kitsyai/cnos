@@ -1,6 +1,7 @@
 import type { NormalizedManifest } from './manifest.js';
 import type { CnosPlugin } from './plugin.js';
 import type { ProfileSource } from './profile.js';
+import type { SecretCache } from '../secrets/secretCache.js';
 import type { WorkspaceContext } from './workspace.js';
 
 export type LogicalKey = string;
@@ -42,6 +43,10 @@ export interface ResolvedGraph {
   workspace: WorkspaceContext;
 }
 
+export interface SecretResolutionContext {
+  cache: SecretCache;
+}
+
 export interface InspectResult {
   key: LogicalKey;
   value: unknown;
@@ -73,6 +78,7 @@ export interface CnosCreateOptions {
   profile?: string;
   workspace?: string;
   globalRoot?: string;
+  secretResolution?: 'eager' | 'lazy';
   cnosVersion?: string;
   plugins?: CnosPlugin[];
   cliArgs?: string[];

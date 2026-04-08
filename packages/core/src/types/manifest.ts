@@ -7,6 +7,18 @@ export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
 export type NamespaceKind = 'data' | 'projection' | 'system';
 export type NamespaceProjectionSource = 'promote' | 'envMapping';
 export type VaultProviderName = 'local' | 'github-secrets' | (string & {});
+export type VaultAuthMethod = 'passphrase' | 'environment' | 'token' | 'iam' | 'keychain';
+
+export interface VaultAuthSourceConfig {
+  from?: string[];
+}
+
+export interface VaultAuthDefinition {
+  method?: VaultAuthMethod;
+  passphrase?: VaultAuthSourceConfig;
+  token?: VaultAuthSourceConfig;
+  config?: Record<string, unknown>;
+}
 
 export interface NamespaceDefinition {
   kind: NamespaceKind;
@@ -18,7 +30,8 @@ export interface NamespaceDefinition {
 
 export interface VaultDefinition {
   provider: VaultProviderName;
-  passphrase?: string;
+  auth?: VaultAuthDefinition;
+  mapping?: Record<string, string>;
 }
 
 export interface ManifestFile {

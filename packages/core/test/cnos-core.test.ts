@@ -84,7 +84,10 @@ describe('@kitsy/cnos-core', () => {
         'vaults:',
         '  local-dev:',
         '    provider: local',
-        '    passphrase: env:CNOS_SECRET_PASSPHRASE',
+        '    auth:',
+        '      passphrase:',
+        '        from:',
+        '          - env:CNOS_SECRET_PASSPHRASE',
         '  github-ci:',
         '    provider: github-secrets',
       ].join('\n'),
@@ -93,10 +96,18 @@ describe('@kitsy/cnos-core', () => {
 
     expect(loadedManifest.manifest.vaults['local-dev']).toEqual({
       provider: 'local',
-      passphrase: 'env:CNOS_SECRET_PASSPHRASE',
+      auth: {
+        method: 'passphrase',
+        passphrase: {
+          from: ['env:CNOS_SECRET_PASSPHRASE'],
+        },
+      },
     });
     expect(loadedManifest.manifest.vaults['github-ci']).toEqual({
       provider: 'github-secrets',
+      auth: {
+        method: 'environment',
+      },
     });
   });
 

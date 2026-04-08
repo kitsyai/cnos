@@ -1,6 +1,11 @@
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+
 import type { ConfigEntry, ResolvedEntry, ResolvedGraph } from '@kitsy/cnos-core';
+import { isSecretReference } from '@kitsy/cnos-core';
 
 export const CNOS_GRAPH_ENV_VAR = '__CNOS_GRAPH__';
+export const CNOS_SECRET_PAYLOAD_ENV_VAR = '__CNOS_SECRET_PAYLOAD__';
+export const CNOS_SESSION_KEY_ENV_VAR = '__CNOS_SESSION_KEY__';
 
 interface SerializedResolvedEntry extends Omit<ResolvedEntry, 'winner' | 'overridden'> {
   winner: ConfigEntry;
@@ -13,6 +18,12 @@ interface SerializedRuntimeGraph {
   resolvedAt: string;
   profileSource: ResolvedGraph['profileSource'];
   workspace: ResolvedGraph['workspace'];
+}
+
+interface SerializedSecretPayload {
+  iv: string;
+  tag: string;
+  ciphertext: string;
 }
 
 export function serializeRuntimeGraph(graph: ResolvedGraph): string {
@@ -64,6 +75,48 @@ export function deserializeRuntimeGraph(source: string): ResolvedGraph {
   };
 }
 
+function decryptSecretPayload(
+  serialized: string,
+  sessionKey: string,
+): Record<string, unknown> {
+  const payload = JSON.parse(serialized) as Partial<SerializedSecretPayload>;
+
+  if (
+    !payload ||
+    typeof payload.iv !== 'string' ||
+    typeof payload.tag !== 'string' ||
+    typeof payload.ciphertext !== 'string'
+  ) {
+    throw new Error('Invalid CNOS secret payload');
+  }
+
+  const key = Buffer.from(sessionKey, 'hex');
+  const iv = Buffer.from(payload.iv, 'base64');
+  const tag = Buffer.from(payload.tag, 'base64');
+  const ciphertext = Buffer.from(payload.ciphertext, 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  return JSON.parse(plaintext) as Record<string, unknown>;
+}
+
+export function serializeSecretPayload(values: Record<string, unknown>): { payload: string; sessionKey: string } {
+  const key = randomBytes(32);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(values), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return {
+    payload: JSON.stringify({
+      iv: iv.toString('base64'),
+      tag: tag.toString('base64'),
+      ciphertext: ciphertext.toString('base64'),
+    } satisfies SerializedSecretPayload),
+    sessionKey: key.toString('hex'),
+  };
+}
+
 export function readRuntimeGraphFromEnv(
   processEnv: Record<string, string | undefined> = process.env,
 ): ResolvedGraph | undefined {
@@ -73,5 +126,25 @@ export function readRuntimeGraphFromEnv(
     return undefined;
   }
 
-  return deserializeRuntimeGraph(serialized);
+  const graph = deserializeRuntimeGraph(serialized);
+  const secretPayload = processEnv[CNOS_SECRET_PAYLOAD_ENV_VAR];
+  const sessionKey = processEnv[CNOS_SESSION_KEY_ENV_VAR];
+
+  if (secretPayload && sessionKey) {
+    const decrypted = decryptSecretPayload(secretPayload, sessionKey);
+
+    for (const [key, value] of Object.entries(decrypted)) {
+      const entry = graph.entries.get(key);
+
+      if (entry) {
+        entry.value = value;
+      }
+    }
+  }
+
+  return graph;
+}
+
+export function graphRequiresSecretHydration(graph: ResolvedGraph): boolean {
+  return Array.from(graph.entries.values()).some((entry) => entry.namespace === 'secret' && isSecretReference(entry.value));
 }

@@ -12,6 +12,7 @@ import { resolveWorkspaceContext } from '../workspaces/resolveWorkspaceContext.j
 import { applySchemaRules } from '../validation/basicSchema.js';
 import { runPipeline } from './pipeline.js';
 import { createRuntime } from './runtime.js';
+import { batchResolveSecrets } from '../secrets/batchResolve.js';
 
 function buildMetaEntries(graph: ResolvedGraph, cnosVersion?: string): ConfigEntry[] {
   return [
@@ -156,6 +157,10 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
   });
   const schemaApplied = applySchemaRules(graph, loadedManifest.manifest.schema);
   const promotedGraph = promoteToPublic(schemaApplied.graph, loadedManifest.manifest);
+  const secretCache =
+    options.secretResolution === 'lazy'
+      ? undefined
+      : await batchResolveSecrets(promotedGraph, loadedManifest.manifest, options.processEnv);
 
   return createRuntime(
     loadedManifest.manifest,
@@ -164,5 +169,6 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
       profileSource: activeProfile.source,
     }, options.cnosVersion),
     plugins,
+    secretCache,
   );
 }

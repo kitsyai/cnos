@@ -4,7 +4,6 @@ import type { ConfigEntry, LoaderPlugin } from '@kitsy/cnos-core';
 
 import {
   collectFilesystemLayerFiles,
-  resolveSecretValue,
   toSecretReferenceMetadata,
   yamlObjectToEntries,
 } from './helpers.js';
@@ -33,11 +32,9 @@ export function createFilesystemSecretsPlugin(): LoaderPlugin {
 
         for (const entry of fileEntries) {
           const metadata = toSecretReferenceMetadata(entry.value);
-          const resolvedValue = await resolveSecretValue(entry.value, context.processEnv);
 
           entries.push({
             ...entry,
-            value: resolvedValue,
             ...(metadata ? { metadata } : {}),
           });
         }

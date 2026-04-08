@@ -454,7 +454,10 @@ describe('@kitsy/cnos', () => {
         'vaults:',
         '  default:',
         '    provider: local',
-        '    passphrase: env:CNOS_SECRET_PASSPHRASE',
+        '    auth:',
+        '      passphrase:',
+        '        from:',
+        '          - env:CNOS_SECRET_PASSPHRASE',
       ].join('\n'),
     );
     await writeFile(

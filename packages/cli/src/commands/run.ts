@@ -2,6 +2,9 @@ import { spawn, type ChildProcess } from 'node:child_process';
 
 import {
   CNOS_GRAPH_ENV_VAR,
+  CNOS_SECRET_PAYLOAD_ENV_VAR,
+  CNOS_SESSION_KEY_ENV_VAR,
+  serializeSecretPayload,
   serializeRuntimeGraph,
 } from '@kitsy/cnos/internal';
 
@@ -64,6 +67,7 @@ export async function runCommand(
 
   const cliArgs = [...(options.cliArgs ?? [])];
   const isPublic = consumeFlag(cliArgs, '--public');
+  const isAuthenticated = consumeFlag(cliArgs, '--auth');
   const framework = consumeOption(cliArgs, '--framework');
   const prefix = consumeOption(cliArgs, '--prefix');
   const setOverrides = normalizeSetOverrides(consumeOptions(cliArgs, '--set'));
@@ -71,6 +75,15 @@ export async function runCommand(
     ...options,
     cliArgs: [...cliArgs, ...setOverrides],
   });
+  const authenticatedSecrets =
+    isAuthenticated
+      ? Object.fromEntries(
+          Array.from(runtime.graph.entries.values())
+            .filter((entry) => entry.namespace === 'secret')
+            .map((entry) => [entry.key, runtime.read(entry.key)]),
+        )
+      : undefined;
+  const secretPayload = authenticatedSecrets ? serializeSecretPayload(authenticatedSecrets) : undefined;
   const env = {
     ...process.env,
     ...(isPublic
@@ -80,6 +93,12 @@ export async function runCommand(
         })
       : runtime.toEnv()),
     [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph),
+    ...(secretPayload
+      ? {
+          [CNOS_SECRET_PAYLOAD_ENV_VAR]: secretPayload.payload,
+          [CNOS_SESSION_KEY_ENV_VAR]: secretPayload.sessionKey,
+        }
+      : {}),
   };
 
   return new Promise<RunCommandResult>((resolve, reject) => {

@@ -25,11 +25,13 @@ id:
       default: CNOS
     feat:
       values:
+        - AUTH
         - BROWSER
         - EXPORT
         - LOAD
         - ORCH
         - PROFILE
+        - SECRET
         - VALIDATE
       default: ORCH
   seq_padding: 0

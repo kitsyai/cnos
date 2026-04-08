@@ -14,10 +14,12 @@ import {
 } from '@kitsy/cnos-core';
 
 import { createCnos } from '../createCnos.js';
-import { readRuntimeGraphFromEnv } from './bootstrap.js';
+import { graphRequiresSecretHydration, readRuntimeGraphFromEnv } from './bootstrap.js';
 import {
+  getBootstrappedSecretHydrationRequired,
   getSingletonReady,
   getSingletonRuntime,
+  setBootstrappedSecretHydrationRequired,
   setSingletonReady,
   setSingletonRuntime,
 } from './state.js';
@@ -149,6 +151,7 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
   } satisfies CnosRuntime;
 
   setSingletonRuntime(runtime);
+  setBootstrappedSecretHydrationRequired(graphRequiresSecretHydration(graph));
 }
 
 function bootstrapFromProcessEnv(): void {
@@ -191,13 +194,13 @@ const cnos = Object.assign(
       return readValue(getRuntimeOrThrow().graph, toLogicalKey('meta', path));
     },
     async ready(): Promise<void> {
-      if (getSingletonRuntime()) {
+      if (getSingletonRuntime() && !getBootstrappedSecretHydrationRequired()) {
         return;
       }
 
       const existing = getSingletonReady();
 
-      if (existing) {
+      if (existing && !getBootstrappedSecretHydrationRequired()) {
         await existing;
         return;
       }

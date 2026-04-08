@@ -1,4 +1,5 @@
 import { printJson } from '../format/printJson.js';
+import { maskSecretValue } from '../format/maskSecret.js';
 import { printValue } from '../format/printValue.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
 
@@ -10,9 +11,12 @@ export async function runRead(key: string, options: RuntimeServiceOptions = {}):
     throw new Error(`Missing CNOS config key: ${key}`);
   }
 
+  const isSecret = key.startsWith('secret.');
+  const valueForOutput = isSecret ? maskSecretValue(value) : value;
+
   if (options.json) {
-    return printJson({ key, value });
+    return printJson({ key, value: valueForOutput });
   }
 
-  return printValue(value);
+  return printValue(valueForOutput);
 }

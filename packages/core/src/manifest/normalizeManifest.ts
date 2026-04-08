@@ -1,5 +1,11 @@
 import { CnosManifestError } from '../errors.js';
-import type { ManifestFile, NamespaceDefinition, NormalizedManifest, VaultDefinition } from '../types/manifest.js';
+import type {
+  ManifestFile,
+  NamespaceDefinition,
+  NormalizedManifest,
+  VaultAuthDefinition,
+  VaultDefinition,
+} from '../types/manifest.js';
 import type { ProfileResolveFrom } from '../types/profile.js';
 import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from '../types/workspace.js';
 
@@ -105,25 +111,114 @@ function normalizeVaults(
 ): Record<string, VaultDefinition> {
   return Object.fromEntries(
     Object.entries(vaults ?? {}).map(([name, definition]) => {
+      const legacyPassphrase = (definition as { passphrase?: unknown }).passphrase;
+
+      if (legacyPassphrase !== undefined) {
+        throw new CnosManifestError(
+          `Vault "${name}" uses legacy passphrase configuration. Use vaults.${name}.auth instead.`,
+        );
+      }
+
       const provider = definition.provider?.trim();
 
       if (!provider) {
         throw new CnosManifestError(`Vault "${name}" requires a provider`);
       }
 
+      const normalizedAuth = normalizeVaultAuth(name, provider, definition.auth);
+      const normalizedMapping = Object.fromEntries(
+        Object.entries(definition.mapping ?? {})
+          .filter(
+            (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string',
+          )
+          .map(([envVar, logicalRef]) => [envVar.trim(), logicalRef.trim()] as const)
+          .filter(([envVar, logicalRef]) => envVar.length > 0 && logicalRef.length > 0),
+      );
+
       return [
         name,
         {
           provider,
-          ...(definition.passphrase?.trim()
+          auth: normalizedAuth,
+          ...(Object.keys(normalizedMapping).length > 0
             ? {
-                passphrase: definition.passphrase.trim(),
+                mapping: normalizedMapping,
               }
             : {}),
         } satisfies VaultDefinition,
       ];
     }),
   );
+}
+
+function normalizeAuthSources(value: unknown): string[] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const sources = Array.isArray((value as { from?: unknown[] }).from)
+    ? (value as { from?: unknown[] }).from
+    : undefined;
+
+  const normalized = (sources ?? [])
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeVaultAuth(
+  vaultName: string,
+  provider: string,
+  auth?: VaultAuthDefinition,
+): VaultAuthDefinition {
+  if (provider === 'local') {
+    const passphraseSources = normalizeAuthSources(auth?.passphrase);
+    const defaultToken = vaultName
+      .replace(/[^A-Za-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toUpperCase();
+    const defaultSources = [
+      ...(defaultToken ? [`env:CNOS_SECRET_PASSPHRASE_${defaultToken}`] : []),
+      'env:CNOS_SECRET_PASSPHRASE',
+      `keychain:cnos/${vaultName}`,
+      'prompt',
+    ];
+
+    return {
+      method: auth?.method ?? 'passphrase',
+      passphrase: {
+        from: passphraseSources ?? defaultSources,
+      },
+      ...(auth?.config ? { config: auth.config } : {}),
+    };
+  }
+
+  if (provider === 'github-secrets') {
+    return {
+      method: auth?.method ?? 'environment',
+      ...(auth?.config ? { config: auth.config } : {}),
+    };
+  }
+
+  return {
+    ...(auth?.method ? { method: auth.method } : {}),
+    ...(normalizeAuthSources(auth?.passphrase)
+      ? {
+          passphrase: {
+            from: normalizeAuthSources(auth?.passphrase) ?? [],
+          },
+        }
+      : {}),
+    ...(normalizeAuthSources(auth?.token)
+      ? {
+          token: {
+            from: normalizeAuthSources(auth?.token) ?? [],
+          },
+        }
+      : {}),
+    ...(auth?.config ? { config: auth.config } : {}),
+  };
 }
 
 export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {

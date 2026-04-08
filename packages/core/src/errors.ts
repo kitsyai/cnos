@@ -17,6 +17,12 @@ export class CnosSecurityError extends CnosError {
   }
 }
 
+export class CnosAuthenticationError extends CnosError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 export class CnosKeyNotFoundError extends CnosError {
   constructor(readonly key: string) {
     super(`Missing required CNOS config key: ${key}`);

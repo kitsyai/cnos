@@ -1,20 +1,12 @@
+import { readFile } from 'node:fs/promises';
+
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
+import { maskSecretValue } from '../format/maskSecret.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
 import { deleteSecret, setSecret } from '../services/writes.js';
-import { listConfigEntries } from '../services/listing.js';
 import { runVault } from './vault.js';
-
-function isSecretRef(value: unknown): value is { provider: string; ref: string; vault?: string } {
-  return Boolean(
-    value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      typeof (value as { provider?: unknown }).provider === 'string' &&
-      typeof (value as { ref?: unknown }).ref === 'string',
-  );
-}
 
 function normalizeSecretCommand(
   args: string[],
@@ -48,45 +40,77 @@ function normalizeSecretCommand(
   };
 }
 
+async function readStdinValue(): Promise<string> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks).toString('utf8').trimEnd();
+}
+
 export async function runSecret(argsOrPath: string | string[], options: RuntimeServiceOptions = {}): Promise<string> {
   const args = Array.isArray(argsOrPath) ? argsOrPath : [argsOrPath];
   const { action, tail } = normalizeSecretCommand(args);
   const cliArgs = [...(options.cliArgs ?? [])];
+
+  if (consumeOption(cliArgs, '--passphrase')) {
+    throw new Error('The --passphrase option is not supported in CNOS 1.4. Use env, keychain, or prompt-based auth.');
+  }
 
   if (action === 'create-vault') {
     return runVault(['create', tail[0] ?? 'default'], options);
   }
 
   if (action === 'list') {
+    const runtime = await createRuntimeService(options);
     const prefix = consumeOption(cliArgs, '--prefix');
     const vault = consumeOption(cliArgs, '--vault');
     const provider = consumeOption(cliArgs, '--provider');
-    const entries = await listConfigEntries('secret', {
-      ...options,
-      cliArgs,
-      ...(prefix ? { prefix } : {}),
-      ...(vault ? { vault } : {}),
-      ...(provider ? { provider } : {}),
-    });
+    const entries = Array.from(runtime.graph.entries.values())
+      .filter((entry) => entry.namespace === 'secret')
+      .filter((entry) => !prefix || entry.key.startsWith(`secret.${prefix}`) || entry.key.startsWith(prefix))
+      .filter((entry) => {
+        const secretRef = entry.winner.metadata?.secretRef as { provider?: string; vault?: string } | undefined;
+        if (vault && secretRef?.vault !== vault) {
+          return false;
+        }
+
+        if (provider && secretRef?.provider !== provider) {
+          return false;
+        }
+
+        return true;
+      })
+      .map((entry) => {
+        const secretRef = entry.winner.metadata?.secretRef as { provider?: string; vault?: string } | undefined;
+        return {
+          key: entry.key,
+          vault: secretRef?.vault ?? 'default',
+          provider: secretRef?.provider ?? 'local',
+        };
+      })
+      .sort((left, right) => left.key.localeCompare(right.key));
 
     if (options.json) {
       return printJson(entries);
     }
 
-    return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');
+    return entries.map((entry) => `${entry.key} (vault: ${entry.vault}, provider: ${entry.provider})`).join('\n');
   }
 
   if (action === 'set') {
     const secretPath = tail[0];
-    const rawValue = tail[1] ?? '';
     const local = consumeFlag(cliArgs, '--local');
     const remote = consumeFlag(cliArgs, '--remote');
     const ref = consumeFlag(cliArgs, '--ref');
+    const stdin = consumeFlag(cliArgs, '--stdin');
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
     const provider = consumeOption(cliArgs, '--provider');
-    const passphrase = consumeOption(cliArgs, '--passphrase');
     const vault = consumeOption(cliArgs, '--vault') ?? 'default';
     const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : undefined;
+    const rawValue = stdin ? await readStdinValue() : tail[1] ?? '';
     const result = await setSecret(secretPath ?? 'app.token', rawValue, {
       ...options,
       cliArgs,
@@ -94,7 +118,6 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
       vault,
       ...(mode ? { mode } : {}),
       ...(provider ? { provider } : {}),
-      ...(passphrase ? { passphrase } : {}),
     });
 
     if (options.json) {
@@ -127,6 +150,7 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   const runtime = await createRuntimeService(options);
   const secretPath = tail[0] ?? 'app.token';
   const expectedVault = consumeOption(cliArgs, '--vault');
+  const reveal = consumeFlag(cliArgs, '--reveal');
   const entry = runtime.graph.entries.get(`secret.${secretPath}`);
   const secretRef = entry?.winner.metadata?.secretRef as { provider?: string; ref?: string; vault?: string } | undefined;
   const value = runtime.secret(secretPath);
@@ -139,29 +163,15 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     throw new Error(`Secret ${secretPath} belongs to vault "${secretRef.vault}", not "${expectedVault}"`);
   }
 
-  if (isSecretRef(value)) {
-    if (value.provider === 'local') {
-      const vault = value.vault ?? 'default';
-      throw new Error(
-        `Secret ${secretPath} is stored in vault "${vault}" as ref "${value.ref}". Provide the correct vault passphrase to resolve it.`,
-      );
-    }
-
-    if (value.provider === 'github-secrets') {
-      throw new Error(
-        `Secret ${secretPath} is backed by GitHub secrets via ref "${value.ref}". Set that env var in the current process or CI job to resolve it.`,
-      );
-    }
-
-    throw new Error(`Secret ${secretPath} is stored as a ${value.provider} reference "${value.ref}" and is not resolved.`);
-  }
+  const valueForOutput = reveal ? value : maskSecretValue(value);
 
   if (options.json) {
     return printJson({
       key: `secret.${secretPath}`,
-      value,
+      value: valueForOutput,
+      vault: secretRef?.vault ?? 'default',
     });
   }
 
-  return printValue(value);
+  return printValue(valueForOutput);
 }

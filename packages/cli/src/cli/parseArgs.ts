@@ -36,7 +36,19 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--as',
   '--set',
 ]);
-const COMMAND_FLAG_KEYS = new Set(['--flatten', '--public', '--local', '--remote', '--ref', '--no-passphrase']);
+const COMMAND_FLAG_KEYS = new Set([
+  '--flatten',
+  '--public',
+  '--local',
+  '--remote',
+  '--ref',
+  '--no-passphrase',
+  '--stdin',
+  '--reveal',
+  '--auth',
+  '--all',
+  '--store-keychain',
+]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
 
 function normalizeCommand(argv: string[]): string[] {
@@ -62,6 +74,14 @@ function normalizeCommand(argv: string[]): string[] {
 
   if ((command === 'delete' || command === 'remove') && resource === 'vault') {
     return ['vault', 'remove', ...remaining];
+  }
+
+  if (command === 'auth' && resource === 'vault') {
+    return ['vault', 'auth', ...remaining];
+  }
+
+  if (command === 'logout' && resource === 'vault') {
+    return ['vault', 'logout', ...remaining];
   }
 
   if (command === 'list' && resource === 'profile') {

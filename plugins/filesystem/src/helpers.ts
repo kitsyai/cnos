@@ -170,7 +170,10 @@ export async function resolveSecretValue(
     return readLocalSecret(
       resolveSecretStoreRoot(processEnv),
       value.ref,
-      passphrase,
+      {
+        passphrase,
+        method: 'passphrase',
+      },
       value.vault,
     );
   }

@@ -1,19 +1,16 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  getVaultPassphraseEnvVar,
+  createSecretVaultProvider,
   parseYaml,
   resolveConfigDocumentPath,
+  resolveVaultAuth,
   stringifyYaml,
-  writeLocalSecret,
-  resolveConfiguredVaultPassphrase,
-  resolveSecretStoreRoot,
   type SecretReference,
 } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
-import { createVaultDefinition } from './vaults.js';
 
 function setNestedValue(target: Record<string, unknown>, pathSegments: string[], value: unknown): void {
   const [head, ...tail] = pathSegments;
@@ -116,7 +113,6 @@ export async function defineValue(
     target?: 'local' | 'global';
     mode?: 'local' | 'remote' | 'ref';
     provider?: string;
-    passphrase?: string;
     vault?: string;
   } = {},
 ): Promise<{ filePath: string; value: unknown }> {
@@ -131,6 +127,7 @@ export async function defineValue(
       value: {
         provider: secret.provider,
         ref: secret.ref,
+        ...(secret.vault ? { vault: secret.vault } : {}),
       },
     };
   }
@@ -157,19 +154,6 @@ export interface SecretWriteResult {
   ref: string;
   provider: string;
   vault?: string;
-  storePath?: string;
-}
-
-export async function createVault(
-  vault: string,
-  options: RuntimeServiceOptions & { passphrase?: string; provider?: string; noPassphrase?: boolean } = {},
-): Promise<{ vault: string; filePath: string }> {
-  const result = await createVaultDefinition(vault, options);
-
-  return {
-    vault: result.name,
-    filePath: result.manifestPath,
-  };
 }
 
 export async function setSecret(
@@ -179,7 +163,6 @@ export async function setSecret(
     target?: 'local' | 'global';
     mode?: 'local' | 'remote' | 'ref';
     provider?: string;
-    passphrase?: string;
     vault?: string;
   } = {},
 ): Promise<SecretWriteResult> {
@@ -190,57 +173,35 @@ export async function setSecret(
   const document = await readYamlDocument(filePath);
   const vault = options.vault?.trim() || 'default';
   const vaultDefinition = runtime.manifest.vaults[vault];
-  const inferredProvider = vaultDefinition?.provider ?? options.provider;
+
+  if (!vaultDefinition) {
+    throw new Error(`Unknown vault "${vault}". Create it first with cnos vault create ${vault}.`);
+  }
+
   const mode =
     options.mode ??
-    (inferredProvider === 'local'
+    (vaultDefinition.provider === 'local'
       ? 'local'
-      : inferredProvider === 'github-secrets'
+      : vaultDefinition.provider === 'github-secrets'
         ? 'ref'
-        : 'local');
+        : 'remote');
   let reference: SecretReference;
-  let storePath: string | undefined;
 
   if (mode === 'local') {
-    const provider = inferredProvider ?? 'local';
-
-    if (provider !== 'local') {
-      throw new Error(`Vault "${vault}" uses provider "${provider}" and cannot store local secret material`);
-    }
-
-    const passphrase = resolveConfiguredVaultPassphrase(
-      vaultDefinition ? { provider: 'local', ...(vaultDefinition.passphrase ? { passphrase: vaultDefinition.passphrase } : {}) } : { provider: 'local' },
-      vault,
-      {
-        ...(options.processEnv ?? process.env),
-        ...(options.passphrase
-          ? {
-              [getVaultPassphraseEnvVar(vault)]: options.passphrase,
-            }
-          : {}),
-      },
-    ) ?? options.passphrase;
-
-    if (!passphrase) {
-      throw new Error(`Vault "${vault}" requires --passphrase or its configured passphrase env var`);
-    }
-
-    const ref = configPath;
-    storePath = await writeLocalSecret(resolveSecretStoreRoot(options.processEnv), ref, rawValue, passphrase, vault);
+    const auth = await resolveVaultAuth(vault, vaultDefinition, options.processEnv ?? process.env);
+    const provider = createSecretVaultProvider(vault, vaultDefinition, options.processEnv ?? process.env);
+    await provider.authenticate(auth);
+    await provider.set(configPath, rawValue);
     reference = {
       provider: 'local',
-      ref,
+      ref: configPath,
       vault,
     };
   } else {
     reference = {
-      provider: inferredProvider ?? (mode === 'ref' ? 'ref' : 'remote'),
+      provider: options.provider?.trim() || vaultDefinition.provider,
       ref: rawValue || configPath.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase(),
-      ...(vaultDefinition || vault !== 'default'
-        ? {
-            vault,
-          }
-        : {}),
+      vault,
     };
   }
 
@@ -253,14 +214,13 @@ export async function setSecret(
     provider: reference.provider,
     ref: reference.ref,
     ...(reference.vault ? { vault: reference.vault } : {}),
-    ...(storePath ? { storePath } : {}),
   };
 }
 
 export async function deleteSecret(
   configPath: string,
   options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
-): Promise<{ filePath: string; deleted: boolean; removedStore?: string }> {
+): Promise<{ filePath: string; deleted: boolean }> {
   const runtime = await createRuntimeService(options);
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
@@ -277,28 +237,22 @@ export async function deleteSecret(
   }
 
   await writeFile(filePath, stringifyYaml(document), 'utf8');
-
-  let removedStore: string | undefined;
   const secretRef = metadata?.secretRef;
 
   if (isSecretReference(secretRef) && secretRef.provider === 'local') {
-    const storePath = path
-      .join(
-        resolveSecretStoreRoot(options.processEnv),
-        'vaults',
-        secretRef.vault ?? 'default',
-        'store',
-        ...secretRef.ref.split('/'),
-      )
-      .concat('.json');
-    await rm(storePath, { force: true });
-    removedStore = storePath;
+    const definition = runtime.manifest.vaults[secretRef.vault ?? 'default'];
+
+    if (definition) {
+      const auth = await resolveVaultAuth(secretRef.vault ?? 'default', definition, options.processEnv ?? process.env);
+      const provider = createSecretVaultProvider(secretRef.vault ?? 'default', definition, options.processEnv ?? process.env);
+      await provider.authenticate(auth);
+      await provider.delete(secretRef.ref);
+    }
   }
 
   return {
     filePath,
     deleted: true,
-    ...(removedStore ? { removedStore } : {}),
   };
 }
 
@@ -306,7 +260,7 @@ export async function deleteValue(
   namespace: 'value' | 'secret',
   configPath: string,
   options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
-): Promise<{ filePath: string; deleted: boolean; removedStore?: string }> {
+): Promise<{ filePath: string; deleted: boolean }> {
   if (namespace === 'secret') {
     return deleteSecret(configPath, options);
   }

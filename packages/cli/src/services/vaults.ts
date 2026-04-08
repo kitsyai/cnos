@@ -1,15 +1,20 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  clearAllVaultSessionKeys,
+  clearVaultSessionKey,
   createSecretVault,
+  deriveVaultKey,
   loadManifest,
   listSecretVaults,
-  resolveConfiguredVaultPassphrase,
+  readVaultMetadata,
   resolveSecretStoreRoot,
-  resolveSecretVaultFile,
+  resolveVaultAuth,
   resolveVaultDefinition,
   stringifyYaml,
+  writeKeychain,
+  writeVaultSessionKey,
   type ResolvedVaultDefinition,
   type VaultDefinition,
 } from '@kitsy/cnos/internal';
@@ -17,32 +22,34 @@ import {
 import type { RuntimeServiceOptions } from './runtime.js';
 
 export interface VaultRecord extends ResolvedVaultDefinition {
-  passphrasePolicy: 'required' | 'none';
+  authMethod: string;
+  localStore: boolean;
 }
 
 function sortVaults<T extends Record<string, unknown>>(vaults: Record<string, T>): Record<string, T> {
   return Object.fromEntries(Object.entries(vaults).sort(([left], [right]) => left.localeCompare(right)));
 }
 
+function defaultLocalAuthSources(vault: string): string[] {
+  const token = vault.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase();
+  return [`env:CNOS_SECRET_PASSPHRASE_${token}`, 'env:CNOS_SECRET_PASSPHRASE', `keychain:cnos/${vault}`, 'prompt'];
+}
+
 export async function createVaultDefinition(
   name: string,
   options: RuntimeServiceOptions & {
     provider?: string;
-    passphrase?: string;
     noPassphrase?: boolean;
   } = {},
-): Promise<VaultRecord & { manifestPath: string; storePath?: string }> {
+): Promise<VaultRecord & { manifestPath: string }> {
   const vault = name.trim() || 'default';
   const provider = options.provider?.trim() || 'local';
-  const noPassphrase = options.noPassphrase ?? false;
 
-  if (provider === 'local' && noPassphrase) {
-    throw new Error('Local vaults require a passphrase');
+  if (provider === 'local' && (options.noPassphrase ?? false)) {
+    throw new Error('Local vaults cannot be passwordless.');
   }
 
   const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
-  const processEnv = options.processEnv ?? process.env;
-  const passphraseEnvVar = 'CNOS_SECRET_PASSPHRASE';
   const rawManifest = {
     ...loadedManifest.rawManifest,
     vaults: {
@@ -51,54 +58,35 @@ export async function createVaultDefinition(
         provider === 'local'
           ? {
               provider: 'local',
-              passphrase: `env:${passphraseEnvVar}`,
+              auth: {
+                passphrase: {
+                  from: defaultLocalAuthSources(vault),
+                },
+              },
             }
           : {
               provider,
+              auth: {
+                method: 'environment',
+              },
             },
     },
   };
 
-  let storePath: string | undefined;
-
-  if (provider === 'local') {
-    const passphrase =
-      options.passphrase ??
-      resolveConfiguredVaultPassphrase(
-        {
-          provider: 'local',
-          passphrase: `env:${passphraseEnvVar}`,
-        },
-        vault,
-        processEnv,
-      );
-
-    if (!passphrase) {
-      throw new Error(`Vault "${vault}" requires --passphrase or ${passphraseEnvVar}`);
-    }
-
-    storePath = await createSecretVault(resolveSecretStoreRoot(processEnv), vault, passphrase);
-  }
-
   await writeFile(loadedManifest.manifestPath, stringifyYaml(rawManifest), 'utf8');
+  const definition = resolveVaultDefinition({ [vault]: rawManifest.vaults[vault] as VaultDefinition }, vault);
 
   return {
-    ...resolveVaultDefinition(
-      {
-        [vault]: rawManifest.vaults[vault] as VaultDefinition,
-      },
-      vault,
-    ),
-    passphrasePolicy: provider === 'local' ? 'required' : 'none',
+    ...definition,
+    authMethod: definition.auth?.method ?? (provider === 'local' ? 'passphrase' : 'environment'),
+    localStore: provider === 'local',
     manifestPath: loadedManifest.manifestPath,
-    ...(storePath ? { storePath } : {}),
   };
 }
 
-export async function listVaultDefinitions(
-  options: RuntimeServiceOptions = {},
-): Promise<VaultRecord[]> {
+export async function listVaultDefinitions(options: RuntimeServiceOptions = {}): Promise<VaultRecord[]> {
   const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const localStoreVaults = await listSecretVaults(resolveSecretStoreRoot(options.processEnv));
 
   return Object.keys(loadedManifest.manifest.vaults)
     .sort((left, right) => left.localeCompare(right))
@@ -106,7 +94,8 @@ export async function listVaultDefinitions(
       const definition = resolveVaultDefinition(loadedManifest.manifest.vaults, name);
       return {
         ...definition,
-        passphrasePolicy: definition.requiresPassphrase ? 'required' : 'none',
+        authMethod: definition.auth?.method ?? (definition.provider === 'local' ? 'passphrase' : 'environment'),
+        localStore: localStoreVaults.includes(name),
       };
     });
 }
@@ -128,7 +117,6 @@ export async function removeVaultDefinition(
 
   const nextVaults = { ...(loadedManifest.rawManifest.vaults ?? {}) };
   delete nextVaults[vault];
-
   const rawManifest = {
     ...loadedManifest.rawManifest,
     ...(Object.keys(nextVaults).length > 0 ? { vaults: sortVaults(nextVaults) } : {}),
@@ -140,19 +128,17 @@ export async function removeVaultDefinition(
 
   await writeFile(loadedManifest.manifestPath, stringifyYaml(rawManifest), 'utf8');
 
-  const storeRoot = resolveSecretStoreRoot(options.processEnv);
-  const vaultFile = resolveSecretVaultFile(storeRoot, vault);
-  const vaultStoreRoot = path.join(storeRoot, 'vaults', vault);
+  const vaultRoot = path.join(resolveSecretStoreRoot(options.processEnv), 'vaults', vault);
   let removedStore: string | undefined;
 
   try {
-    await readFile(vaultFile, 'utf8');
-    await rm(vaultFile, { force: true });
-    await rm(vaultStoreRoot, { recursive: true, force: true });
-    removedStore = vaultStoreRoot;
+    await rm(vaultRoot, { recursive: true, force: true });
+    removedStore = vaultRoot;
   } catch {
     removedStore = undefined;
   }
+
+  await clearVaultSessionKey(vault, options.processEnv);
 
   return {
     name: vault,
@@ -172,4 +158,74 @@ export async function ensureVaultDefinition(
 
 export async function listLocalStoreVaults(options: RuntimeServiceOptions = {}): Promise<string[]> {
   return listSecretVaults(resolveSecretStoreRoot(options.processEnv));
+}
+
+export async function authenticateVault(
+  name: string,
+  options: RuntimeServiceOptions & { storeKeychain?: boolean } = {},
+): Promise<{ name: string; method: string; storedInKeychain: boolean; sessionPath: string }> {
+  const vault = name.trim() || 'default';
+  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const definition = loadedManifest.manifest.vaults[vault];
+
+  if (!definition) {
+    throw new Error(`Unknown vault "${vault}"`);
+  }
+
+  const auth = await resolveVaultAuth(vault, definition, options.processEnv ?? process.env);
+  const storeRoot = resolveSecretStoreRoot(options.processEnv);
+
+  if (definition.provider === 'local') {
+    if (!auth.passphrase) {
+      throw new Error(`Vault "${vault}" requires passphrase-based authentication.`);
+    }
+
+    const existing = await readVaultMetadata(storeRoot, vault);
+
+    if (!existing) {
+      await createSecretVault(storeRoot, vault, auth.passphrase);
+    }
+
+    const metadata = await readVaultMetadata(storeRoot, vault);
+
+    if (!metadata) {
+      throw new Error(`Failed to initialize vault "${vault}"`);
+    }
+
+    const derivedKey = deriveVaultKey(auth.passphrase, Buffer.from(metadata.salt, 'base64'), metadata.iterations);
+    const sessionPath = await writeVaultSessionKey(vault, derivedKey, options.processEnv);
+
+    if (options.storeKeychain) {
+      await writeKeychain(`cnos/${vault}`, derivedKey.toString('hex'));
+    }
+
+    return {
+      name: vault,
+      method: auth.method,
+      storedInKeychain: options.storeKeychain ?? false,
+      sessionPath,
+    };
+  }
+
+  const sessionPath = await writeVaultSessionKey(vault, Buffer.from(vault, 'utf8'), options.processEnv);
+  return {
+    name: vault,
+    method: auth.method,
+    storedInKeychain: false,
+    sessionPath,
+  };
+}
+
+export async function logoutVault(
+  name: string | undefined,
+  options: RuntimeServiceOptions & { all?: boolean } = {},
+): Promise<{ scope: string }> {
+  if (options.all) {
+    await clearAllVaultSessionKeys(options.processEnv);
+    return { scope: 'all' };
+  }
+
+  const vault = name?.trim() || 'default';
+  await clearVaultSessionKey(vault, options.processEnv);
+  return { scope: vault };
 }

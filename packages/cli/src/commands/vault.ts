@@ -2,23 +2,29 @@ import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import {
+  authenticateVault,
   createVaultDefinition,
   listLocalStoreVaults,
   listVaultDefinitions,
+  logoutVault,
   removeVaultDefinition,
 } from '../services/vaults.js';
 
-function normalizeVaultAction(args: string[]): { action: 'create' | 'list' | 'remove'; tail: string[] } {
+function normalizeVaultAction(args: string[]): { action: 'create' | 'list' | 'remove' | 'auth' | 'logout'; tail: string[] } {
   const [action = 'list', ...tail] = args;
 
-  if (['create', 'add', 'list', 'delete', 'remove'].includes(action)) {
+  if (['create', 'add', 'list', 'delete', 'remove', 'auth', 'logout'].includes(action)) {
     return {
       action:
         action === 'add' || action === 'create'
           ? 'create'
           : action === 'delete' || action === 'remove'
             ? 'remove'
-            : 'list',
+            : action === 'auth'
+              ? 'auth'
+              : action === 'logout'
+                ? 'logout'
+                : 'list',
       tail,
     };
   }
@@ -33,16 +39,18 @@ export async function runVault(args: string[] = [], options: RuntimeServiceOptio
   const { action, tail } = normalizeVaultAction(args);
   const cliArgs = [...(options.cliArgs ?? [])];
 
+  if (consumeOption(cliArgs, '--passphrase')) {
+    throw new Error('The --passphrase option is not supported in CNOS 1.4. Use env, keychain, or prompt-based auth.');
+  }
+
   if (action === 'create') {
     const name = tail[0] ?? 'default';
     const provider = consumeOption(cliArgs, '--provider') ?? 'local';
-    const passphrase = consumeOption(cliArgs, '--passphrase');
     const noPassphrase = consumeFlag(cliArgs, '--no-passphrase');
     const result = await createVaultDefinition(name, {
       ...options,
       cliArgs,
       provider,
-      ...(passphrase ? { passphrase } : {}),
       ...(noPassphrase ? { noPassphrase: true } : {}),
     });
 
@@ -51,6 +59,34 @@ export async function runVault(args: string[] = [], options: RuntimeServiceOptio
     }
 
     return `created vault "${result.name}" with provider "${result.provider}" in ${result.manifestPath}`;
+  }
+
+  if (action === 'auth') {
+    const result = await authenticateVault(tail[0] ?? 'default', {
+      ...options,
+      cliArgs,
+      storeKeychain: consumeFlag(cliArgs, '--store-keychain'),
+    });
+
+    if (options.json) {
+      return printJson(result);
+    }
+
+    return `authenticated vault "${result.name}" via ${result.method}`;
+  }
+
+  if (action === 'logout') {
+    const result = await logoutVault(tail[0], {
+      ...options,
+      cliArgs,
+      all: consumeFlag(cliArgs, '--all'),
+    });
+
+    if (options.json) {
+      return printJson(result);
+    }
+
+    return result.scope === 'all' ? 'logged out all vault sessions' : `logged out vault "${result.scope}"`;
   }
 
   if (action === 'remove') {
@@ -85,7 +121,7 @@ export async function runVault(args: string[] = [], options: RuntimeServiceOptio
   return manifestVaults
     .map(
       (vault) =>
-        `${vault.name} provider=${vault.provider} passphrase=${vault.passphrasePolicy}${
+        `${vault.name} provider=${vault.provider} auth=${vault.authMethod}${
           localStoreVaults.includes(vault.name) ? ' local-store=true' : ''
         }`,
     )
