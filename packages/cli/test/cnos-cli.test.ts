@@ -695,7 +695,7 @@ describe('@kitsy/cnos-cli', () => {
       runProfile(['create', 'stage'], {
         root,
       }),
-    ).resolves.toBe('created profile stage at .cnos\\profiles\\stage.yml');
+    ).resolves.toBe('created profile stage at .cnos\\profiles\\stage.yml; inherits values from base by default');
 
     await expect(
       runVault(['create', 'local-dev'], {
@@ -706,6 +706,30 @@ describe('@kitsy/cnos-cli', () => {
         },
       }),
     ).resolves.toBe('created vault "local-dev" with provider "local" in .cnos\\cnos.yml');
+  });
+
+  it('creates profiles with implicit base inheritance and optional no-inherit mode', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runProfile(['create', 'local'], {
+        root,
+      }),
+    ).resolves.toBe('created profile local at .cnos\\profiles\\local.yml; inherits values from base by default');
+    await expect(readFile(path.join(root, '.cnos', 'profiles', 'local.yml'), 'utf8')).resolves.toBe('name: local\n');
+
+    await expect(
+      runProfile(['create', 'isolated'], {
+        root,
+        cliArgs: ['--no-inherit'],
+      }),
+    ).resolves.toBe('created profile isolated at .cnos\\profiles\\isolated.yml without inheriting base');
+    await expect(readFile(path.join(root, '.cnos', 'profiles', 'isolated.yml'), 'utf8')).resolves.toContain(
+      'envFiles:',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'profiles', 'isolated.yml'), 'utf8')).resolves.toContain(
+      '.env.isolated',
+    );
   });
 
   it('creates vault-backed local secret refs with simple keys', async () => {

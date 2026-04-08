@@ -370,9 +370,15 @@ Recommended split:
 Create and use profiles explicitly:
 
 ```powershell
-cnos profile create stage --inherit base
+cnos profile create stage
 cnos use --profile stage
 cnos value set app.apiBaseUrl https://api.stage
+```
+
+Profiles inherit values from `base` by default. If you need a clean profile with no base fallback, use:
+
+```powershell
+cnos profile create isolated --no-inherit
 ```
 
 Checks:

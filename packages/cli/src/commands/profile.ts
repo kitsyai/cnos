@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
@@ -36,13 +36,23 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
   if (action === 'create') {
     const profile = tail[0] ?? 'stage';
     const inherit = consumeOption(cliArgs, '--inherit');
-    const result = await createProfileDefinition(root, profile, inherit);
+    const noInherit = consumeFlag(cliArgs, '--no-inherit');
+
+    if (inherit && noInherit) {
+      throw new Error('profile create accepts either --inherit <name> or --no-inherit, not both');
+    }
+
+    const result = await createProfileDefinition(root, profile, inherit, { noInherit });
 
     if (options.json) {
       return printJson(result);
     }
 
-    return `created profile ${profile} at ${displayPath(result.filePath, root)}`;
+    if (noInherit) {
+      return `created profile ${profile} at ${displayPath(result.filePath, root)} without inheriting base`;
+    }
+
+    return `created profile ${profile} at ${displayPath(result.filePath, root)}; inherits values from base by default`;
   }
 
   if (action === 'use') {

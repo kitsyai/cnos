@@ -364,11 +364,16 @@ const COMMANDS: HelpCommand[] = [
     options: [
       {
         flag: '--inherit <name>',
-        description: 'Parent profile to extend when creating a profile.',
+        description: 'Parent profile to extend when creating a profile. Base inheritance is implicit by default.',
+      },
+      {
+        flag: '--no-inherit',
+        description: 'Create a clean profile that does not inherit base fallback layers.',
       },
     ],
     examples: [
-      'cnos profile create stage --inherit base',
+      'cnos profile create stage',
+      'cnos profile create isolated --no-inherit',
       'cnos profile list',
       'cnos profile use stage',
     ],
@@ -376,9 +381,9 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'profile create',
     summary: 'Create a profile definition.',
-    usage: 'cnos profile create <name> [--inherit <name>] [--root <path>] [--json]',
-    description: 'Creates .cnos/profiles/<name>.yml for an explicit profile overlay.',
-    examples: ['cnos profile create stage --inherit base'],
+    usage: 'cnos profile create <name> [--inherit <name> | --no-inherit] [--root <path>] [--json]',
+    description: 'Creates .cnos/profiles/<name>.yml for an explicit profile overlay. New profiles inherit base by default unless --no-inherit is set.',
+    examples: ['cnos profile create stage', 'cnos profile create isolated --no-inherit'],
   },
   {
     id: 'profile list',

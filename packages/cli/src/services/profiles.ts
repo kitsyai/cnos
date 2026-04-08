@@ -7,11 +7,20 @@ export async function createProfileDefinition(
   root = process.cwd(),
   profile: string,
   inherit?: string,
-): Promise<{ filePath: string; profile: string; inherit?: string }> {
+  options: { noInherit?: boolean } = {},
+): Promise<{ filePath: string; profile: string; inherit?: string; noInherit?: boolean }> {
   const filePath = path.join(path.resolve(root), '.cnos', 'profiles', `${profile}.yml`);
   await mkdir(path.dirname(filePath), { recursive: true });
-  const document =
-    inherit && inherit !== 'base'
+  const document = options.noInherit
+    ? {
+        name: profile,
+        activate: {
+          values: [`profiles/${profile}/values`, `values/${profile}`],
+          secrets: [`profiles/${profile}/secrets`, `secrets/${profile}`],
+          envFiles: [`.env.${profile}`],
+        },
+      }
+    : inherit && inherit !== 'base'
       ? {
           name: profile,
           extends: [inherit],
@@ -26,6 +35,7 @@ export async function createProfileDefinition(
     filePath,
     profile,
     ...(inherit ? { inherit } : {}),
+    ...(options.noInherit ? { noInherit: true } : {}),
   };
 }
 
