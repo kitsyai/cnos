@@ -1,4 +1,5 @@
-import { createCnos, resolveBrowserData, type CnosCreateOptions } from '@kitsy/cnos';
+import { resolveBrowserData } from '@kitsy/cnos/build';
+import { createCnos, type CnosCreateOptions } from '@kitsy/cnos/configure';
 
 export interface NextConfigLike {
   env?: Record<string, string>;

@@ -1,4 +1,4 @@
-import { writeDump } from '@kitsy/cnos';
+import { writeDump } from '@kitsy/cnos/configure';
 
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';

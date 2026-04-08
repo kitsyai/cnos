@@ -11,7 +11,7 @@ The CNOS Solution: Before the server even starts, cnos should validate the resol
 How it looks in code:
 
 ```typeScript
-import { cnos } from '@kitsy/cnos';
+import cnos from '@kitsy/cnos';
 import { z } from 'zod'; // Or built-in cnos validation
 
 // Define the required shape

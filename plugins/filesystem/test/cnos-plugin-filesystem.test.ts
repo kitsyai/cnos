@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createCnos } from '@kitsy/cnos';
+import { createCnos } from '@kitsy/cnos/configure';
 
 import {
   collectFilesystemLayerFiles,

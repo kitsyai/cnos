@@ -12,7 +12,7 @@ export interface RewriteSourceResult {
 function importStatementFor(kind: EnvUsage['kind']): string {
   return kind === 'import-meta-env'
     ? "import cnos from '@kitsy/cnos/browser';"
-    : "import cnos from '@kitsy/cnos/runtime';";
+    : "import cnos from '@kitsy/cnos';";
 }
 
 function replacementFor(proposal: EnvMappingProposal): string {

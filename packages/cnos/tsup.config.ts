@@ -13,6 +13,7 @@ const internalPackages = [
 export default defineConfig({
   entry: [
     'src/index.ts',
+    'src/configure/index.ts',
     'src/internal.ts',
     'src/build/index.ts',
     'src/browser/index.ts',

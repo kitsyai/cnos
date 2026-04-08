@@ -4,7 +4,8 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createCnos, defaultPlugins, planDump, writeDump, type LoaderPlugin } from '../src/index.js';
+import { type LoaderPlugin } from '../src/index.js';
+import { createCnos, defaultPlugins, planDump, writeDump } from '../src/configure/index.js';
 import { writeLocalSecret } from '../src/internal.js';
 
 const fixtureRoots: string[] = [];

@@ -83,10 +83,10 @@ Also generate a thin typed wrapper that re-exports `createCnos` with the typed r
 
 ```ts
 // .cnos/types/runtime.ts (generated)
-import { createCnos as _createCnos, CreateCnosOptions } from "@kitsy/cnos";
+import { createCnos as _createCnos, CnosCreateOptions } from "@kitsy/cnos/configure";
 import type { TypedCnosRuntime } from "./cnos";
 
-export async function createCnos(options?: CreateCnosOptions): Promise<TypedCnosRuntime> {
+export async function createCnos(options?: CnosCreateOptions): Promise<TypedCnosRuntime> {
   return _createCnos(options) as unknown as TypedCnosRuntime;
 }
 ```

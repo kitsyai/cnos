@@ -35,7 +35,7 @@ afterEach(async () => {
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('@kitsy/cnos/runtime', () => {
+describe('@kitsy/cnos root runtime entry', () => {
   it('reads synchronously when bootstrapped from __CNOS_GRAPH__', async () => {
     const root = await createFixtureRoot();
     const runtime = await createCnos({
@@ -46,7 +46,7 @@ describe('@kitsy/cnos/runtime', () => {
     process.env[CNOS_GRAPH_ENV_VAR] = serializeRuntimeGraph(runtime.graph);
     vi.resetModules();
 
-    const { default: cnos } = await import('../src/runtime/index.js');
+    const { default: cnos } = await import('../src/index.js');
 
     expect(cnos('value.server.port')).toBe(3000);
     expect(cnos.value('server.port')).toBe(3000);
@@ -56,7 +56,7 @@ describe('@kitsy/cnos/runtime', () => {
   it('throws a clear error before ready() when no bootstrap payload exists', async () => {
     vi.resetModules();
 
-    const { default: cnos } = await import('../src/runtime/index.js');
+    const { default: cnos } = await import('../src/index.js');
 
     expect(() => cnos.read('value.server.port')).toThrow(
       'CNOS not initialized. Call await cnos.ready() or use cnos run.',
@@ -68,7 +68,7 @@ describe('@kitsy/cnos/runtime', () => {
     process.chdir(root);
     vi.resetModules();
 
-    const { default: cnos } = await import('../src/runtime/index.js');
+    const { default: cnos } = await import('../src/index.js');
 
     await cnos.ready();
 

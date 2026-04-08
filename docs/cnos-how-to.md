@@ -54,7 +54,7 @@ cnos secret set db.password super-secret --vault db
 ### Read config in code
 
 ```ts
-import { createCnos } from '@kitsy/cnos';
+import { createCnos } from '@kitsy/cnos/configure';
 
 const cnos = await createCnos();
 
@@ -66,7 +66,7 @@ const dbPassword = cnos.secret('db.password');
 Or, when the process is started through `cnos run`, use the singleton:
 
 ```ts
-import cnos from '@kitsy/cnos/runtime';
+import cnos from '@kitsy/cnos';
 
 const port = cnos('value.server.port');
 const dbPassword = cnos.secret('db.password');
@@ -217,7 +217,7 @@ process.env.NEXT_PUBLIC_APP_API_BASE_URL
 Server code can still use the runtime directly:
 
 ```ts
-import { createCnos } from '@kitsy/cnos';
+import { createCnos } from '@kitsy/cnos/configure';
 
 const cnos = await createCnos();
 const secret = cnos.secret('db.password');
@@ -238,7 +238,7 @@ Use `@kitsy/cnos` directly in the server process and export only public values t
 Server:
 
 ```ts
-import { createCnos } from '@kitsy/cnos';
+import { createCnos } from '@kitsy/cnos/configure';
 
 const cnos = await createCnos();
 const dbHost = cnos.value('db.host');

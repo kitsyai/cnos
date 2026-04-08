@@ -993,7 +993,7 @@ describe('@kitsy/cnos-cli', () => {
       'DATABASE_HOST: value.database.host',
     );
     await expect(readFile(path.join(root, 'src', 'config.ts'), 'utf8')).resolves.toContain(
-      "import cnos from '@kitsy/cnos/runtime';",
+      "import cnos from '@kitsy/cnos';",
     );
     await expect(readFile(path.join(root, 'src', 'config.ts.bak'), 'utf8')).resolves.toContain(
       'process.env.DATABASE_HOST',

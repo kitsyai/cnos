@@ -12,6 +12,16 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
+    "./configure": {
+      "types": "./dist/configure/index.d.ts",
+      "import": "./dist/configure/index.js",
+      "require": "./dist/configure/index.cjs"
+    },
+    "./create": {
+      "types": "./dist/configure/index.d.ts",
+      "import": "./dist/configure/index.js",
+      "require": "./dist/configure/index.cjs"
+    },
     "./internal": {
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js",

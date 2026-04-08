@@ -1,10 +1,10 @@
 # @kitsy/cnos
 
-Developer-friendly CNOS runtime assembly. It bundles the core engine plus the official built-in plugins, exposes the main `createCnos(...)` entry point for app code, and re-exports the built-ins under `@kitsy/cnos/plugins/*`.
+Developer-friendly CNOS runtime assembly. It bundles the core engine plus the official built-in plugins, exposes the default singleton runtime at `@kitsy/cnos`, and provides explicit creation/configuration helpers under `@kitsy/cnos/configure`.
 
 Current runtime surface includes:
-- `createCnos()`
-- `@kitsy/cnos/runtime` singleton with `cnos(key)` and `ready()`
+- `@kitsy/cnos` singleton with `cnos(key)` and `ready()`
+- `@kitsy/cnos/configure` with `createCnos()`
 - `@kitsy/cnos/browser` for promoted `public.*` reads in browser code
 - `@kitsy/cnos/build` with `resolveBrowserData()`
 - `read`, `require`, `readOr`

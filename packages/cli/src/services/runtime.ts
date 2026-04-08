@@ -1,4 +1,4 @@
-import { createCnos } from '@kitsy/cnos';
+import { createCnos } from '@kitsy/cnos/configure';
 
 export interface RuntimeServiceOptions {
   root?: string;

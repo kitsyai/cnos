@@ -1,4 +1,5 @@
-import { createCnos, type LoaderPlugin } from '@kitsy/cnos';
+import { type LoaderPlugin } from '@kitsy/cnos';
+import { createCnos } from '@kitsy/cnos/configure';
 import { fileURLToPath } from 'node:url';
 
 export async function runBasicNodeExample() {

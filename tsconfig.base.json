@@ -21,6 +21,21 @@
       "@kitsy/cnos": [
         "packages/cnos/src/index.ts"
       ],
+      "@kitsy/cnos/configure": [
+        "packages/cnos/src/configure/index.ts"
+      ],
+      "@kitsy/cnos/create": [
+        "packages/cnos/src/configure/index.ts"
+      ],
+      "@kitsy/cnos/build": [
+        "packages/cnos/src/build/index.ts"
+      ],
+      "@kitsy/cnos/browser": [
+        "packages/cnos/src/browser/index.ts"
+      ],
+      "@kitsy/cnos/runtime": [
+        "packages/cnos/src/runtime/index.ts"
+      ],
       "@kitsy/cnos/internal": [
         "packages/cnos/src/internal.ts"
       ],

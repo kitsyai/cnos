@@ -131,6 +131,14 @@ describe('@kitsy/cnos codegen', () => {
         '  secret(path: string): unknown;',
         '  require(key: string): unknown;',
         '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await mkdir(path.join(compileRoot, 'node_modules', '@kitsy', 'cnos', 'configure'), { recursive: true });
+    await writeFile(
+      path.join(compileRoot, 'node_modules', '@kitsy', 'cnos', 'configure', 'index.d.ts'),
+      [
+        "import type { CnosRuntime } from '../index';",
         'export interface CnosCreateOptions {',
         '  root?: string;',
         '}',

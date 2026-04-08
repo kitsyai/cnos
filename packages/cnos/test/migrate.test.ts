@@ -90,7 +90,7 @@ describe('@kitsy/cnos migrate helpers', () => {
     expect(rewriteResult.rewrittenFiles).toContain(path.join(root, 'src', 'server.ts'));
     expect(rewriteResult.backupFiles).toContain(path.join(root, 'src', 'server.ts.bak'));
     expect(await readFile(path.join(root, 'src', 'server.ts'), 'utf8')).toContain(
-      "import cnos from '@kitsy/cnos/runtime';",
+      "import cnos from '@kitsy/cnos';",
     );
     expect(await readFile(path.join(root, 'src', 'server.ts'), 'utf8')).toContain(
       'cnos.value("database.host")',
