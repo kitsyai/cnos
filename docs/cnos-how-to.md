@@ -46,6 +46,14 @@ cnos value set db.host localhost
 cnos value set app.name my-service
 ```
 
+Values can be structured, not just strings:
+
+```powershell
+cnos value set flags.upi_enabled false
+cnos value set api.default_query_params '["ab", "bc"]'
+cnos value set app.theme '{ primary: blue, density: compact }'
+```
+
 ### Define a local secret
 
 ```powershell
@@ -76,6 +84,17 @@ import cnos from '@kitsy/cnos';
 const port = cnos('value.server.port');
 const dbPassword = cnos.secret('db.password');
 ```
+
+Other runtime helpers:
+
+```ts
+const port = cnos.readOr('value.server.port', 3000);
+const flags = cnos.toNamespace('flags');
+const exported = cnos.toEnv();
+const publicEnv = cnos.toPublicEnv();
+```
+
+There are no `readAsString()` / `readAsNumber()` helpers in the current runtime. Use `read<T>()`, `require<T>()`, `readOr()`, or the namespace helpers.
 
 ### Run the service with CNOS-injected env
 

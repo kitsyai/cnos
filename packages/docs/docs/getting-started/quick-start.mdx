@@ -9,6 +9,7 @@ description: Go from zero to a running CNOS-backed project in a few minutes.
 cnos init
 cnos value set app.name demo
 cnos value set server.port 3000
+cnos value set api.default_query_params '["ab", "bc"]'
 cnos read value.app.name
 cnos run -- node server.js
 ```
@@ -29,4 +30,5 @@ import { createCnos } from '@kitsy/cnos/configure';
 
 const runtime = await createCnos();
 console.log(runtime.value('app.name'));
+console.log(runtime.read<string[]>('value.api.default_query_params'));
 ```

@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-next",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Next.js integration for CNOS public config injection.",
   "type": "module",
   "main": "./dist/index.cjs",

@@ -11,3 +11,38 @@ cnos value get app.name
 cnos value list --prefix app.
 cnos value delete app.name
 ```
+
+## Typed input
+
+`cnos value set` parses the input as YAML before writing it. That means you can store more than strings.
+
+```bash
+cnos value set server.port 3000
+cnos value set flags.upi_enabled false
+cnos value set api.default_query_params '["ab", "bc"]'
+cnos value set app.theme '{ primary: blue, density: compact }'
+```
+
+Those values are stored and read back as:
+
+- number
+- boolean
+- array
+- object
+
+## Read forms
+
+The most common CLI read forms are:
+
+```bash
+cnos value get app.name
+cnos get value app.name
+cnos get value.app.name
+cnos read value.app.name
+```
+
+## Notes
+
+- Values are private by default.
+- To expose a value to browser/public surfaces, use `cnos promote`.
+- To expose a value as shell env, map it through `envMapping.explicit` or `cnos promote --to env`.

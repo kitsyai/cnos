@@ -5,6 +5,8 @@ description: Use the default CNOS runtime singleton from the root package.
 
 # Singleton Runtime
 
+Use the default server/runtime singleton when your process is started through `cnos run`, or when you want the zero-config default entrypoint.
+
 ```ts
 import cnos from '@kitsy/cnos';
 
@@ -14,3 +16,52 @@ cnos('value.app.name');
 cnos.value('app.name');
 cnos.secret('app.token');
 ```
+
+## Available methods
+
+The runtime currently exposes:
+
+- `cnos(key)` as shorthand for `cnos.read(key)`
+- `cnos.read(key)`
+- `cnos.require(key)`
+- `cnos.readOr(key, fallback)`
+- `cnos.value(path)`
+- `cnos.secret(path)`
+- `cnos.meta(path)`
+- `cnos.inspect(key)`
+- `cnos.toNamespace(namespace)`
+- `cnos.toEnv()`
+- `cnos.toPublicEnv()`
+
+Example:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+
+const appName = cnos.value('app.name');
+const dbPassword = cnos.secret('db.password');
+const profile = cnos.meta('profile');
+const port = cnos.readOr('value.server.port', 3000);
+const flags = cnos.toNamespace('flags');
+```
+
+## Typed values
+
+CNOS values are not limited to strings. If the underlying config stores numbers, booleans, arrays, or objects, runtime reads return those values as-is.
+
+```ts
+const enabled = cnos.value<boolean>('flags.upi_enabled');
+const params = cnos.read<string[]>('value.api.default_query_params');
+```
+
+## What does not exist
+
+The current v1 runtime does not expose helper methods such as:
+
+- `readAsString()`
+- `readAsNumber()`
+- `readAsBoolean()`
+
+Use `read<T>()`, `require<T>()`, or the namespace helpers instead.
