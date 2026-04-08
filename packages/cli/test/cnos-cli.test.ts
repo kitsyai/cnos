@@ -476,6 +476,16 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--vault', 'default'],
       }),
     ).resolves.toBe('****');
+    await expect(
+      runRead('secret.app.token', {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--vault', 'default', '--reveal'],
+      }),
+    ).resolves.toBe('super-secret');
 
     await expect(
       runSecret(['get', 'app.token'], {
@@ -497,6 +507,14 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--vault', 'default', '--reveal'],
       }),
     ).resolves.toBe('super-secret');
+    await expect(parseArgs(['get', 'secret.app.token', '--reveal'])).toEqual({
+      command: 'secret',
+      args: ['get', 'app.token'],
+      options: {
+        cliArgs: ['--reveal'],
+      },
+      passthrough: [],
+    });
   });
 
   it('supports value CRUD and generic list flows without leaking ambient env into value listings', async () => {

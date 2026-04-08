@@ -1,3 +1,4 @@
+import { consumeFlag } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import { maskSecretValue } from '../format/maskSecret.js';
 import { printValue } from '../format/printValue.js';
@@ -12,7 +13,9 @@ export async function runRead(key: string, options: RuntimeServiceOptions = {}):
   }
 
   const isSecret = key.startsWith('secret.');
-  const valueForOutput = isSecret ? maskSecretValue(value) : value;
+  const cliArgs = [...(options.cliArgs ?? [])];
+  const reveal = consumeFlag(cliArgs, '--reveal');
+  const valueForOutput = isSecret && !reveal ? maskSecretValue(value) : value;
 
   if (options.json) {
     return printJson({ key, value: valueForOutput });
