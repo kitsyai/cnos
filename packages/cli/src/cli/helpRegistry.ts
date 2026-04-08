@@ -250,7 +250,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Create a manifest-defined vault.',
     usage: 'cnos vault create <name> [--provider <local|github-secrets>] [--no-passphrase] [global-options]',
     description:
-      'Creates a vault definition in .cnos/cnos.yml and, for local vaults, initializes the encrypted store under ~/.cnos/secrets.',
+      'Creates a vault definition in .cnos/cnos.yml and, for local vaults, initializes the encrypted store under ~/.cnos/secrets. CNOS prompts for a passphrase when one is not already available from env or keychain.',
     examples: [
       'cnos vault create local-dev',
       'cnos vault create github-ci --provider github-secrets --no-passphrase',
@@ -261,7 +261,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Authenticate a vault for the current shell session.',
     usage: 'cnos vault auth <name> [--store-keychain] [global-options]',
     description:
-      'Authenticates a local vault using env, keychain, or prompt-based auth and stores a derived session key for later CNOS commands in the same shell.',
+      'Authenticates an existing local vault using env, keychain, or prompt-based auth and stores a derived session key for later CNOS commands in the same shell. Wrong passphrases fail authentication.',
     examples: ['cnos vault auth local-dev', 'cnos vault auth local-dev --store-keychain'],
   },
   {

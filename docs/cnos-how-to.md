@@ -52,6 +52,8 @@ cnos vault auth db
 cnos secret set db.password super-secret --vault db
 ```
 
+`cnos vault create <name>` initializes the local encrypted vault immediately. If `CNOS_SECRET_PASSPHRASE_<VAULT>` or `CNOS_SECRET_PASSPHRASE` is not set and no keychain entry exists, CNOS prompts for the passphrase at create time. `cnos vault auth <name>` only re-authenticates an existing vault and fails on a wrong passphrase.
+
 ### Read config in code
 
 ```ts

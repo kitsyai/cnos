@@ -688,6 +688,46 @@ describe('@kitsy/cnos-cli', () => {
     );
   });
 
+  it('initializes local vaults during create and rejects wrong auth passphrases later', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-vault-auth-'));
+    fixtureRoots.push(secretHome);
+
+    await expect(
+      runVault(['create', 'hilk'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'correct-pass',
+        },
+      }),
+    ).resolves.toContain('created vault "hilk"');
+
+    await expect(readFile(path.join(secretHome, 'vaults', 'hilk', 'meta.yml'), 'utf8')).resolves.toContain(
+      'pbkdf2-sha512',
+    );
+
+    await expect(
+      runVault(['auth', 'hilk'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'wrong-pass',
+        },
+      }),
+    ).rejects.toThrow('Failed to decrypt CNOS local vault. Check vault authentication.');
+
+    await expect(
+      runVault(['auth', 'hilk'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'correct-pass',
+        },
+      }),
+    ).resolves.toContain('authenticated vault "hilk"');
+  });
+
   it('manages manifest-defined vaults and github-secrets secret flows', async () => {
     const root = await createRuntimeFixture();
 

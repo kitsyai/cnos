@@ -12,3 +12,5 @@ cnos vault list
 cnos vault logout default
 cnos vault remove default
 ```
+
+For local vaults, `cnos vault create <name>` initializes the encrypted keystore immediately. CNOS prompts for a passphrase if one is not already available through `CNOS_SECRET_PASSPHRASE_<VAULT>`, `CNOS_SECRET_PASSPHRASE`, or the OS keychain. `cnos vault auth <name>` re-authenticates an existing vault and fails on wrong credentials.
