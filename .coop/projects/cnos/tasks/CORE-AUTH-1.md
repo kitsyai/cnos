@@ -3,7 +3,7 @@ id: CORE-AUTH-1
 short_id: 745a16add817
 title: Vault auth sessions and cross-platform keychain adapters
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

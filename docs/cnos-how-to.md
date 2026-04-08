@@ -47,7 +47,8 @@ cnos value set app.name my-service
 ### Define a local secret
 
 ```powershell
-cnos vault create db --passphrase dev-pass
+cnos vault create db
+cnos vault auth db
 cnos secret set db.password super-secret --vault db
 ```
 
@@ -402,7 +403,8 @@ cnos list values --workspace webapp
 Recommended local secret flow:
 
 ```powershell
-cnos vault create default --passphrase dev-pass
+cnos vault create default
+cnos vault auth default
 cnos secret set app.token super-secret --vault default
 ```
 
@@ -416,12 +418,13 @@ app:
     ref: app.token
 ```
 
-The encrypted value is stored outside the repo.
+The encrypted value is stored outside the repo. Auth comes from env, keychain, or an interactive prompt.
 
-You can avoid passing the passphrase every time by setting:
+For non-interactive shells, set:
 
 ```powershell
 $env:CNOS_SECRET_PASSPHRASE='dev-pass'
+$env:CNOS_SECRET_PASSPHRASE_DEFAULT='dev-pass'
 ```
 
 For CI-style passwordless refs, create a GitHub-backed vault:
@@ -455,7 +458,8 @@ cnos inspect value.app.id
 cnos list values
 cnos list env
 cnos profile create stage --inherit base
-cnos vault create default --passphrase dev-pass
+cnos vault create default
+cnos vault auth default
 cnos secret set app.token super-secret --vault default
 cnos vault create github-ci --provider github-secrets --no-passphrase
 cnos secret set ci.token APP_TOKEN --vault github-ci

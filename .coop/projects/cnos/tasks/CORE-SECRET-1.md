@@ -3,7 +3,7 @@ id: CORE-SECRET-1
 short_id: 661062bcba2d
 title: Core secret provider abstraction, cache, and batch resolution
 type: feature
-status: in_progress
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

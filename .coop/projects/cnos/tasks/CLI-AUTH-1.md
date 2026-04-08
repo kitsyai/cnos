@@ -3,7 +3,7 @@ id: CLI-AUTH-1
 short_id: cf910fafbb67
 title: CLI vault auth and threat-safe auth UX
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

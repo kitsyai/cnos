@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs';
+import { watch } from 'node:fs';
 
 import { loadManifest } from '@kitsy/cnos-core';
 
@@ -10,7 +10,12 @@ export interface WatchSchemaOptions extends WriteCodegenOutputOptions {
   onError?: (error: unknown) => void | Promise<void>;
 }
 
-export async function watchSchema(options: WatchSchemaOptions = {}): Promise<FSWatcher> {
+export interface CnosWatchHandle {
+  close(): void;
+  on(event: 'close', listener: () => void): this;
+}
+
+export async function watchSchema(options: WatchSchemaOptions = {}): Promise<CnosWatchHandle> {
   const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
   let timeout: NodeJS.Timeout | undefined;
   const debounceMs = options.debounceMs ?? 300;

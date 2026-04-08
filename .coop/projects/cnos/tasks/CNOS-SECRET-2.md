@@ -3,7 +3,7 @@ id: CNOS-SECRET-2
 short_id: 7de0f717959a
 title: Docs, examples, and daily-use-case validation for secure secret model
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

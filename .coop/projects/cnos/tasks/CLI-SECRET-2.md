@@ -3,7 +3,7 @@ id: CLI-SECRET-2
 short_id: 37c9e69c19be
 title: Doctor, audit, and security diagnostics for secret hardening
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

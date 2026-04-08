@@ -3,7 +3,7 @@ id: CNOS-SECRET-1
 short_id: 9cccf695da2f
 title: Runtime singleton and createCnos authenticated secret cache wiring
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

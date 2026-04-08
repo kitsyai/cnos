@@ -3,7 +3,7 @@ id: CLI-SECRET-1
 short_id: 50fbac36205d
 title: CLI secret CRUD masking and reveal controls
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

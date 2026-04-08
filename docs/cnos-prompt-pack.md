@@ -180,9 +180,10 @@ Build all commands with workspace support:
 13. `cnos use show`
 14. `cnos list env`
 15. `cnos list public`
-16. `cnos vault create <name> --passphrase <value>`
-17. `cnos vault create github-ci --provider github-secrets --no-passphrase`
-17. concise error output by default, stack traces only with `--verbose`
+16. `cnos vault create <name>`
+17. `cnos vault auth <name>`
+18. `cnos vault create github-ci --provider github-secrets --no-passphrase`
+19. concise error output by default, stack traces only with `--verbose`
 
 All relevant commands must accept:
 - `--workspace`

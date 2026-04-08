@@ -3,7 +3,7 @@ id: CORE-SECRET-2
 short_id: 6f2e6f3f8b16
 title: Secure local vault storage format and crypto hard break
 type: feature
-status: todo
+status: done
 created: 2026-04-08
 updated: 2026-04-08
 aliases: []

@@ -836,14 +836,15 @@ Manages manifest-defined vaults.
 
 Examples:
 ```bash
-cnos vault create local-dev --passphrase dev-pass
+cnos vault create local-dev
+cnos vault auth local-dev
 cnos vault create github-ci --provider github-secrets --no-passphrase
 cnos vault list
 cnos vault remove local-dev
 ```
 
 Rules:
-- local vaults require a passphrase policy and store encrypted material outside the repo
+- local vaults store encrypted material outside the repo and authenticate through env, keychain, or prompt-based auth
 - `github-secrets` vaults are passwordless and resolve refs from `process.env`
 - secret flows may use `--vault <name>` to infer provider behavior
 
