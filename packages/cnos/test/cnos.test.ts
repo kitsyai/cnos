@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createCnos, defaultPlugins, planDump, writeDump, type LoaderPlugin } from '../src/index.js';
+import { writeLocalSecret } from '../src/internal.js';
 
 const fixtureRoots: string[] = [];
 
@@ -434,5 +435,41 @@ describe('@kitsy/cnos', () => {
         },
       ],
     });
+  });
+
+  it('resolves local-vault secrets in app code from ambient process.env by default', async () => {
+    const root = await createFixtureRoot();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-secret-home-'));
+    fixtureRoots.push(secretHome);
+    process.env.CNOS_SECRET_HOME = secretHome;
+    process.env.CNOS_SECRET_PASSPHRASE = 'dev-pass';
+
+    await mkdir(path.join(root, 'cnos', 'secrets', 'base'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: cnos-runtime',
+        'vaults:',
+        '  default:',
+        '    provider: local',
+        '    passphrase: env:CNOS_SECRET_PASSPHRASE',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'secrets', 'base', 'app.yml'),
+      ['app:', '  token:', '    provider: local', '    vault: default', '    ref: app.token'].join('\n'),
+    );
+    await writeLocalSecret(secretHome, 'app.token', 'super-secret', 'dev-pass', 'default');
+
+    const runtime = await createCnos({
+      root,
+    });
+
+    expect(runtime.require('secret.app.token')).toBe('super-secret');
+
+    delete process.env.CNOS_SECRET_HOME;
+    delete process.env.CNOS_SECRET_PASSPHRASE;
   });
 });

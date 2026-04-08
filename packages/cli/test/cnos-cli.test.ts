@@ -135,6 +135,22 @@ describe('@kitsy/cnos-cli', () => {
   });
 
   it('normalizes verb-first aliases for value, secret, and profile flows', () => {
+    expect(parseArgs(['set', 'value', 'app.name', 'demo'])).toEqual({
+      command: 'value',
+      args: ['set', 'app.name', 'demo'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['get', 'secret', 'app.token'])).toEqual({
+      command: 'secret',
+      args: ['get', 'app.token'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
     expect(parseArgs(['add', 'value', 'app.name', 'demo'])).toEqual({
       command: 'value',
       args: ['set', 'app.name', 'demo'],
@@ -314,6 +330,51 @@ describe('@kitsy/cnos-cli', () => {
     await expect(runSecret('app.token', { root, workspace: 'api', processEnv: {} })).resolves.toBe(
       'super-secret',
     );
+  });
+
+  it('resolves vault-backed secrets through read and secret get when a passphrase is provided', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-secret-read-'));
+    fixtureRoots.push(secretHome);
+
+    await runVault(['create', 'default'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+      },
+      cliArgs: ['--passphrase', 'dev-pass'],
+    });
+
+    await runSecret(['set', 'app.token', 'super-secret'], {
+      root,
+      workspace: 'api',
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+      },
+      cliArgs: ['--local', '--vault', 'default', '--passphrase', 'dev-pass'],
+    });
+
+    await expect(
+      runRead('secret.app.token', {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--vault', 'default', '--passphrase', 'dev-pass'],
+      }),
+    ).resolves.toBe('super-secret');
+
+    await expect(
+      runSecret(['get', 'app.token'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--vault', 'default', '--passphrase', 'dev-pass'],
+      }),
+    ).resolves.toBe('super-secret');
   });
 
   it('supports value CRUD and generic list flows without leaking ambient env into value listings', async () => {

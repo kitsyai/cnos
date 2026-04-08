@@ -11,6 +11,7 @@ import { setSingletonRuntime } from './runtime/state.js';
 export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosRuntime> {
   const runtime = await createCoreCnos({
     ...options,
+    processEnv: options.processEnv ?? process.env,
     cnosVersion: packageJson.version,
     plugins: [...defaultPlugins(), ...(options.plugins ?? [])],
   });

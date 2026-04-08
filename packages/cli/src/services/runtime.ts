@@ -1,5 +1,9 @@
 import { createCnos } from '@kitsy/cnos';
 
+import { getVaultPassphraseEnvVar } from '@kitsy/cnos/internal';
+
+import { consumeOption } from '../cli/commandOptions.js';
+
 export interface RuntimeServiceOptions {
   root?: string;
   workspace?: string;
@@ -9,6 +13,24 @@ export interface RuntimeServiceOptions {
   verbose?: boolean;
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
+}
+
+function deriveRuntimeProcessEnv(options: RuntimeServiceOptions): Record<string, string | undefined> {
+  const cliArgs = [...(options.cliArgs ?? [])];
+  const vault = consumeOption(cliArgs, '--vault') ?? 'default';
+  const passphrase = consumeOption(cliArgs, '--passphrase');
+  const baseEnv = {
+    ...(options.processEnv ?? process.env),
+  };
+
+  if (!passphrase) {
+    return baseEnv;
+  }
+
+  return {
+    ...baseEnv,
+    [getVaultPassphraseEnvVar(vault)]: passphrase,
+  };
 }
 
 export async function createRuntimeService(options: RuntimeServiceOptions = {}) {
@@ -38,13 +60,7 @@ export async function createRuntimeService(options: RuntimeServiceOptions = {}) 
           cliArgs: options.cliArgs,
         }
       : {}),
-    ...(options.processEnv
-      ? {
-          processEnv: options.processEnv,
-        }
-      : {
-          processEnv: process.env,
-        }),
+    processEnv: deriveRuntimeProcessEnv(options),
   };
 
   return createCnos({

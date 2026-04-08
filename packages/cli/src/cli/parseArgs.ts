@@ -44,6 +44,10 @@ function normalizeCommand(argv: string[]): string[] {
   const resource = rest[0];
   const remaining = rest.slice(1);
 
+  if ((command === 'set' || command === 'get') && (resource === 'value' || resource === 'secret')) {
+    return [resource, command, ...remaining];
+  }
+
   if ((command === 'create' || command === 'add') && resource === 'profile') {
     return ['profile', 'create', ...remaining];
   }
