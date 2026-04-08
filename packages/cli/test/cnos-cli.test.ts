@@ -18,6 +18,7 @@ import { runInit } from '../src/commands/init.js';
 import { runInspect } from '../src/commands/inspect.js';
 import { runList } from '../src/commands/list.js';
 import { runMigrate } from '../src/commands/migrate.js';
+import { runNamespace } from '../src/commands/namespace.js';
 import { runOnboard } from '../src/commands/onboard.js';
 import { runProfile } from '../src/commands/profile.js';
 import { runRead } from '../src/commands/read.js';
@@ -87,6 +88,10 @@ async function createRuntimeFixture(): Promise<string> {
       'public:',
       '  promote:',
       '    - value.api.baseUrl',
+      'namespaces:',
+      '  flags:',
+      '    kind: data',
+      '    shareable: true',
       'schema:',
       '  value.server.port:',
       '    type: number',
@@ -215,6 +220,22 @@ describe('@kitsy/cnos-cli', () => {
     expect(parseArgs(['remove', 'secret.app.token'])).toEqual({
       command: 'secret',
       args: ['delete', 'app.token'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['set', 'flags.upi_enabled', 'false'])).toEqual({
+      command: 'flags',
+      args: ['set', 'upi_enabled', 'false'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+    expect(parseArgs(['get', 'flags.upi_enabled'])).toEqual({
+      command: 'flags',
+      args: ['get', 'upi_enabled'],
       options: {
         cliArgs: [],
       },
@@ -353,7 +374,8 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
-    expect(runHelp('list')).toContain('--namespace <value|secret|meta|env|public|all>');
+    expect(runHelp('list')).toContain('--namespace <name>');
+    expect(runHelp('list')).toContain('cnos list flags');
     expect(runHelp('list')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--framework <name>');
     expect(runHelp('export env')).toContain('--to <path>');
@@ -620,6 +642,72 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
       'PORT: value.server.port',
     );
+  });
+
+  it('supports custom data namespace CRUD, public promotion, and env export', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runNamespace('flags', ['set', 'upi_enabled', 'false'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('set flags.upi_enabled');
+    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'flags', 'upi_enabled.yml'), 'utf8')).resolves.toContain(
+      'upi_enabled: false',
+    );
+
+    await expect(
+      runNamespace('flags', ['get', 'upi_enabled'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toBe('false');
+    await expect(
+      runList(['flags'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('flags.upi_enabled=false');
+
+    await expect(
+      runPromote(['flags.upi_enabled'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'public'],
+      }),
+    ).resolves.toContain('promoted flags.upi_enabled to public');
+    await expect(
+      runPromote(['flags.upi_enabled'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'env', '--as', 'FLAGS_UPI_ENABLED'],
+      }),
+    ).resolves.toContain('promoted flags.upi_enabled to env as FLAGS_UPI_ENABLED');
+    await expect(
+      runRead('public.flags.upi_enabled', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toBe('false');
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('FLAGS_UPI_ENABLED=false');
+    await expect(
+      runNamespace('flags', ['delete', 'upi_enabled'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('deleted flags.upi_enabled');
   });
 
   it('prints inspect output in text and json modes', async () => {

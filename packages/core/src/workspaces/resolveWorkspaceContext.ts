@@ -24,14 +24,27 @@ async function exists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function resolveLocalWorkspaceRoot(manifestRoot: string, workspaceId: string): Promise<string> {
+async function resolveLocalWorkspaceRoot(
+  manifestRoot: string,
+  workspaceId: string,
+  manifest: NormalizedManifest,
+): Promise<string> {
   const workspaceRoot = path.join(manifestRoot, 'workspaces', workspaceId);
 
   if (await exists(workspaceRoot)) {
     return workspaceRoot;
   }
 
-  const legacyMarkers = ['values', 'secrets', 'env', 'profiles'].map((segment) =>
+  const customDataNamespaceRoots = Object.entries(manifest.namespaces)
+    .filter(
+      ([namespace, definition]) =>
+        namespace !== 'value' &&
+        namespace !== 'secret' &&
+        definition.kind === 'data' &&
+        !definition.sensitive,
+    )
+    .map(([namespace]) => namespace);
+  const legacyMarkers = ['values', 'secrets', 'env', 'profiles', ...customDataNamespaceRoots].map((segment) =>
     path.join(manifestRoot, segment),
   );
 
@@ -148,7 +161,7 @@ export async function resolveWorkspaceContext(
     workspaceRoots.push({
       scope: 'local',
       workspaceId: chainWorkspaceId,
-      path: await resolveLocalWorkspaceRoot(options.manifestRoot, chainWorkspaceId),
+      path: await resolveLocalWorkspaceRoot(options.manifestRoot, chainWorkspaceId, manifest),
     });
   }
 

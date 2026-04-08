@@ -29,7 +29,7 @@ function normalizeNamespace(value?: string): ListNamespace {
     return 'public';
   }
 
-  throw new Error(`Unsupported list namespace: ${value}`);
+  return value as ListNamespace;
 }
 
 export async function runList(args: string[] = [], options: RuntimeServiceOptions = {}): Promise<string> {

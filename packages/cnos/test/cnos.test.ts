@@ -267,6 +267,44 @@ describe('@kitsy/cnos', () => {
     });
   });
 
+  it('loads custom data namespaces from the filesystem and projects them to public/env', async () => {
+    const root = await createFixtureRoot();
+    await mkdir(path.join(root, 'cnos', 'flags'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: cnos-runtime',
+        'namespaces:',
+        '  flags:',
+        '    kind: data',
+        '    shareable: true',
+        'envMapping:',
+        '  explicit:',
+        '    FLAGS_UPI_ENABLED: flags.upi_enabled',
+        'public:',
+        '  promote:',
+        '    - flags.upi_enabled',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(root, 'cnos', 'flags', 'upi_enabled.yml'),
+      'upi_enabled: false\n',
+    );
+
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+
+    expect(runtime.require('flags.upi_enabled')).toBe(false);
+    expect(runtime.require('public.flags.upi_enabled')).toBe(false);
+    expect(runtime.toEnv()).toEqual({
+      FLAGS_UPI_ENABLED: 'false',
+    });
+  });
+
   it('expands inherited profiles and preserves parent-before-child provenance', async () => {
     const root = await createFixtureRoot();
     await mkdir(path.join(root, 'cnos', 'profiles'), { recursive: true });

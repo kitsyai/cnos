@@ -106,6 +106,7 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
 
     const plugin = createDotenvPlugin();
     const entries = await plugin.load({
+      manifest: {} as never,
       manifestConfig: {
         root: './env',
         envMapping: {

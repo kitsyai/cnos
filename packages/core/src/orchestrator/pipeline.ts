@@ -20,6 +20,7 @@ export async function runPipeline(options: PipelineOptions): Promise<ConfigEntry
   const collectedEntries = await Promise.all(
     options.plugins.map((plugin) =>
       plugin.load({
+        manifest: options.manifest,
         manifestConfig: {
           ...(options.manifest.sources[plugin.id] ?? {}),
           envMapping: options.manifest.envMapping,

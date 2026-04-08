@@ -1,6 +1,6 @@
 ---
 title: Namespaces
-description: Understand value, secret, meta, public, and env projection surfaces.
+description: Understand value, secret, meta, public, env, and custom data namespaces.
 ---
 
 # Namespaces
@@ -10,8 +10,16 @@ Primary namespaces:
 - `value.*`
 - `secret.*`
 - `meta.*`
+- custom data namespaces such as `flags.*` or `config.*` when declared in `.cnos/cnos.yml`
 
 Derived surfaces:
 
 - `public.*` for promoted browser-safe values
 - explicit env exports through `envMapping.explicit`
+
+Custom data namespaces can be:
+
+- read at runtime with `cnos('flags.upi_enabled')`
+- written through the CLI with `cnos set flags.upi_enabled false`
+- promoted to `public.*` when the namespace is `shareable: true`
+- exported through `envMapping.explicit`

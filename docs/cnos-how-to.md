@@ -23,6 +23,7 @@ Core concepts:
 - values are private by default.
 - public/browser exposure comes from `public.promote`.
 - shell env export comes from `envMapping.explicit`.
+- custom data namespaces such as `flags.*` can be written and promoted in v1 when declared under `namespaces`.
 - local secret material is stored outside the repo under `~/.cnos/secrets`.
 
 ## 1. Pure Backend Project
@@ -103,6 +104,45 @@ cnos list values
 cnos list env
 cnos inspect value.server.port
 cnos validate
+```
+
+### Custom data namespaces
+
+You can declare additional writable data namespaces and use them like `value.*` in code and CLI.
+
+```yaml
+namespaces:
+  flags:
+    kind: data
+    shareable: true
+
+public:
+  promote:
+    - flags.upi_enabled
+
+envMapping:
+  explicit:
+    FLAGS_UPI_ENABLED: flags.upi_enabled
+```
+
+Then:
+
+```powershell
+cnos set flags.upi_enabled false
+cnos get flags.upi_enabled
+cnos list flags
+cnos promote flags.upi_enabled --to public
+cnos promote flags.upi_enabled --to env --as FLAGS_UPI_ENABLED
+```
+
+In server code:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+console.log(cnos('flags.upi_enabled'));
+console.log(cnos('public.flags.upi_enabled'));
 ```
 
 ## 2. Pure Frontend Static Bundle

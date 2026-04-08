@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getNamespaceDefinition,
   createSecretVaultProvider,
   parseYaml,
   resolveConfigDocumentPath,
@@ -106,7 +107,7 @@ function getSelectedWorkspaceRoot(
 }
 
 export async function defineValue(
-  namespace: 'value' | 'secret',
+  namespace: string,
   configPath: string,
   rawValue: string,
   options: RuntimeServiceOptions & {
@@ -133,6 +134,25 @@ export async function defineValue(
   }
 
   const runtime = await createRuntimeService(options);
+
+  if (namespace !== 'value' && namespace !== 'secret' && !runtime.manifest.namespaces[namespace]) {
+    throw new Error(`Cannot write ${namespace}.${configPath} because namespace "${namespace}" is not declared in .cnos/cnos.yml.`);
+  }
+
+  const namespaceDefinition = getNamespaceDefinition(runtime.manifest, namespace);
+
+  if (namespaceDefinition.kind !== 'data') {
+    throw new Error(`Cannot write ${namespace}.${configPath} because namespace "${namespace}" is not a data namespace.`);
+  }
+
+  if (namespaceDefinition.readonly) {
+    throw new Error(`Cannot write ${namespace}.${configPath} because namespace "${namespace}" is readonly.`);
+  }
+
+  if (namespaceDefinition.sensitive) {
+    throw new Error(`Cannot write ${namespace}.${configPath} with the generic data writer because namespace "${namespace}" is sensitive.`);
+  }
+
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
   const filePath = resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile);
@@ -257,7 +277,7 @@ export async function deleteSecret(
 }
 
 export async function deleteValue(
-  namespace: 'value' | 'secret',
+  namespace: string,
   configPath: string,
   options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
 ): Promise<{ filePath: string; deleted: boolean }> {
@@ -266,6 +286,25 @@ export async function deleteValue(
   }
 
   const runtime = await createRuntimeService(options);
+
+  if (namespace !== 'value' && namespace !== 'secret' && !runtime.manifest.namespaces[namespace]) {
+    throw new Error(`Cannot delete ${namespace}.${configPath} because namespace "${namespace}" is not declared in .cnos/cnos.yml.`);
+  }
+
+  const namespaceDefinition = getNamespaceDefinition(runtime.manifest, namespace);
+
+  if (namespaceDefinition.kind !== 'data') {
+    throw new Error(`Cannot delete ${namespace}.${configPath} because namespace "${namespace}" is not a data namespace.`);
+  }
+
+  if (namespaceDefinition.readonly) {
+    throw new Error(`Cannot delete ${namespace}.${configPath} because namespace "${namespace}" is readonly.`);
+  }
+
+  if (namespaceDefinition.sensitive) {
+    throw new Error(`Cannot delete ${namespace}.${configPath} with the generic data writer because namespace "${namespace}" is sensitive.`);
+  }
+
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
   const filePath = resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile);

@@ -20,11 +20,40 @@ export function createFilesystemValuesPlugin(): LoaderPlugin {
         sourceRoot,
         context.profileActivation.values,
       );
+      const customNamespaces = Object.entries(context.manifest.namespaces)
+        .filter(
+          ([namespace, definition]) =>
+            namespace !== 'value' &&
+            namespace !== 'secret' &&
+            definition.kind === 'data' &&
+            !definition.sensitive,
+        )
+        .map(([namespace]) => namespace);
       const entries: ConfigEntry[] = [];
 
       for (const file of files) {
         const document = await readFile(file.absolutePath, 'utf8');
         entries.push(...filesystemValuesReader(file.relativePath, document, file.workspaceId));
+      }
+
+      for (const namespace of customNamespaces) {
+        const layers = [
+          namespace,
+          ...context.profileChain
+            .filter((profile) => profile !== 'base')
+            .map((profile) => `profiles/${profile}/${namespace}`),
+        ];
+        const namespaceFiles = await collectFilesystemLayerFiles(
+          context.manifestRoot,
+          context.workspace.workspaceRoots,
+          sourceRoot,
+          layers,
+        );
+
+        for (const file of namespaceFiles) {
+          const document = await readFile(file.absolutePath, 'utf8');
+          entries.push(...yamlObjectToEntries(document, file.relativePath, namespace, 'filesystem-values', file.workspaceId));
+        }
       }
 
       return entries;

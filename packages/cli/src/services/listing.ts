@@ -3,6 +3,7 @@ import { flattenObject } from '@kitsy/cnos/internal';
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 
 export type ListNamespace = 'all' | 'value' | 'secret' | 'meta' | 'env' | 'public';
+type StoredNamespace = string;
 
 export interface ListEntry {
   key: string;
@@ -56,11 +57,11 @@ function matchesPrefix(key: string, prefix?: string): boolean {
 }
 
 function toStoredEntry(
-  namespace: 'value' | 'secret',
+  namespace: StoredNamespace,
   entry: StoredResolvedEntry,
   filter: SecretListFilter = {},
 ): ListEntry | undefined {
-  const sourceId = namespace === 'value' ? 'filesystem-values' : 'filesystem-secrets';
+  const sourceId = namespace === 'secret' ? 'filesystem-secrets' : 'filesystem-values';
   const candidates = [entry.winner, ...entry.overridden].filter((candidate) => candidate.sourceId === sourceId);
 
   if (candidates.length === 0) {
@@ -81,7 +82,7 @@ function toStoredEntry(
 }
 
 function listStoredNamespace(
-  namespace: 'value' | 'secret',
+  namespace: StoredNamespace,
   options: RuntimeServiceOptions & SecretListFilter,
 ): Promise<ListEntry[]> {
   return createRuntimeService(options).then((runtime) =>
@@ -131,7 +132,7 @@ function listProjectedNamespace(
 }
 
 export async function listConfigEntries(
-  namespace: ListNamespace,
+  namespace: ListNamespace | string,
   options: RuntimeServiceOptions & { prefix?: string; framework?: string } = {},
 ): Promise<ListEntry[]> {
   if (namespace === 'value' || namespace === 'secret') {
@@ -142,11 +143,21 @@ export async function listConfigEntries(
     return listProjectedNamespace(namespace, options);
   }
 
-  const [values, secrets, meta] = await Promise.all([
-    listStoredNamespace('value', options),
-    listStoredNamespace('secret', options),
-    listProjectedNamespace('meta', options),
-  ]);
+  if (namespace !== 'all') {
+    return listStoredNamespace(namespace, options);
+  }
 
-  return [...values, ...secrets, ...meta].sort((left, right) => left.key.localeCompare(right.key));
+  const runtime = await createRuntimeService(options);
+  const namespaces = Array.from(
+    new Set(
+      Array.from(runtime.graph.entries.values())
+        .map((entry) => entry.namespace)
+        .filter((entry) => entry !== 'meta' && entry !== 'env' && entry !== 'public'),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+
+  const stored = await Promise.all(namespaces.map((entry) => listStoredNamespace(entry, options)));
+  const meta = await listProjectedNamespace('meta', options);
+
+  return [...stored.flat(), ...meta].sort((left, right) => left.key.localeCompare(right.key));
 }

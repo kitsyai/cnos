@@ -602,7 +602,7 @@ Built-in validator supports:
 Additional v1 validations:
 - workspace inheritance graph is acyclic
 - profile inheritance graph is acyclic
-- `public.promote` contains only `value.*`
+- `public.promote` contains only shareable, non-sensitive data namespaces
 - no ambiguous env mapping collisions
 - global writes disallowed unless `workspaces.global.allowWrite: true`
 
@@ -672,7 +672,7 @@ Rules:
 - unresolved local secret refs are skipped
 
 ### 16.2 `toPublicEnv()`
-Exports promoted `value.*` keys only.
+Exports promoted shareable data keys only.
 
 CLI note:
 - `cnos export env` should emit only explicitly mapped env exports by default

@@ -89,10 +89,11 @@ export function resolveWorkspaceScopedPath(
 
 export function resolveNamespaceDirectory(
   workspaceRoot: string,
-  namespace: 'value' | 'secret',
+  namespace: NamespaceName,
   profile?: string,
 ): string {
-  const rootFolder = namespace === 'value' ? 'values' : 'secrets';
+  const rootFolder =
+    namespace === 'value' ? 'values' : namespace === 'secret' ? 'secrets' : namespace;
 
   if (profile && profile !== 'base') {
     return path.resolve(workspaceRoot, 'profiles', profile, rootFolder);
@@ -103,7 +104,7 @@ export function resolveNamespaceDirectory(
 
 export function resolveConfigDocumentPath(
   workspaceRoot: string,
-  namespace: 'value' | 'secret',
+  namespace: NamespaceName,
   configPath: string,
   profile?: string,
 ): string {

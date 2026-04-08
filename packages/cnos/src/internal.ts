@@ -34,6 +34,7 @@ export {
   validateRuntime,
   writeKeychain,
   ensureProjectionAllowed,
+  getNamespaceDefinition,
   writeLocalSecret,
   writeVaultSessionKey,
   type VaultDefinition,

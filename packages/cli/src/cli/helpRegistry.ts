@@ -336,12 +336,12 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'list',
     summary: 'List resolved config entries.',
-    usage: 'cnos list [value|secret|meta|env|public|all] [--prefix <path>] [--framework <name>] [global-options]',
+    usage: 'cnos list [<namespace>|all] [--prefix <path>] [--framework <name>] [global-options]',
     description:
-      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering.',
+      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering. Custom data namespaces such as flags are supported.',
     options: [
       {
-        flag: '--namespace <value|secret|meta|env|public|all>',
+        flag: '--namespace <name>',
         description: 'Explicit namespace selector when not using a positional namespace argument.',
       },
       {
@@ -353,7 +353,7 @@ const COMMANDS: HelpCommand[] = [
         description: 'When listing public output, apply framework-specific prefixes such as vite or next.',
       },
     ],
-    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list env', 'cnos list public --framework vite'],
+    examples: ['cnos list', 'cnos list value --prefix app.', 'cnos list flags', 'cnos list env', 'cnos list public --framework vite'],
   },
   {
     id: 'profile',
@@ -411,7 +411,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Promote shareable config into public or env projection surfaces.',
     usage: 'cnos promote <key...> --to <public|env> [--as <ENV_VAR>] [global-options]',
     description:
-      'Adds keys to public.promote or envMapping.explicit in .cnos/cnos.yml. Sensitive or non-shareable namespaces are rejected.',
+      'Adds keys to public.promote or envMapping.explicit in .cnos/cnos.yml. Sensitive or non-shareable namespaces are rejected, but declared shareable data namespaces such as flags are allowed.',
     options: [
       {
         flag: '--to <public|env>',
@@ -424,6 +424,7 @@ const COMMANDS: HelpCommand[] = [
     ],
     examples: [
       'cnos promote value.flag.auth.upi_enabled --to public',
+      'cnos promote flags.upi_enabled --to public',
       'cnos promote value.server.port --to env --as PORT',
     ],
   },

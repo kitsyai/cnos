@@ -62,19 +62,32 @@ function normalizeCommand(argv: string[]): string[] {
   const [command = 'doctor', ...rest] = argv;
   const resource = rest[0];
   const remaining = rest.slice(1);
-  const dottedValue = resource?.startsWith('value.') ? resource.slice('value.'.length) : undefined;
-  const dottedSecret = resource?.startsWith('secret.') ? resource.slice('secret.'.length) : undefined;
+  const dottedNamespace = resource?.includes('.')
+    ? {
+        namespace: resource.slice(0, resource.indexOf('.')),
+        path: resource.slice(resource.indexOf('.') + 1),
+      }
+    : undefined;
+  const normalizedVerb =
+    command === 'remove' || command === 'delete'
+      ? 'delete'
+      : command === 'create' || command === 'add'
+        ? 'set'
+        : command === 'set' || command === 'get'
+          ? command
+          : undefined;
 
   if ((command === 'set' || command === 'get') && (resource === 'value' || resource === 'secret')) {
     return [resource, command, ...remaining];
   }
 
-  if ((command === 'set' || command === 'get') && dottedValue) {
-    return ['value', command, dottedValue, ...remaining];
-  }
-
-  if ((command === 'set' || command === 'get') && dottedSecret) {
-    return ['secret', command, dottedSecret, ...remaining];
+  if (
+    normalizedVerb &&
+    dottedNamespace &&
+    dottedNamespace.namespace &&
+    dottedNamespace.path
+  ) {
+    return [dottedNamespace.namespace, normalizedVerb, dottedNamespace.path, ...remaining];
   }
 
   if ((command === 'create' || command === 'add') && resource === 'profile') {
@@ -117,10 +130,6 @@ function normalizeCommand(argv: string[]): string[] {
     return ['secret', 'delete', ...remaining];
   }
 
-  if ((command === 'delete' || command === 'remove') && dottedSecret) {
-    return ['secret', 'delete', dottedSecret, ...remaining];
-  }
-
   if (command === 'list' && resource === 'secret') {
     return ['secret', 'list', ...remaining];
   }
@@ -133,8 +142,12 @@ function normalizeCommand(argv: string[]): string[] {
     return ['value', 'delete', ...remaining];
   }
 
-  if ((command === 'delete' || command === 'remove') && dottedValue) {
-    return ['value', 'delete', dottedValue, ...remaining];
+  if (
+    normalizedVerb &&
+    resource &&
+    !['profile', 'vault', 'secret', 'value'].includes(resource)
+  ) {
+    return [resource, normalizedVerb, ...remaining];
   }
 
   if (command === 'list' && resource === 'value') {

@@ -14,6 +14,7 @@ import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runList } from './commands/list.js';
 import { runMigrate } from './commands/migrate.js';
+import { runNamespace } from './commands/namespace.js';
 import { runOnboard } from './commands/onboard.js';
 import { runProfile } from './commands/profile.js';
 import { runPromote } from './commands/promote.js';
@@ -208,6 +209,11 @@ export async function main(argv: string[]): Promise<void> {
       process.stdout.write(`${await runDoctor(runtimeOptions)}\n`);
       return;
     default:
+      if (args.length > 0 && /^[a-z][a-z0-9-]*$/i.test(command)) {
+        process.stdout.write(`${await runNamespace(command, args, runtimeOptions)}\n`);
+        return;
+      }
+
       process.stderr.write(`Unknown command: ${command}\n`);
       process.exitCode = 1;
   }

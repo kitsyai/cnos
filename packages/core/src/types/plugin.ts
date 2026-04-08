@@ -12,6 +12,7 @@ export interface CnosPlugin {
 }
 
 export interface LoaderContext {
+  manifest: NormalizedManifest;
   manifestConfig: Record<string, unknown>;
   profile: string;
   profileChain: string[];
