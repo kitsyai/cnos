@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import cnos from '../src/browser/index.js';
-import { resolveBrowserData } from '../src/build/index.js';
+import { resolveBrowserData, resolveFrameworkEnv, toFrameworkEnv } from '../src/build/index.js';
 
 const fixtureRoots: string[] = [];
 
@@ -73,6 +73,24 @@ describe('@kitsy/cnos/build', () => {
     await expect(resolveBrowserData({ root })).resolves.toEqual({
       'public.app.apiUrl': 'https://api.local',
       'public.flag.auth.upi_enabled': true,
+    });
+  });
+
+  it('maps browser data into framework env shapes', async () => {
+    const root = await createFixtureRoot();
+    const browserData = await resolveBrowserData({ root });
+
+    expect(toFrameworkEnv(browserData, 'generic')).toEqual({
+      APP_API_URL: 'https://api.local',
+      FLAG_AUTH_UPI_ENABLED: 'true',
+    });
+    expect(toFrameworkEnv(browserData, 'vite')).toEqual({
+      VITE_APP_API_URL: 'https://api.local',
+      VITE_FLAG_AUTH_UPI_ENABLED: 'true',
+    });
+    await expect(resolveFrameworkEnv({ root }, 'next')).resolves.toEqual({
+      NEXT_PUBLIC_APP_API_URL: 'https://api.local',
+      NEXT_PUBLIC_FLAG_AUTH_UPI_ENABLED: 'true',
     });
   });
 });

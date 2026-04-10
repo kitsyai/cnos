@@ -8,6 +8,7 @@ CNOS is a plugin-first configuration orchestration system. This repository is a 
 - `@kitsy/cnos-cli`: `cnos` executable and command routing. It depends only on `@kitsy/cnos`.
 - `@kitsy/cnos-vite`: first-party Vite integration for CNOS public env injection.
 - `@kitsy/cnos-next`: first-party Next.js integration for CNOS public env injection.
+- `@kitsy/cnos-webpack`: first-party webpack integration for CNOS public env injection.
 - `@kitsy/cnos-docs`: source-of-truth MDX documentation package for Astro Starlight and other static docs consumers.
 
 Internal workspaces such as `packages/core` and `plugins/*` remain in the source monorepo for development, but they are not published as standalone npm packages.
@@ -35,7 +36,7 @@ Recent DX behavior:
 - `cnos vault create <name>` creates a manifest-defined vault and, for local vaults, initializes encrypted secret storage under `~/.cnos/secrets`.
 - command failures are concise by default; pass `--verbose` for stack traces.
 
-Framework integrations currently ship as `@kitsy/cnos-vite` and `@kitsy/cnos-next`. Official built-ins remain available from `@kitsy/cnos/plugins/*`.
+Framework integrations currently ship as `@kitsy/cnos-vite`, `@kitsy/cnos-next`, and `@kitsy/cnos-webpack`. Official built-ins remain available from `@kitsy/cnos/plugins/*`.
 
 For step-by-step setup flows, see [docs/cnos-how-to.md](/Users/pkvsi/Wks/kitsy/cnos/docs/cnos-how-to.md).
 

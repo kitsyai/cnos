@@ -1,0 +1,58 @@
+---
+title: Frontend with Webpack
+description: Use CNOS public projection with webpack builds, webpack-dev-server, and browser-safe runtime reads.
+---
+
+# Frontend with Webpack
+
+CNOS integrates with webpack through `@kitsy/cnos-webpack`. This covers the common static-bundle case where webpack produces a browser build that is then deployed as static assets.
+
+Promote browser-safe values:
+
+```yaml
+public:
+  promote:
+    - value.app.apiUrl
+    - flags.upi_enabled
+```
+
+Use an async webpack config:
+
+```ts
+import { createCnos } from '@kitsy/cnos/configure';
+import { CnosWebpackPlugin } from '@kitsy/cnos-webpack';
+
+export default async () => {
+  const cnos = await createCnos({
+    profile: process.env.NODE_ENV === 'production' ? 'prod' : 'local',
+  });
+
+  return {
+    devServer: {
+      port: Number(cnos.readOr('value.devServer.port', 3000)),
+    },
+    plugins: [
+      new CnosWebpackPlugin({
+        profile: process.env.NODE_ENV === 'production' ? 'prod' : 'local',
+      }),
+    ],
+  };
+};
+```
+
+Read in browser code:
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+console.log(cnos('public.app.apiUrl'));
+console.log(cnos('public.flags.upi_enabled'));
+console.log(process.env.APP_API_URL);
+```
+
+The webpack plugin:
+- injects `process.env.*` define replacements for promoted public values
+- embeds `globalThis.__CNOS_BROWSER_DATA__` for `@kitsy/cnos/browser`
+- keeps server-only `value.*` and `secret.*` out of the browser bundle
+
+If you need build-time server config such as `devServer.port`, read it in the webpack config through `createCnos()` so dev and production builds use the same CNOS source of truth.

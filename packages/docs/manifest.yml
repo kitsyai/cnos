@@ -21,6 +21,8 @@ sidebar:
         label: Backend Projects
       - path: guides/frontend-vite
         label: Frontend with Vite
+      - path: guides/frontend-webpack
+        label: Frontend with Webpack
       - path: guides/frontend-next
         label: Frontend with Next.js
       - path: guides/ssr

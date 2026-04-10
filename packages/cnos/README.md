@@ -19,4 +19,4 @@ CLI-oriented storage/export rules to be aware of:
 - shell env export comes from explicit `envMapping.explicit`
 - local secret material lives outside the repo in encrypted vault storage under `~/.cnos/secrets`
 
-Use `@kitsy/cnos-vite` for Vite projects and `@kitsy/cnos-next` for Next.js projects when you want CNOS public values projected into framework-native env surfaces and embedded for `@kitsy/cnos/browser`.
+Use `@kitsy/cnos-vite` for Vite projects, `@kitsy/cnos-next` for Next.js projects, and `@kitsy/cnos-webpack` for webpack/static bundles when you want CNOS public values projected into framework-native env surfaces and embedded for `@kitsy/cnos/browser`.

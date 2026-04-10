@@ -21,6 +21,8 @@ cnos build env --profile stage --to .env.stage
 cnos dev env --profile local --to .env.local -- pnpm dev
 ```
 
+For webpack or other static bundles, pair this with `@kitsy/cnos-webpack` or `@kitsy/cnos/build` so browser-safe `public.*` values are injected at build time without keeping handwritten `.env` files as the source of truth.
+
 Recommended migration sequence:
 
 1. Keep `.cnos` as the source of truth.

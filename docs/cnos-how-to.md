@@ -239,24 +239,52 @@ cnos build env --public --framework vite --to .env.local
 cnos export env --public --framework vite --to .env.local
 ```
 
-### Webpack or other bundlers
+### Webpack
 
-There is no first-party Webpack integration yet.
+Use `@kitsy/cnos-webpack` when webpack produces the browser bundle.
 
-Current working approach:
-- keep public values in `public.promote`
-- use `cnos export env --public`
-- or use `cnos build env --public --to ...` when you want a concrete env artifact
-- inject those values into your bundler build step with your existing DefinePlugin or env loading path
+```ts
+import { createCnos } from '@kitsy/cnos/configure';
+import { CnosWebpackPlugin } from '@kitsy/cnos-webpack';
 
-Example:
+export default async () => {
+  const cnos = await createCnos({
+    profile: process.env.NODE_ENV === 'production' ? 'prod' : 'local',
+  });
 
-```powershell
-cnos export env --public > .cnos-public.env
-cnos build env --public --framework vite --to .env.local
+  return {
+    devServer: {
+      port: Number(cnos.readOr('value.devServer.port', 3000)),
+    },
+    plugins: [
+      new CnosWebpackPlugin({
+        profile: process.env.NODE_ENV === 'production' ? 'prod' : 'local',
+      }),
+    ],
+  };
+};
 ```
 
-Then load that file in your bundler setup.
+Read in browser code:
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+console.log(cnos('public.app.apiBaseUrl'));
+console.log(cnos('public.flags.upi_enabled'));
+console.log(process.env.APP_API_BASE_URL);
+```
+
+### Other bundlers
+
+For generic bundlers or custom build scripts, use `@kitsy/cnos/build`:
+
+```ts
+import { resolveBrowserData, toFrameworkEnv } from '@kitsy/cnos/build';
+
+const browserData = await resolveBrowserData({ profile: 'stage' });
+const genericEnv = toFrameworkEnv(browserData, 'generic');
+```
 
 ## 3. SSR Projects
 

@@ -65,6 +65,9 @@
       ],
       "@kitsy/cnos-next": [
         "packages/next/src/index.ts"
+      ],
+      "@kitsy/cnos-webpack": [
+        "packages/webpack/src/index.ts"
       ]
     }
   }

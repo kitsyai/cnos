@@ -1,0 +1,52 @@
+{
+  "name": "@kitsy/cnos-webpack",
+  "version": "1.4.0",
+  "description": "Webpack integration for CNOS public config injection.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kitsyai/cnos.git",
+    "directory": "packages/webpack"
+  },
+  "homepage": "https://github.com/kitsyai/cnos/tree/main/packages/webpack",
+  "bugs": {
+    "url": "https://github.com/kitsyai/cnos/issues"
+  },
+  "keywords": [
+    "cnos",
+    "webpack",
+    "config"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@kitsy/cnos": "workspace:*"
+  },
+  "peerDependencies": {
+    "webpack": ">=5"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "clean": "rimraf dist",
+    "dev": "tsup src/index.ts --watch --format esm,cjs --dts",
+    "lint": "eslint src test",
+    "prepack": "pnpm build",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

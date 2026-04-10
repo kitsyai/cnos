@@ -11,6 +11,7 @@ const internalPackages = [
 ];
 
 export default defineConfig({
+  tsconfig: 'tsconfig.build.json',
   entry: [
     'src/index.ts',
     'src/configure/index.ts',
