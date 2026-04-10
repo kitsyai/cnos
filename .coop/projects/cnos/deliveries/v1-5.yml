@@ -1,0 +1,13 @@
+id: v1-5
+short_id: 9d4c04b75b9e
+name: v1.5
+status: planning
+target_date: 2026-06-15
+started_date: null
+delivered_date: null
+budget: {}
+capacity_profiles:
+  - backend_team
+scope:
+  include: []
+  exclude: []

@@ -257,3 +257,42 @@ packages/cnos/src/
 | Deep migration (`cnos migrate --deep`) | Changeset Phase 3 (basic migrate) | Large | High — enterprise adoption |
 
 Remote providers and deep migration are the highest-impact items. Webpack and generic adapter are small wins. All four are independent and can be prioritized based on user demand.
+
+---
+
+## 4. Production Logging Integrations
+
+### Problem
+
+`cnos.format(...)` and `cnos.log(...)` now cover direct runtime interpolation, but
+production systems usually standardize on structured loggers such as pino or
+winston. CNOS should be able to resolve `${logical.key}` placeholders while
+delegating the actual transport/output to those logging stacks.
+
+### What to build
+
+Add an adapter surface so CNOS can format messages and then forward them to a
+configured logger implementation.
+
+### Initial scope
+
+| Integration | Goal |
+|-------------|------|
+| `pino` | structured JSON logging with CNOS-resolved message text and metadata |
+| `winston` | pluggable transports with CNOS-resolved message text and metadata |
+| future | bunyan, morgan, and custom adapters through the same contract |
+
+### Design notes
+
+- Keep `cnos.format(...)` as the core placeholder-resolution primitive.
+- Keep `cnos.log(...)` as the zero-dependency default for simple apps.
+- Add a separate adapter-based API for production logging rather than forcing a
+  logging dependency into `@kitsy/cnos`.
+- Structured metadata should remain available alongside the resolved message.
+
+### Tests
+
+- Placeholder interpolation remains identical between default `cnos.log(...)`
+  and adapter-backed logging.
+- Pino adapter emits the resolved message plus structured metadata.
+- Winston adapter emits the resolved message plus structured metadata.
