@@ -14,3 +14,5 @@ console.log(cnos('public.app.apiBaseUrl'));
 Only promoted browser-safe values are available here.
 
 Framework integrations such as `@kitsy/cnos-vite`, `@kitsy/cnos-next`, and `@kitsy/cnos-webpack` are responsible for embedding that browser payload during the build.
+
+The browser runtime does not fetch config over the network. It reads from data already embedded into the bundle/runtime globals by the framework integration, so it follows the same bundle and service-worker caching behavior as the rest of your frontend assets.

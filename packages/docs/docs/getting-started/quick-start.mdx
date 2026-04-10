@@ -45,3 +45,10 @@ For frontend builds:
 - Vite: `@kitsy/cnos-vite`
 - Webpack/static bundles: `@kitsy/cnos-webpack`
 - Next.js: `@kitsy/cnos-next`
+
+For webpack/static bundles, build-time settings can come from CNOS too:
+
+```bash
+cnos set value dev.server.port 8800
+npm run dev
+```

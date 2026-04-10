@@ -243,6 +243,24 @@ cnos export env --public --framework vite --to .env.local
 
 Use `@kitsy/cnos-webpack` when webpack produces the browser bundle.
 
+Simple highlight:
+
+```powershell
+cnos set value dev.server.port 8800
+npm run dev
+```
+
+Typical result:
+
+```text
+set value.dev.server.port in .cnos\values\dev.yml
+Cnos value.dev.server.port: 8800
+[webpack-dev-server] Project is running at:
+[webpack-dev-server] Loopback: http://localhost:8800/
+```
+
+This is the intended DX: update one CNOS key and let webpack pick it up through `createCnos()`.
+
 ```ts
 import { createCnos } from '@kitsy/cnos/configure';
 import { CnosWebpackPlugin } from '@kitsy/cnos-webpack';

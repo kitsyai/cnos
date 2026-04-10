@@ -7,6 +7,26 @@ description: Use CNOS public projection with webpack builds, webpack-dev-server,
 
 CNOS integrates with webpack through `@kitsy/cnos-webpack`. This covers the common static-bundle case where webpack produces a browser build that is then deployed as static assets.
 
+## Highlight: change webpack dev-server config from CNOS
+
+Once webpack reads build-time config through `createCnos()`, changing a setting such as the dev-server port is just a config write:
+
+```powershell
+cnos set value dev.server.port 8800
+npm run dev
+```
+
+Typical result:
+
+```text
+set value.dev.server.port in .cnos\values\dev.yml
+Cnos value.dev.server.port: 8800
+[webpack-dev-server] Project is running at:
+[webpack-dev-server] Loopback: http://localhost:8800/
+```
+
+This is the main benefit of the CNOS webpack path: you change config in `.cnos`, not scattered build scripts or ad hoc env files.
+
 Promote browser-safe values:
 
 ```yaml
@@ -87,6 +107,18 @@ The webpack plugin:
 - embeds `globalThis.__CNOS_BROWSER_DATA__` for `@kitsy/cnos/browser`
 - keeps server-only `value.*` and `secret.*` out of the browser bundle
 - uses no prefix by default for webpack public env unless you configure `public.frameworks.webpack` or pass `prefix`
+
+## Bundle and cache behavior
+
+CNOS does not add a runtime fetch layer to the browser bundle.
+
+- `@kitsy/cnos-webpack` resolves public config at build time
+- browser-safe values are embedded into the existing webpack bundle through `DefinePlugin` and `globalThis.__CNOS_BROWSER_DATA__`
+- `@kitsy/cnos/browser` is a small reader over that embedded payload
+- if your app does not import `@kitsy/cnos/browser`, webpack can leave it out of the browser bundle
+- if your app does import `@kitsy/cnos/browser`, it is bundled like any other app dependency and follows your existing webpack and service-worker caching strategy
+
+So if your site already uses `sw.js` for offline behavior, CNOS does not disable or bypass that. CNOS becomes part of the same built assets your service worker already caches.
 
 If you need build-time server config such as `devServer.port`, read it in the webpack config through `createCnos()` so dev and production builds use the same CNOS source of truth.
 
