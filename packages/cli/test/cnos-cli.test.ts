@@ -354,7 +354,7 @@ describe('@kitsy/cnos-cli', () => {
   });
 
   it('prints the CLI version', () => {
-    expect(runVersion()).toBe('1.4.0');
+    expect(runVersion()).toBe('1.5.0');
   });
 
   it('shows current CLI context without creating .cnos-workspace.yml', async () => {

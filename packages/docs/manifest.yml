@@ -1,7 +1,7 @@
 product: cnos
 title: CNOS Documentation
 tagline: Configuration orchestration for apps, monorepos, and deployment pipelines
-version: "1.3"
+version: "1.5"
 
 sidebar:
   - group: Getting Started
