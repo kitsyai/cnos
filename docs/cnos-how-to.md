@@ -112,7 +112,10 @@ Then:
 ```powershell
 cnos export env
 cnos export env --to .env.local
+cnos build env --profile local --to .env.local
 cnos export env --profile stage --to .env.stage
+cnos build env --profile stage --to .env.stage
+cnos dev env --profile local --to .env.local -- pnpm dev
 cnos run -- node server.js
 cnos run --set value.server.port=9999 -- node server.js
 ```
@@ -232,6 +235,7 @@ Useful checks:
 ```powershell
 cnos list public
 cnos export env --public --framework vite
+cnos build env --public --framework vite --to .env.local
 cnos export env --public --framework vite --to .env.local
 ```
 
@@ -242,12 +246,14 @@ There is no first-party Webpack integration yet.
 Current working approach:
 - keep public values in `public.promote`
 - use `cnos export env --public`
+- or use `cnos build env --public --to ...` when you want a concrete env artifact
 - inject those values into your bundler build step with your existing DefinePlugin or env loading path
 
 Example:
 
 ```powershell
 cnos export env --public > .cnos-public.env
+cnos build env --public --framework vite --to .env.local
 ```
 
 Then load that file in your bundler setup.
@@ -306,6 +312,7 @@ Checks:
 
 ```powershell
 cnos export env --public --framework next
+cnos build env --public --framework next --to .env.production
 cnos export env --public --framework next --to .env.production
 cnos inspect value.app.apiBaseUrl
 ```
@@ -376,6 +383,13 @@ Modes:
 - signal mode: prints changed logical keys as JSON and does not spawn a child
 
 Use signal mode when another tool is responsible for reloads.
+
+For env-file-based dev loops, prefer:
+
+```powershell
+cnos dev env --profile local --to .env.local -- pnpm dev
+cnos dev env --public --framework vite --to .env.local --signal -- pnpm dev
+```
 
 ### Detect schema drift
 

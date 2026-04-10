@@ -1,19 +1,18 @@
-import { watch, type FSWatcher } from 'node:fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 
 import {
   CNOS_GRAPH_ENV_VAR,
   CNOS_SECRET_PAYLOAD_ENV_VAR,
   CNOS_SESSION_KEY_ENV_VAR,
-  diffGraphs,
   serializeRuntimeGraph,
   serializeSecretPayload,
-  watchFiles,
 } from '@kitsy/cnos/internal';
 
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
+import { spawnCommand } from '../services/spawn.js';
+import { startGraphWatchLoop } from '../services/watchLoop.js';
 
 export interface WatchLoopHandle {
   close(): Promise<void>;
@@ -23,14 +22,6 @@ export interface StartWatchLoopOptions extends RuntimeServiceOptions {
   command?: string[];
   onSignal?: (payload: { changedKeys: string[] }) => void | Promise<void>;
   onRestart?: (payload: { changedKeys: string[] }) => void | Promise<void>;
-}
-
-function shouldUseShellForCommand(command: string): boolean {
-  if (process.platform !== 'win32') {
-    return false;
-  }
-
-  return !/[\\/]/.test(command);
 }
 
 async function buildRunEnvironment(
@@ -86,11 +77,10 @@ function spawnWatchedChild(command: string[], cwd: string, env: NodeJS.ProcessEn
     throw new Error('watch requires a command after -- unless --signal is used');
   }
 
-  return spawn(executable, command.slice(1), {
+  return spawnCommand(command, {
     cwd,
     env,
     stdio: 'inherit',
-    shell: shouldUseShellForCommand(executable),
   });
 }
 
@@ -105,103 +95,43 @@ export async function startWatchLoop(options: StartWatchLoopOptions): Promise<Wa
     cliArgs,
   });
   let child = !isSignal ? spawnWatchedChild(command, root, current.env) : undefined;
-  const watcherMap = new Map<string, FSWatcher>();
-  let timer: NodeJS.Timeout | undefined;
   let closed = false;
-
-  const attachWatcher = (targetPath: string, recursive = false): void => {
-    if (watcherMap.has(targetPath)) {
-      return;
-    }
-
-    try {
-      const watcher = watch(
-        targetPath,
-        recursive
-          ? {
-              recursive: true,
-            }
-          : undefined,
-        () => {
-          if (timer) {
-            clearTimeout(timer);
-          }
-
-          timer = setTimeout(() => {
-            void handleChange();
-          }, debounceMs);
-        },
-      );
-      watcherMap.set(targetPath, watcher);
-    } catch {
-      if (recursive) {
-        attachWatcher(targetPath, false);
+  const watcher = await startGraphWatchLoop({
+    ...options,
+    cliArgs,
+    debounceMs,
+    async onChange(payload) {
+      if (closed) {
+        return;
       }
-    }
-  };
 
-  const refreshWatchers = async (): Promise<void> => {
-    const nextTargets = await watchFiles(current.runtime, options.root);
-    attachWatcher(nextTargets.manifestPath, false);
-
-    for (const workspaceRoot of nextTargets.roots) {
-      attachWatcher(workspaceRoot, true);
-    }
-
-    for (const filePath of nextTargets.files) {
-      attachWatcher(filePath, false);
-    }
-  };
-
-  const handleChange = async (): Promise<void> => {
-    if (closed) {
-      return;
-    }
-
-    const next = await buildRunEnvironment({
-      ...options,
-      cliArgs,
-    });
-    const changedKeys = diffGraphs(current.runtime.graph, next.runtime.graph);
-    current = next;
-    await refreshWatchers();
-
-    if (changedKeys.length === 0) {
-      return;
-    }
-
-    if (isSignal) {
-      await options.onSignal?.({ changedKeys });
-      process.stdout.write(`${printJson({ changedKeys })}\n`);
-      return;
-    }
-
-    if (child && !child.killed) {
-      await new Promise<void>((resolve) => {
-        child?.once('close', () => resolve());
-        child?.kill();
+      current = await buildRunEnvironment({
+        ...options,
+        cliArgs,
       });
-    }
 
-    child = spawnWatchedChild(command, root, current.env);
-    await options.onRestart?.({ changedKeys });
-  };
+      if (isSignal) {
+        await options.onSignal?.({ changedKeys: payload.changedKeys });
+        process.stdout.write(`${printJson({ changedKeys: payload.changedKeys })}\n`);
+        return;
+      }
 
-  await refreshWatchers();
+      if (child && !child.killed) {
+        await new Promise<void>((resolve) => {
+          child?.once('close', () => resolve());
+          child?.kill();
+        });
+      }
+
+      child = spawnWatchedChild(command, root, current.env);
+      await options.onRestart?.({ changedKeys: payload.changedKeys });
+    },
+  });
 
   return {
     async close() {
       closed = true;
-
-      if (timer) {
-        clearTimeout(timer);
-      }
-
-      for (const watcher of watcherMap.values()) {
-        watcher.close();
-      }
-
-      watcherMap.clear();
+      await watcher.close();
 
       if (child && !child.killed) {
         await new Promise<void>((resolve) => {

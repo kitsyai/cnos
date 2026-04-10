@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { parseArgs } from './cli/parseArgs.js';
+import { runBuild } from './commands/build.js';
 import { runDefine } from './commands/define.js';
+import { runDev } from './commands/dev.js';
 import { runDrift } from './commands/drift.js';
 import { runDiff } from './commands/diff.js';
 import { runDoctor } from './commands/doctor.js';
@@ -35,6 +37,14 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
   }
 
   if (command === 'export' && args[0] === 'env') {
+    return normalizeHelpTopic([command, args[0]]);
+  }
+
+  if (command === 'build' && args[0] === 'env') {
+    return normalizeHelpTopic([command, args[0]]);
+  }
+
+  if (command === 'dev' && args[0] === 'env') {
     return normalizeHelpTopic([command, args[0]]);
   }
 
@@ -184,6 +194,12 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'export':
       process.stdout.write(`${await runExport(args[0], runtimeOptions)}\n`);
+      return;
+    case 'build':
+      process.stdout.write(`${await runBuild(args[0], runtimeOptions)}\n`);
+      return;
+    case 'dev':
+      process.stdout.write(`${await runDev(args[0], passthrough.length > 0 ? passthrough : args.slice(1), runtimeOptions)}\n`);
       return;
     case 'dump':
       process.stdout.write(`${await runDump(runtimeOptions)}\n`);

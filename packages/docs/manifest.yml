@@ -35,6 +35,8 @@ sidebar:
         label: Secrets and Vaults
       - path: guides/migration
         label: Migrating from .env
+      - path: guides/generated-env-files
+        label: Generated Env Files
 
   - group: CLI Reference
     collapsed: true
@@ -55,6 +57,10 @@ sidebar:
         label: cnos validate
       - path: cli/export
         label: cnos export
+      - path: cli/build
+        label: cnos build env
+      - path: cli/dev
+        label: cnos dev env
       - path: cli/run
         label: cnos run
       - path: cli/diff

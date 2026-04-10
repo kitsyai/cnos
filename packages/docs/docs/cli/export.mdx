@@ -10,3 +10,16 @@ cnos export env
 cnos export env --to .env.local
 cnos export env --public --framework vite --to .env.local
 ```
+
+`export env` is the low-level renderer.
+
+Use it when you want:
+
+- stdout output for piping
+- one-off JSON/text export behavior
+- direct control over the raw env projection
+
+For higher-level file-oriented workflows, prefer:
+
+- `cnos build env` for one-shot artifact generation
+- `cnos dev env` for watched dev-time file generation

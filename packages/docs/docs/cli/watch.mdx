@@ -9,3 +9,13 @@ description: Watch config changes and emit signals or restart processes.
 cnos watch -- node server.js
 cnos watch --signal
 ```
+
+`watch` is the low-level graph watcher.
+
+Use it when you want to react to CNOS graph changes directly.
+
+If your repo still needs `.env.*` files during development, prefer:
+
+```bash
+cnos dev env --profile local --to .env.local -- pnpm dev
+```

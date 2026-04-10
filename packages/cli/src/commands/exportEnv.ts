@@ -1,55 +1,43 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
-import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
-
-function formatEnvOutput(env: Record<string, string>): string {
-  return Object.entries(env)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
-}
+import {
+  materializeEnvToFile,
+  resolveMaterializedEnv,
+} from '../services/envMaterialization.js';
+import type { RuntimeServiceOptions } from '../services/runtime.js';
 
 export async function runExportEnv(options: RuntimeServiceOptions = {}): Promise<string> {
-  const cliArgs = [...(options.cliArgs ?? [])];
-  const isPublic = consumeFlag(cliArgs, '--public');
-  const framework = consumeOption(cliArgs, '--framework');
-  const prefix = consumeOption(cliArgs, '--prefix');
-  const to = consumeOption(cliArgs, '--to');
-  const runtime = await createRuntimeService({
+  const infoArgs = [...(options.cliArgs ?? [])];
+  const isPublic = consumeFlag(infoArgs, '--public');
+  const framework = consumeOption(infoArgs, '--framework');
+  consumeOption(infoArgs, '--prefix');
+  const to = consumeOption(infoArgs, '--to');
+  const baseOptions = {
     ...options,
-    cliArgs,
-  });
-  const env = isPublic
-    ? runtime.toPublicEnv({
-        ...(framework ? { framework } : {}),
-        ...(prefix ? { prefix } : {}),
-      })
-    : runtime.toEnv();
-  const output = formatEnvOutput(env);
+    cliArgs: [...(options.cliArgs ?? [])],
+  };
 
   if (to) {
-    const targetPath = path.resolve(options.root ?? process.cwd(), to);
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, output, 'utf8');
+    const result = await materializeEnvToFile(to, baseOptions);
 
     if (options.json) {
       return printJson({
-        to: targetPath,
-        count: Object.keys(env).length,
+        to: result.targetPath,
+        count: Object.keys(result.env).length,
         public: isPublic,
         ...(framework ? { framework } : {}),
       });
     }
 
-    return `Wrote ${Object.keys(env).length} env vars to ${targetPath}`;
+    return `Wrote ${Object.keys(result.env).length} env vars to ${displayPath(result.targetPath, options.root ?? process.cwd())}`;
   }
+
+  const result = await resolveMaterializedEnv(baseOptions);
 
   if (options.json) {
-    return printJson(env);
+    return printJson(result.env);
   }
 
-  return output;
+  return result.output;
 }

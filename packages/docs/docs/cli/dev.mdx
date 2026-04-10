@@ -1,0 +1,23 @@
+---
+title: cnos dev env
+description: Watch CNOS config, rewrite env artifacts, and restart a child process.
+---
+
+# cnos dev env
+
+Use `dev env` when a local development workflow still expects a `.env.*` file.
+
+```bash
+cnos dev env --profile local --to .env.local -- pnpm dev
+cnos dev env --profile stage --to .env.stage -- node server.js
+cnos dev env --public --framework vite --to .env.local --signal -- pnpm dev
+```
+
+By default `dev env`:
+
+- writes the env artifact before first launch
+- watches CNOS inputs
+- rewrites the target file on change
+- restarts the child process
+
+Use `--signal` when another tool is responsible for reloads and you only want the file to stay current.

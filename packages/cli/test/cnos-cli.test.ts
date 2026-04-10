@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseArgs } from '../src/cli/parseArgs.js';
+import { runBuild } from '../src/commands/build.js';
+import { startDevEnvLoop } from '../src/commands/dev.js';
 import { runDefine } from '../src/commands/define.js';
 import { runDrift } from '../src/commands/drift.js';
 import { runDiff } from '../src/commands/diff.js';
@@ -157,6 +159,27 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--value.server.port=9000'],
       },
       passthrough: [],
+    });
+  });
+
+  it('parses build env and dev env command groups', () => {
+    expect(parseArgs(['build', 'env', '--profile', 'stage', '--to', '.env.stage'])).toEqual({
+      command: 'build',
+      args: ['env'],
+      options: {
+        profile: 'stage',
+        cliArgs: ['--to', '.env.stage'],
+      },
+      passthrough: [],
+    });
+
+    expect(parseArgs(['dev', 'env', '--to', '.env.local', '--', 'pnpm', 'dev'])).toEqual({
+      command: 'dev',
+      args: ['env'],
+      options: {
+        cliArgs: ['--to', '.env.local'],
+      },
+      passthrough: ['pnpm', 'dev'],
     });
   });
 
@@ -370,7 +393,11 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('watch');
     expect(runHelp()).toContain('promote');
     expect(runHelp()).toContain('vault');
+    expect(runHelp()).toContain('build');
+    expect(runHelp()).toContain('dev');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
+    expect(runHelp('build env')).toContain('Usage: cnos build env --to <path>');
+    expect(runHelp('dev env')).toContain('Usage: cnos dev env --to <path>');
     expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
@@ -389,11 +416,13 @@ describe('@kitsy/cnos-cli', () => {
   it('prints machine-readable help for agents', () => {
     const rootPayload = JSON.parse(runHelpAi(undefined, ['--format', 'json']));
     const commandPayload = JSON.parse(runHelpAi('export env', ['--format=json']));
+    const buildPayload = JSON.parse(runHelpAi('build env', ['--format=json']));
 
     expect(rootPayload.cli).toBe('cnos');
     expect(rootPayload.commands.some((command: { id: string }) => command.id === 'doctor')).toBe(true);
     expect(rootPayload.integrations.some((integration: { id: string }) => integration.id === 'next')).toBe(true);
     expect(commandPayload.command.id).toBe('export env');
+    expect(buildPayload.command.id).toBe('build env');
     expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
       true,
     );
@@ -1074,6 +1103,17 @@ describe('@kitsy/cnos-cli', () => {
       ['API_URL=https://api.local', 'SERVER_PORT=8080'].join('\n'),
     );
     await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--to', path.join(exportRoot, '.env.built')],
+      }),
+    ).resolves.toContain('.env.built');
+    await expect(readFile(path.join(exportRoot, '.env.built'), 'utf8')).resolves.toBe(
+      ['API_URL=https://api.local', 'SERVER_PORT=8080'].join('\n'),
+    );
+    await expect(
       runExport('env', {
         root,
         workspace: 'api',
@@ -1110,6 +1150,13 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(exportRoot, '.env.next'), 'utf8')).resolves.toBe(
       'NEXT_PUBLIC_API_BASE_URL=https://api.stage',
     );
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).rejects.toThrow('build env requires --to <path>');
     await expect(
       runDump({
         root,
@@ -1324,5 +1371,56 @@ describe('@kitsy/cnos-cli', () => {
       }
     },
     15000,
+  );
+
+  it(
+    'writes and rewrites derived env artifacts in dev env mode while restarting the child process',
+    async () => {
+      const root = await createRuntimeFixture();
+      const outputPath = path.join(root, '.env.local');
+      const markerPath = path.join(root, 'dev-env-starts.log');
+      const handle = await startDevEnvLoop(
+        [
+          process.execPath,
+          '-e',
+          "const fs=require('node:fs'); const marker=process.argv[1]; fs.appendFileSync(marker,'start\\n'); setInterval(() => {}, 1000);",
+          markerPath,
+        ],
+        {
+          root,
+          workspace: 'api',
+          processEnv: {},
+          cliArgs: ['--to', outputPath, '--debounce', '25'],
+        },
+      );
+
+      try {
+        await waitForCondition(async () => {
+          const content = await readFile(outputPath, 'utf8').catch(() => '');
+          return content.includes('API_URL=https://api.local');
+        });
+        await waitForCondition(async () => {
+          const content = await readFile(markerPath, 'utf8').catch(() => '');
+          return content.trim().split(/\r?\n/).filter(Boolean).length >= 1;
+        });
+
+        await writeFile(
+          path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+          ['app:', '  name: cli-fixture', 'server:', '  port: "9191"', 'api:', '  baseUrl: https://api.changed'].join('\n'),
+        );
+
+        await waitForCondition(async () => {
+          const content = await readFile(outputPath, 'utf8').catch(() => '');
+          return content.includes('API_URL=https://api.local') && content.includes('SERVER_PORT=9191');
+        }, 10000);
+        await waitForCondition(async () => {
+          const content = await readFile(markerPath, 'utf8').catch(() => '');
+          return content.trim().split(/\r?\n/).filter(Boolean).length >= 2;
+        }, 10000);
+      } finally {
+        await handle.close();
+      }
+    },
+    20000,
   );
 });

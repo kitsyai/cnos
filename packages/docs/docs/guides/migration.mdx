@@ -16,6 +16,15 @@ cnos migrate --apply --rewrite
 Bridge to existing tooling:
 
 ```bash
-cnos export env --to .env.local
-cnos export env --profile stage --to .env.stage
+cnos build env --to .env.local
+cnos build env --profile stage --to .env.stage
+cnos dev env --profile local --to .env.local -- pnpm dev
 ```
+
+Recommended migration sequence:
+
+1. Keep `.cnos` as the source of truth.
+2. Generate `.env.*` artifacts for legacy tools.
+3. Migrate server code to `@kitsy/cnos`.
+4. Migrate browser code to `@kitsy/cnos/browser`.
+5. Remove env-file dependencies app by app.

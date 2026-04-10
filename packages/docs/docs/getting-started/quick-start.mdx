@@ -11,6 +11,7 @@ cnos value set app.name demo
 cnos value set server.port 3000
 cnos value set api.default_query_params '["ab", "bc"]'
 cnos read value.app.name
+cnos build env --profile local --to .env.local
 cnos run -- node server.js
 ```
 
@@ -31,4 +32,11 @@ import { createCnos } from '@kitsy/cnos/configure';
 const runtime = await createCnos();
 console.log(runtime.value('app.name'));
 console.log(runtime.read<string[]>('value.api.default_query_params'));
+```
+
+If your repo still expects env files, keep `.cnos` as the source of truth and generate them:
+
+```bash
+cnos build env --profile local --to .env.local
+cnos dev env --profile local --to .env.local -- pnpm dev
 ```

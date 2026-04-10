@@ -506,6 +506,53 @@ const COMMANDS: HelpCommand[] = [
     ],
   },
   {
+    id: 'build',
+    summary: 'Build derived configuration artifacts from CNOS.',
+    usage: 'cnos build <subcommand> [options] [global-options]',
+    description: 'Builds deterministic derived outputs from the selected workspace. Currently supports env artifact generation.',
+    arguments: [
+      {
+        name: 'subcommand',
+        description: 'Supported value: env.',
+        required: true,
+      },
+    ],
+    examples: [
+      'cnos build env --profile local --to .env.local',
+      'cnos build env --public --framework vite --profile prod --to .env.production',
+    ],
+  },
+  {
+    id: 'build env',
+    summary: 'Build a flat env-file artifact from CNOS.',
+    usage: 'cnos build env --to <path> [--public] [--framework <name>] [--prefix <prefix>] [global-options]',
+    description:
+      'Builds a deterministic KEY=VALUE artifact for legacy build and runtime workflows. The target file is derived output, not the CNOS source of truth.',
+    options: [
+      {
+        flag: '--to <path>',
+        description: 'Write the rendered KEY=VALUE output to a file. Required.',
+      },
+      {
+        flag: '--public',
+        description: 'Build only public values based on manifest promotion rules.',
+      },
+      {
+        flag: '--framework <name>',
+        description: 'Apply framework-specific public env conventions such as vite or next.',
+      },
+      {
+        flag: '--prefix <prefix>',
+        description: 'Override the generated public env prefix.',
+      },
+    ],
+    examples: [
+      'cnos build env --profile local --to .env.local',
+      'cnos build env --profile stage --to .env.stage',
+      'cnos build env --public --framework vite --to .env.local',
+    ],
+  },
+  {
     id: 'export env',
     summary: 'Render environment variables for the selected workspace.',
     usage: 'cnos export env [--public] [--framework <name>] [--prefix <prefix>] [--to <path>] [global-options]',
@@ -533,6 +580,62 @@ const COMMANDS: HelpCommand[] = [
       'cnos export env',
       'cnos export env --to .env.local',
       'cnos export env --public --framework vite --to .env.local --workspace api',
+    ],
+  },
+  {
+    id: 'dev',
+    summary: 'Run watched CNOS-driven development workflows.',
+    usage: 'cnos dev <subcommand> [options] [global-options] -- <command...>',
+    description:
+      'Runs higher-level development workflows that derive config artifacts from CNOS and keep them up to date while a child process is running.',
+    arguments: [
+      {
+        name: 'subcommand',
+        description: 'Supported value: env.',
+        required: true,
+      },
+    ],
+    examples: [
+      'cnos dev env --profile local --to .env.local -- pnpm dev',
+      'cnos dev env --public --framework vite --to .env.local -- pnpm dev',
+    ],
+  },
+  {
+    id: 'dev env',
+    summary: 'Watch CNOS config, rewrite an env file, and restart a child process.',
+    usage: 'cnos dev env --to <path> [--public] [--framework <name>] [--prefix <prefix>] [--debounce <ms>] [--signal] [global-options] -- <command...>',
+    description:
+      'Writes a derived env file before first launch, watches CNOS inputs, rewrites the file on change, and restarts the child process by default.',
+    options: [
+      {
+        flag: '--to <path>',
+        description: 'Write the rendered KEY=VALUE output to a file. Required.',
+      },
+      {
+        flag: '--public',
+        description: 'Build only public values based on manifest promotion rules.',
+      },
+      {
+        flag: '--framework <name>',
+        description: 'Apply framework-specific public env conventions such as vite or next.',
+      },
+      {
+        flag: '--prefix <prefix>',
+        description: 'Override the generated public env prefix.',
+      },
+      {
+        flag: '--debounce <ms>',
+        description: 'Debounce config changes before rebuilding the env artifact. Defaults to 300ms.',
+      },
+      {
+        flag: '--signal',
+        description: 'Rewrite the env artifact and emit changed keys as JSON instead of restarting the child process.',
+      },
+    ],
+    examples: [
+      'cnos dev env --profile local --to .env.local -- pnpm dev',
+      'cnos dev env --profile stage --to .env.stage -- node server.js',
+      'cnos dev env --public --framework vite --to .env.local --signal -- pnpm dev',
     ],
   },
   {
@@ -750,6 +853,8 @@ export const HELP_DOCUMENT: HelpDocument = {
   examples: [
     'cnos use --profile stage',
     'cnos doctor --workspace api',
+    'cnos build env --profile stage --to .env.stage',
+    'cnos dev env --profile local --to .env.local -- pnpm dev',
     'cnos export env --public --framework vite',
     'cnos export env --public --framework next',
     'cnos help-ai --format json',

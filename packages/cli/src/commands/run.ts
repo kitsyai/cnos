@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 
 import {
   CNOS_GRAPH_ENV_VAR,
@@ -10,19 +10,12 @@ import {
 
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
+import { spawnCommand } from '../services/spawn.js';
 
 export interface RunCommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
-}
-
-function shouldUseShellForCommand(command: string): boolean {
-  if (process.platform !== 'win32') {
-    return false;
-  }
-
-  return !/[\\/]/.test(command);
 }
 
 function consumeOptions(args: string[], flag: string): string[] {
@@ -117,11 +110,10 @@ export async function runCommand(
       return;
     }
 
-    const child: ChildProcess = spawn(executable, command.slice(1), {
+    const child: ChildProcess = spawnCommand(command, {
       cwd: options.root ?? process.cwd(),
       env,
       stdio: options.stdio === 'pipe' ? 'pipe' : 'inherit',
-      shell: shouldUseShellForCommand(executable),
     });
     let stdout = '';
     let stderr = '';

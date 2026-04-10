@@ -1,0 +1,38 @@
+---
+title: Generated Env Files
+description: Use CNOS to generate legacy .env artifacts while keeping .cnos as the source of truth.
+---
+
+# Generated Env Files
+
+CNOS is runtime-first, but many repos still rely on `.env.local`, `.env.stage`, or similar files.
+
+Use generated env files as a **bridge**, not as the source of truth.
+
+## One-shot build
+
+```bash
+cnos build env --profile local --to .env.local
+cnos build env --profile stage --to .env.stage
+cnos build env --profile prod --to .env.prod
+```
+
+## Watched dev loop
+
+```bash
+cnos dev env --profile local --to .env.local -- pnpm dev
+```
+
+## Public-only frontend artifacts
+
+```bash
+cnos build env --public --framework vite --profile local --to .env.local
+cnos build env --public --framework next --profile prod --to .env.production
+```
+
+## Recommended policy
+
+- keep `.cnos` as the source of truth
+- keep generated `.env.*` files gitignored
+- migrate app code toward direct CNOS reads over time
+- keep secrets on runtime/vault flows instead of materializing them into env files by default
