@@ -5,7 +5,16 @@ description: Move existing env-based projects onto CNOS without losing current w
 
 # Migrating from .env
 
-Use the migration assistant:
+CNOS migration works best as a bridge, not a flag day.
+
+The pattern is:
+
+1. Keep `.cnos` as the new source of truth.
+2. Keep your current app/build/runtime working.
+3. Generate whatever bridge artifact the existing stack needs.
+4. Migrate direct env reads to CNOS app by app.
+
+Use the migration assistant when you want help mapping existing env usage:
 
 ```bash
 cnos migrate --scan src --dry-run
@@ -13,20 +22,112 @@ cnos migrate --apply
 cnos migrate --apply --rewrite
 ```
 
-Bridge to existing tooling:
+## Plain Node or Express with `.env`
+
+If your service currently starts with `dotenv`, keep that flow first.
 
 ```bash
-cnos build env --to .env.local
+cnos build env --profile local --to .env.local
 cnos build env --profile stage --to .env.stage
-cnos dev env --profile local --to .env.local -- pnpm dev
 ```
 
-For webpack or other static bundles, pair this with `@kitsy/cnos-webpack` or `@kitsy/cnos/build` so browser-safe `public.*` values are injected at build time without keeping handwritten `.env` files as the source of truth.
+Then your existing `dotenv` bootstrap keeps working.
+
+Move server code gradually:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+
+const port = cnos.readOr('value.server.port', 3000);
+const token = cnos.secret('app.token');
+```
+
+For runtime packaging instead of env files:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+## Vite Frontend
+
+If you already use `VITE_*` env variables, keep that contract first.
+
+```bash
+cnos build public --framework vite --profile local --to .env.local
+cnos dev env --public --framework vite --profile local --to .env.local -- pnpm dev
+```
+
+Then add `@kitsy/cnos-vite` and migrate browser reads to:
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+cnos('public.app.apiBaseUrl');
+```
+
+## Next.js
+
+If you already use `NEXT_PUBLIC_*`, keep that contract while adopting CNOS.
+
+```bash
+cnos build public --framework next --profile prod --to .env.production
+```
+
+Then wire `@kitsy/cnos-next` so Next gets public data from CNOS directly and browser code can read `public.*` through `@kitsy/cnos/browser`.
+
+## Webpack Static Frontend
+
+If you already have a `webpack.config.js`, you do not need to invent a new runtime.
+
+- read build-time settings such as dev-server port through `createCnos()`
+- inject browser-safe config through `@kitsy/cnos-webpack`
+- keep generated `.env.*` files only if your repo still expects them
+
+Example bridge:
+
+```bash
+cnos build public --profile local --to .env.local
+```
+
+Longer-term path:
+
+- `CnosWebpackPlugin` for browser-safe values
+- `createCnos()` inside webpack config for build-time settings
+
+## pnpm Monorepo
+
+For monorepos, do not copy `.cnos` into every package.
+
+- keep one repo-root `.cnos/`
+- add `.cnosrc.yml` to each consuming app/package
+- optionally add a repo-root `.cnosrc.yml` if the root also consumes CNOS
+
+Example:
+
+```yaml
+# apps/travel/.cnosrc.yml
+root: ../../.cnos
+workspace: travel
+```
+
+Server-side packages can use projections:
+
+```bash
+cnos build server --workspace travel --profile prod --to apps/travel/.cnos-server.json
+```
+
+Legacy env-based packages can still use:
+
+```bash
+cnos build env --workspace travel --profile local --to apps/travel/.env.local
+```
 
 Recommended migration sequence:
 
 1. Keep `.cnos` as the source of truth.
-2. Generate `.env.*` artifacts for legacy tools.
+2. Generate `.env.*`, browser, or server projection artifacts for legacy tools.
 3. Migrate server code to `@kitsy/cnos`.
 4. Migrate browser code to `@kitsy/cnos/browser`.
-5. Remove env-file dependencies app by app.
+5. Remove handwritten env-file dependencies app by app.

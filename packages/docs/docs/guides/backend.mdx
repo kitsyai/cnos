@@ -10,6 +10,15 @@ Backend projects usually use one of two patterns:
 - `cnos run -- <command>` for zero-code-change adoption
 - `import cnos from '@kitsy/cnos'` for direct runtime reads
 
+For an existing Express or Node service that already uses `.env`, start with the env bridge:
+
+```bash
+cnos build env --profile local --to .env.local
+cnos build env --profile stage --to .env.stage
+```
+
+Then keep your current `dotenv` setup while moving runtime reads to CNOS.
+
 Example:
 
 ```ts
@@ -24,6 +33,12 @@ const token = cnos.secret('app.token');
 Env export bridge:
 
 ```bash
-cnos export env --to .env.local
-cnos export env --profile stage --to .env.stage
+cnos build env --to .env.local
+cnos build env --profile stage --to .env.stage
+```
+
+Projection-first packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
 ```

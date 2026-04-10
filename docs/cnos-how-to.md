@@ -28,6 +28,70 @@ Core concepts:
 - `process.*` is a built-in server-only namespace for ambient runtime state such as `process.env.*`, `process.cwd`, and `process.node.version`.
 - local secret material is stored outside the repo under `~/.cnos/secrets`.
 
+## Migration Stories
+
+Use the stack you already have as the bridge, then move reads to CNOS gradually.
+
+### Plain Node or Express
+
+Keep existing `dotenv` startup if the app already depends on it:
+
+```powershell
+cnos build env --profile local --to .env.local
+cnos build env --profile stage --to .env.stage
+```
+
+Then start moving runtime reads to:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+const port = cnos.readOr('value.server.port', 3000);
+```
+
+For deployment packaging:
+
+```powershell
+cnos build server --profile prod --to .cnos-server.json
+```
+
+### Vite
+
+Keep `VITE_*` working first:
+
+```powershell
+cnos build public --framework vite --profile local --to .env.local
+cnos dev env --public --framework vite --profile local --to .env.local -- pnpm dev
+```
+
+Then move browser reads to `@kitsy/cnos/browser`.
+
+### Next.js
+
+Keep `NEXT_PUBLIC_*` working first:
+
+```powershell
+cnos build public --framework next --profile prod --to .env.production
+```
+
+Then add `withCnosNext()` and move reads to `@kitsy/cnos/browser` for public values and `@kitsy/cnos` for server values.
+
+### Webpack
+
+Use `@kitsy/cnos-webpack` for browser-safe values and `createCnos()` in the webpack config for build-time settings like dev-server port.
+
+### pnpm Monorepo
+
+Keep one repo-root `.cnos/`, add `.cnosrc.yml` per consuming app/package, and only detach a child package if it truly needs to own config independently.
+
+Example child anchor:
+
+```yaml
+root: ../../.cnos
+workspace: travel
+```
+
 ## 1. Pure Backend Project
 
 Use this for Node services, API servers, workers, CLIs, or any backend-only app.

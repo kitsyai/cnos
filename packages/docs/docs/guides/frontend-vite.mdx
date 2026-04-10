@@ -5,6 +5,13 @@ description: Project browser-safe CNOS values into Vite and use the browser runt
 
 # Frontend with Vite
 
+If your app already uses `VITE_*`, keep that shape first and let CNOS generate it.
+
+```bash
+cnos build public --framework vite --profile local --to .env.local
+cnos dev env --public --framework vite --profile local --to .env.local -- pnpm dev
+```
+
 Promote browser-safe values:
 
 ```yaml
@@ -32,3 +39,10 @@ import cnos from '@kitsy/cnos/browser';
 console.log(cnos('public.app.apiBaseUrl'));
 console.log(import.meta.env.VITE_APP_API_BASE_URL);
 ```
+
+Migration path:
+
+1. keep `VITE_*` working through generated env files
+2. add `createCnosVitePlugin()`
+3. move browser reads to `@kitsy/cnos/browser`
+4. stop treating handwritten `.env.local` as the source of truth

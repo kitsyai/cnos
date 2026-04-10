@@ -5,6 +5,12 @@ description: Use CNOS public projection with Next.js builds and browser-safe run
 
 # Frontend with Next.js
 
+If the app already depends on `NEXT_PUBLIC_*`, keep that contract while CNOS becomes the source of truth:
+
+```bash
+cnos build public --framework next --profile prod --to .env.production
+```
+
 ```ts
 import { withCnosNext } from '@kitsy/cnos-next';
 
@@ -12,3 +18,10 @@ export default withCnosNext({});
 ```
 
 Browser-safe values remain under `public.promote` and are exposed as `NEXT_PUBLIC_*` plus browser-runtime data for `@kitsy/cnos/browser`.
+
+Migration path:
+
+1. keep `NEXT_PUBLIC_*` via generated env or Next env injection
+2. add `withCnosNext()`
+3. move browser-safe reads to `@kitsy/cnos/browser`
+4. move server-only reads to `@kitsy/cnos` or `@kitsy/cnos/configure`
