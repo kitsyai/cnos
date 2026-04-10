@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { CnosManifestError } from '../errors.js';
+import { discoverCnosAnchor } from '../discovery/findCnosrc.js';
 import type { LogicalKey, NamespaceName } from '../types/core.js';
 
 export const PRIMARY_CNOS_DIR = '.cnos';
@@ -36,8 +37,36 @@ export async function resolveCnosRoot(root = process.cwd()): Promise<string> {
   );
 }
 
-export async function resolveManifestRoot(root = process.cwd()): Promise<string> {
-  return resolveCnosRoot(root);
+export async function resolveManifestRoot(options: {
+  root?: string;
+  cwd?: string;
+} = {}): Promise<{
+  manifestRoot: string;
+  consumerRoot: string;
+  anchorPath?: string;
+  workspace?: string;
+}> {
+  if (options.root) {
+    const manifestRoot = await resolveCnosRoot(options.root);
+    const resolvedRoot = path.resolve(options.root);
+    const consumerRoot =
+      path.basename(manifestRoot) === PRIMARY_CNOS_DIR || path.basename(manifestRoot) === LEGACY_CNOS_DIR
+        ? path.dirname(manifestRoot)
+        : resolvedRoot;
+
+    return {
+      manifestRoot,
+      consumerRoot,
+    };
+  }
+
+  const discovered = await discoverCnosAnchor(options.cwd ?? process.cwd());
+  return {
+    manifestRoot: discovered.manifestRoot,
+    consumerRoot: discovered.consumerRoot,
+    anchorPath: discovered.anchorPath,
+    ...(discovered.workspace ? { workspace: discovered.workspace } : {}),
+  };
 }
 
 export function interpolatePathTemplate(

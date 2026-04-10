@@ -8,7 +8,11 @@ import { parseYaml } from '../utils/yaml.js';
 import { normalizeManifest } from './normalizeManifest.js';
 
 export async function loadManifest(options: LoadManifestOptions = {}): Promise<LoadedManifest> {
-  const manifestRoot = await resolveManifestRoot(options.root);
+  const resolved = await resolveManifestRoot({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+  });
+  const manifestRoot = resolved.manifestRoot;
   const manifestPath = path.join(manifestRoot, 'cnos.yml');
   let source: string;
 
@@ -27,6 +31,9 @@ export async function loadManifest(options: LoadManifestOptions = {}): Promise<L
   return {
     manifestRoot,
     repoRoot: path.dirname(manifestRoot),
+    consumerRoot: resolved.consumerRoot,
+    ...(resolved.anchorPath ? { anchorPath: resolved.anchorPath } : {}),
+    ...(resolved.workspace ? { anchoredWorkspace: resolved.workspace } : {}),
     manifestPath,
     manifest: normalizeManifest(rawManifest),
     rawManifest,

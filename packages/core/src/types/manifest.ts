@@ -134,11 +134,15 @@ export interface NormalizedManifest {
 
 export interface LoadManifestOptions {
   root?: string;
+  cwd?: string;
 }
 
 export interface LoadedManifest {
   manifestRoot: string;
   repoRoot: string;
+  consumerRoot: string;
+  anchorPath?: string;
+  anchoredWorkspace?: string;
   manifestPath: string;
   manifest: NormalizedManifest;
   rawManifest: ManifestFile;

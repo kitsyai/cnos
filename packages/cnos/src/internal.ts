@@ -46,11 +46,15 @@ export {
 } from '@kitsy/cnos-core';
 export {
   CNOS_GRAPH_ENV_VAR,
+  CNOS_PROJECTION_ENV_VAR,
   CNOS_SECRET_PAYLOAD_ENV_VAR,
   CNOS_SESSION_KEY_ENV_VAR,
+  deserializeServerProjection,
   deserializeRuntimeGraph,
   graphRequiresSecretHydration,
   readRuntimeGraphFromEnv,
+  readServerProjectionFromEnv,
+  serializeServerProjection,
   serializeSecretPayload,
   serializeRuntimeGraph,
 } from './runtime/bootstrap.js';

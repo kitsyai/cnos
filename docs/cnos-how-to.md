@@ -20,6 +20,7 @@ cnos help
 
 Core concepts:
 - `.cnos/cnos.yml` is the local authoritative manifest.
+- `.cnosrc.yml` is the consumer-side anchor that tells a package or app which `.cnos` root to use.
 - values are private by default.
 - public/browser exposure comes from `public.promote`.
 - shell env export comes from `envMapping.explicit`.
@@ -85,6 +86,14 @@ const port = cnos('value.server.port');
 const dbPassword = cnos.secret('db.password');
 ```
 
+For projection-first packaging, build a server artifact:
+
+```powershell
+cnos build server --to .cnos-server.json
+```
+
+`@kitsy/cnos` auto-loads from `__CNOS_PROJECTION__`, then `.cnos-server.json`, then falls back to full authoring resolution through `.cnosrc.yml`.
+
 Other runtime helpers:
 
 ```ts
@@ -113,6 +122,7 @@ Then:
 cnos export env
 cnos export env --to .env.local
 cnos build env --profile local --to .env.local
+cnos build server --profile stage --to dist/.cnos-server.json
 cnos export env --profile stage --to .env.stage
 cnos build env --profile stage --to .env.stage
 cnos dev env --profile local --to .env.local -- pnpm dev
@@ -235,6 +245,7 @@ Useful checks:
 ```powershell
 cnos list public
 cnos export env --public --framework vite
+cnos build public --framework vite --to .env.local
 cnos build env --public --framework vite --to .env.local
 cnos export env --public --framework vite --to .env.local
 ```
@@ -569,6 +580,27 @@ Override per command when needed:
 
 ```powershell
 cnos list values --workspace webapp
+```
+
+For package-level consumers inside a pnpm monorepo, add a `.cnosrc.yml` beside the package `package.json`:
+
+```yaml
+root: ../../.cnos
+workspace: travel
+```
+
+CNOS only discovers `.cnosrc.yml`, not `.cnos`, and the search is bounded to a small package-root window.
+
+If a child package needs to become self-contained:
+
+```powershell
+cnos workspace detach --package-root apps/travel
+```
+
+To reattach later:
+
+```powershell
+cnos workspace attach --package-root apps/travel
 ```
 
 ## Secrets

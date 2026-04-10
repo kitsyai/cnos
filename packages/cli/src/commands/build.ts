@@ -1,40 +1,78 @@
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
-import { materializeEnvToFile } from '../services/envMaterialization.js';
+import {
+  buildBrowserProjectionArtifact,
+  buildEnvProjectionArtifact,
+  buildPublicProjectionArtifact,
+  buildServerProjectionArtifact,
+  type ProjectionFormat,
+} from '../services/projections.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 
 export async function runBuild(
   subcommand: string | undefined,
   options: RuntimeServiceOptions = {},
 ): Promise<string> {
-  if (subcommand !== 'env') {
-    throw new Error(`Unsupported build target: ${subcommand ?? '(missing)'}`);
-  }
-
   const infoArgs = [...(options.cliArgs ?? [])];
+  const format = (consumeOption(infoArgs, '--format') ?? undefined) as ProjectionFormat | undefined;
   const isPublic = consumeFlag(infoArgs, '--public');
   const framework = consumeOption(infoArgs, '--framework');
   consumeOption(infoArgs, '--prefix');
   const to = consumeOption(infoArgs, '--to');
+  const provenanceTarget = consumeOption(infoArgs, '--with-provenance');
 
   if (!to) {
-    throw new Error('build env requires --to <path>');
+    throw new Error(`build ${subcommand ?? '(missing)'} requires --to <path>`);
   }
 
-  const result = await materializeEnvToFile(to, {
-    ...options,
-    cliArgs: [...(options.cliArgs ?? [])],
-  });
+  let targetPath: string;
+  let count = 0;
+
+  switch (subcommand) {
+    case 'env': {
+      const result = await buildEnvProjectionArtifact(to, {
+        ...options,
+        cliArgs: [...(options.cliArgs ?? [])],
+      }, format ?? 'dotenv');
+      targetPath = result.targetPath;
+      count = Object.keys(result.env).length;
+      break;
+    }
+    case 'public': {
+      const result = await buildPublicProjectionArtifact(to, {
+        ...options,
+        cliArgs: [...(options.cliArgs ?? [])],
+      }, format ?? 'dotenv');
+      targetPath = result.targetPath;
+      count = Object.keys(result.env).length;
+      break;
+    }
+    case 'server': {
+      const result = await buildServerProjectionArtifact(to, options, format ?? 'json');
+      targetPath = result.targetPath;
+      count = 1;
+      break;
+    }
+    case 'browser': {
+      const result = await buildBrowserProjectionArtifact(to, options, format ?? 'json');
+      targetPath = result.targetPath;
+      count = 1;
+      break;
+    }
+    default:
+      throw new Error(`Unsupported build target: ${subcommand ?? '(missing)'}`);
+  }
 
   if (options.json) {
     return printJson({
-      to: result.targetPath,
-      count: Object.keys(result.env).length,
+      to: targetPath,
+      count,
       public: isPublic,
       ...(framework ? { framework } : {}),
+      ...(provenanceTarget ? { provenance: provenanceTarget } : {}),
     });
   }
 
-  return `built env artifact at ${displayPath(result.targetPath, options.root ?? process.cwd())}`;
+  return `built ${subcommand} artifact at ${displayPath(targetPath, options.root ?? process.cwd())}`;
 }

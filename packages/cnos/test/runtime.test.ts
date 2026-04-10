@@ -5,7 +5,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createCnos } from '../src/createCnos.js';
-import { CNOS_GRAPH_ENV_VAR, serializeRuntimeGraph } from '../src/runtime/bootstrap.js';
+import {
+  CNOS_GRAPH_ENV_VAR,
+  CNOS_PROJECTION_ENV_VAR,
+  serializeRuntimeGraph,
+  serializeServerProjection,
+} from '../src/runtime/bootstrap.js';
 
 const fixtureRoots: string[] = [];
 const originalCwd = process.cwd();
@@ -14,6 +19,7 @@ async function createFixtureRoot(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-singleton-'));
   fixtureRoots.push(root);
   await mkdir(path.join(root, '.cnos', 'values'), { recursive: true });
+  await writeFile(path.join(root, '.cnosrc.yml'), 'root: ./.cnos\n');
   await writeFile(
     path.join(root, '.cnos', 'cnos.yml'),
     ['version: 1', 'project:', '  name: runtime-fixture', 'envMapping:', '  explicit:', '    PORT: value.server.port'].join(
@@ -89,5 +95,41 @@ describe('@kitsy/cnos root runtime entry', () => {
     expect(consoleSpy).toHaveBeenCalledWith('Starting server at 3000');
 
     consoleSpy.mockRestore();
+  });
+
+  it('reads synchronously when bootstrapped from __CNOS_PROJECTION__', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(runtime.toServerProjection());
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    expect(cnos('value.server.port')).toBe(3000);
+    expect(cnos.value('server.port')).toBe(3000);
+    expect(cnos.meta('profile')).toBe('base');
+  });
+
+  it('autoloads from .cnos-server.json before full authoring resolution', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+    await writeFile(
+      path.join(root, '.cnos-server.json'),
+      serializeServerProjection(runtime.toServerProjection()),
+      'utf8',
+    );
+    process.chdir(root);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    expect(cnos.value('server.port')).toBe(3000);
   });
 });

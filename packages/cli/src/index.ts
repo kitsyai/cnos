@@ -29,6 +29,7 @@ import { runVault } from './commands/vault.js';
 import { runVersion } from './commands/version.js';
 import { runValue } from './commands/value.js';
 import { runWatch } from './commands/watch.js';
+import { runWorkspace } from './commands/workspace.js';
 import { normalizeHelpTopic } from './cli/helpRegistry.js';
 
 function resolveHelpTopic(command: string, args: string[]): string | undefined {
@@ -44,7 +45,15 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
     return normalizeHelpTopic([command, args[0]]);
   }
 
+  if (command === 'build' && args[0] && ['env', 'server', 'browser', 'public'].includes(args[0])) {
+    return normalizeHelpTopic([command, args[0]]);
+  }
+
   if (command === 'dev' && args[0] === 'env') {
+    return normalizeHelpTopic([command, args[0]]);
+  }
+
+  if (command === 'workspace' && args[0] && ['attach', 'detach'].includes(args[0])) {
     return normalizeHelpTopic([command, args[0]]);
   }
 
@@ -214,6 +223,9 @@ export async function main(argv: string[]): Promise<void> {
     }
     case 'watch':
       process.stdout.write(`${await runWatch(passthrough.length > 0 ? passthrough : args, runtimeOptions)}\n`);
+      return;
+    case 'workspace':
+      process.stdout.write(`${await runWorkspace(args, runtimeOptions)}\n`);
       return;
     case 'diff':
       process.stdout.write(`${await runDiff(args[0] ?? 'local', args[1] ?? 'stage', runtimeOptions)}\n`);

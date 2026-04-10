@@ -1,23 +1,25 @@
 ---
-title: cnos build env
-description: Build flat env-file artifacts from CNOS.
+title: cnos build
+description: Build derived CNOS projection artifacts for server, browser, env, and public surfaces.
 ---
 
-# cnos build env
+# cnos build
 
-Use `build env` when a repo still expects `.env.*` files but CNOS is the source of truth.
+Use `build` when a repo needs a deterministic artifact derived from CNOS.
 
 ```bash
+cnos build server --to .cnos-server.json
+cnos build browser --to .cnos-browser.json
 cnos build env --profile local --to .env.local
 cnos build env --profile stage --to .env.stage
-cnos build env --public --framework vite --to .env.production
+cnos build public --framework vite --to .env.production
 ```
 
-`build env`:
+Targets:
 
-- resolves the selected CNOS workspace/profile
-- renders a deterministic flat `KEY=VALUE` file
-- writes the target path
-- does not start a child process
+- `build server` writes a server runtime projection with resolved values plus secret refs
+- `build browser` writes a public-only browser projection
+- `build env` writes explicit env mappings in formats like `dotenv`, `shell`, `json`, `yaml`, `docker-env`, or `toml`
+- `build public` writes promoted public env with optional framework prefixes like Vite and Next
 
-This is the preferred bridge for build systems and CI pipelines that still consume env files.
+All build artifacts are derived output. `.cnos` remains the source of truth.

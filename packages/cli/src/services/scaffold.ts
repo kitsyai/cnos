@@ -122,6 +122,15 @@ export async function scaffoldWorkspace(
   }
 
   if (
+    await ensureFile(
+      path.join(root, '.cnosrc.yml'),
+      workspace ? `root: ./.cnos\nworkspace: ${workspace}\n` : 'root: ./.cnos\n',
+    )
+  ) {
+    createdPaths.push('.cnosrc.yml');
+  }
+
+  if (
     workspace &&
     (await ensureFile(path.join(root, '.cnos-workspace.yml'), `workspace: ${workspace}\nglobalRoot: ~/.cnos\n`))
   ) {

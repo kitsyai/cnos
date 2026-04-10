@@ -32,8 +32,12 @@ The runtime currently exposes:
 - `cnos.toNamespace(namespace)`
 - `cnos.toEnv()`
 - `cnos.toPublicEnv()`
+- `cnos.toServerProjection()`
 - `cnos.format(message)`
 - `cnos.log(message)`
+- `cnos.loadProjection(path)`
+- `cnos.refreshSecrets()`
+- `cnos.refreshSecret(key)`
 
 Example:
 
@@ -53,6 +57,15 @@ cnos.log('Starting server at ${value.server.port}');
 ```
 
 `cnos.format(...)` and `cnos.log(...)` interpolate `${logical.key}` placeholders through the active runtime. Missing keys are left unchanged.
+
+For server packaging, the runtime can also bootstrap from a projection artifact:
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.loadProjection('./.cnos-server.json');
+await cnos.ready();
+```
 
 ## Typed values
 

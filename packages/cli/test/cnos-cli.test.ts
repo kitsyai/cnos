@@ -33,6 +33,7 @@ import { runVault } from '../src/commands/vault.js';
 import { runVersion } from '../src/commands/version.js';
 import { runValue } from '../src/commands/value.js';
 import { startWatchLoop } from '../src/commands/watch.js';
+import { runWorkspace } from '../src/commands/workspace.js';
 import { printJson } from '../src/format/printJson.js';
 
 const fixtureRoots: string[] = [];
@@ -338,6 +339,7 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
       'default: api',
     );
+    await expect(readFile(path.join(root, '.cnosrc.yml'), 'utf8')).resolves.toContain('root: ./.cnos');
     await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).resolves.toContain(
       'workspace: api',
     );
@@ -1158,6 +1160,26 @@ describe('@kitsy/cnos-cli', () => {
       }),
     ).rejects.toThrow('build env requires --to <path>');
     await expect(
+      runBuild('server', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--to', path.join(exportRoot, '.cnos-server.json')],
+      }),
+    ).resolves.toContain('.cnos-server.json');
+    await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.toContain('"workspace": "api"');
+    await expect(
+      runBuild('public', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--framework', 'vite', '--to', path.join(exportRoot, '.env.public')],
+      }),
+    ).resolves.toContain('.env.public');
+    await expect(readFile(path.join(exportRoot, '.env.public'), 'utf8')).resolves.toBe(
+      'VITE_API_BASE_URL=https://api.local',
+    );
+    await expect(
       runDump({
         root,
         workspace: 'api',
@@ -1226,6 +1248,57 @@ describe('@kitsy/cnos-cli', () => {
     await expect(runDiff('base', 'stage', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
       'value.server.port: 8080 -> 9090',
     );
+  });
+
+  it('detaches and reattaches a workspace through .cnosrc.yml anchors', async () => {
+    const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-workspace-'));
+    fixtureRoots.push(repoRoot);
+    await mkdir(path.join(repoRoot, '.cnos', 'workspaces', 'travel', 'values'), { recursive: true });
+    await mkdir(path.join(repoRoot, 'apps', 'travel'), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, '.cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: monorepo-fixture',
+        'workspaces:',
+        '  default: travel',
+        '  items:',
+        '    travel: {}',
+      ].join('\n'),
+    );
+    await writeFile(
+      path.join(repoRoot, '.cnos', 'workspaces', 'travel', 'values', 'app.yml'),
+      ['app:', '  name: Travel'].join('\n'),
+    );
+    await writeFile(
+      path.join(repoRoot, 'apps', 'travel', '.cnosrc.yml'),
+      'root: ../../.cnos\nworkspace: travel\n',
+    );
+
+    await expect(
+      runWorkspace(['detach'], {
+        cliArgs: ['--package-root', path.join(repoRoot, 'apps', 'travel')],
+      }),
+    ).resolves.toContain('detached workspace travel');
+    await expect(readFile(path.join(repoRoot, 'apps', 'travel', '.cnosrc.yml'), 'utf8')).resolves.toContain(
+      'root: ./.cnos',
+    );
+    await expect(readFile(path.join(repoRoot, 'apps', 'travel', '.cnos', '.detached'), 'utf8')).resolves.toContain(
+      'detachedWorkspace: travel',
+    );
+
+    await expect(
+      runWorkspace(['attach'], {
+        cliArgs: ['--package-root', path.join(repoRoot, 'apps', 'travel'), '--force'],
+      }),
+    ).resolves.toContain('attached workspace travel');
+    await expect(readFile(path.join(repoRoot, 'apps', 'travel', '.cnosrc.yml'), 'utf8')).resolves.toContain(
+      'workspace: travel',
+    );
+    await expect(
+      readFile(path.join(repoRoot, '.cnos', 'workspaces', 'travel', 'values', 'app.yml'), 'utf8'),
+    ).resolves.toContain('Travel');
   });
 
   it('validates schema/public rules and reports doctor diagnostics', async () => {

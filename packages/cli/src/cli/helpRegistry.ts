@@ -76,7 +76,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Scaffold a workspace-aware CNOS tree in the current project.',
     usage: 'cnos init [--workspace <id>] [--root <path>] [--json]',
     description:
-      'Creates .cnos/cnos.yml, optional .cnos-workspace.yml, config folders, and .gitignore entries without overwriting existing files.',
+      'Creates .cnos/cnos.yml, .cnosrc.yml, optional .cnos-workspace.yml, config folders, and .gitignore entries without overwriting existing files.',
     examples: ['cnos init', 'cnos init --workspace api', 'cnos init --root ./apps/api --workspace api --json'],
   },
   {
@@ -509,23 +509,41 @@ const COMMANDS: HelpCommand[] = [
     id: 'build',
     summary: 'Build derived configuration artifacts from CNOS.',
     usage: 'cnos build <subcommand> [options] [global-options]',
-    description: 'Builds deterministic derived outputs from the selected workspace. Currently supports env artifact generation.',
+    description: 'Builds deterministic derived outputs from the selected workspace, including server projections, browser projections, env files, and framework-prefixed public env.',
     arguments: [
       {
         name: 'subcommand',
-        description: 'Supported value: env.',
+        description: 'Supported values: server, browser, env, public.',
         required: true,
       },
     ],
     examples: [
+      'cnos build server --to .cnos-server.json',
+      'cnos build browser --to .cnos-browser.json',
       'cnos build env --profile local --to .env.local',
-      'cnos build env --public --framework vite --profile prod --to .env.production',
+      'cnos build public --framework vite --profile prod --to .env.production',
     ],
+  },
+  {
+    id: 'build server',
+    summary: 'Build a server runtime projection artifact.',
+    usage: 'cnos build server --to <path> [--format <json|yaml>] [global-options]',
+    description:
+      'Builds a flat server projection for runtime auto-loading. Non-secret values are embedded, while secret refs remain refs and hydrate at runtime.',
+    examples: ['cnos build server --to .cnos-server.json', 'cnos build server --profile prod --to dist/.cnos-server.json'],
+  },
+  {
+    id: 'build browser',
+    summary: 'Build a browser projection artifact.',
+    usage: 'cnos build browser --to <path> [--format <json|yaml>] [global-options]',
+    description:
+      'Builds a public-only browser projection for tooling and offline packaging flows. secret.* keys are excluded entirely.',
+    examples: ['cnos build browser --to .cnos-browser.json'],
   },
   {
     id: 'build env',
     summary: 'Build a flat env-file artifact from CNOS.',
-    usage: 'cnos build env --to <path> [--public] [--framework <name>] [--prefix <prefix>] [global-options]',
+    usage: 'cnos build env --to <path> [--format <dotenv|docker-env|json|shell|toml|yaml>] [global-options]',
     description:
       'Builds a deterministic KEY=VALUE artifact for legacy build and runtime workflows. The target file is derived output, not the CNOS source of truth.',
     options: [
@@ -534,23 +552,23 @@ const COMMANDS: HelpCommand[] = [
         description: 'Write the rendered KEY=VALUE output to a file. Required.',
       },
       {
-        flag: '--public',
-        description: 'Build only public values based on manifest promotion rules.',
-      },
-      {
-        flag: '--framework <name>',
-        description: 'Apply framework-specific public env conventions such as vite or next.',
-      },
-      {
-        flag: '--prefix <prefix>',
-        description: 'Override the generated public env prefix.',
+        flag: '--format <dotenv|docker-env|json|shell|toml|yaml>',
+        description: 'Select the output format. Defaults to dotenv.',
       },
     ],
     examples: [
       'cnos build env --profile local --to .env.local',
       'cnos build env --profile stage --to .env.stage',
-      'cnos build env --public --framework vite --to .env.local',
+      'cnos build env --profile prod --format yaml --to env.yaml',
     ],
+  },
+  {
+    id: 'build public',
+    summary: 'Build a public env artifact with optional framework prefixing.',
+    usage: 'cnos build public --to <path> [--framework <name>] [--format <dotenv|docker-env|json|shell|toml|yaml>] [global-options]',
+    description:
+      'Builds env-style public artifacts from promoted keys only, with framework-specific prefixes such as vite or next when requested.',
+    examples: ['cnos build public --framework vite --to .env.vite', 'cnos build public --framework next --format json --to public.json'],
   },
   {
     id: 'export env',
@@ -686,6 +704,30 @@ const COMMANDS: HelpCommand[] = [
       'cnos run --set value.server.port=9999 -- node server.js',
       'cnos run --public --framework vite -- pnpm build',
     ],
+  },
+  {
+    id: 'workspace',
+    summary: 'Attach or detach package-local workspace config from a parent CNOS root.',
+    usage: 'cnos workspace <attach|detach> [options] [global-options]',
+    description:
+      'Detaches a child package into a standalone .cnos root or reattaches a detached package back into a parent workspace.',
+    examples: ['cnos workspace detach', 'cnos workspace attach --package-root apps/travel'],
+  },
+  {
+    id: 'workspace detach',
+    summary: 'Detach a package workspace into a standalone .cnos root.',
+    usage: 'cnos workspace detach [--package-root <path>] [--force] [global-options]',
+    description:
+      'Materializes the effective local workspace chain into a package-local .cnos directory, rewrites .cnosrc.yml to root: ./.cnos, and records the original parent binding in .cnos/.detached.',
+    examples: ['cnos workspace detach', 'cnos workspace detach --package-root apps/travel --force'],
+  },
+  {
+    id: 'workspace attach',
+    summary: 'Attach a detached package back to its original parent CNOS root.',
+    usage: 'cnos workspace attach [--package-root <path>] [--force] [global-options]',
+    description:
+      'Imports a detached package-local .cnos directory back into the original parent workspace, archives the detached snapshot, and restores .cnosrc.yml to the parent root/workspace binding.',
+    examples: ['cnos workspace attach', 'cnos workspace attach --package-root apps/travel --force'],
   },
   {
     id: 'diff',

@@ -10,6 +10,7 @@ import { expandWorkspaceChain } from './expandWorkspaceChain.js';
 export interface ResolveWorkspaceContextOptions {
   manifestRoot: string;
   workspaceFile?: WorkspaceFile;
+  anchoredWorkspace?: string;
   workspace?: string;
   globalRoot?: string;
   processEnv?: Record<string, string | undefined>;
@@ -58,6 +59,7 @@ async function resolveLocalWorkspaceRoot(
 function resolveWorkspaceSelection(
   manifest: NormalizedManifest,
   workspaceFile: WorkspaceFile | undefined,
+  anchoredWorkspace: string | undefined,
   workspaceOption: string | undefined,
 ): { workspaceId: string; source: WorkspaceSource } {
   if (workspaceOption) {
@@ -71,6 +73,13 @@ function resolveWorkspaceSelection(
     return {
       workspaceId: workspaceFile.workspace,
       source: 'workspace-file',
+    };
+  }
+
+  if (anchoredWorkspace) {
+    return {
+      workspaceId: anchoredWorkspace,
+      source: 'anchor-file',
     };
   }
 
@@ -139,7 +148,12 @@ export async function resolveWorkspaceContext(
   manifest: NormalizedManifest,
   options: ResolveWorkspaceContextOptions,
 ): Promise<WorkspaceContext> {
-  const selectedWorkspace = resolveWorkspaceSelection(manifest, options.workspaceFile, options.workspace);
+  const selectedWorkspace = resolveWorkspaceSelection(
+    manifest,
+    options.workspaceFile,
+    options.anchoredWorkspace,
+    options.workspace,
+  );
   const workspaceChain = expandWorkspaceChain(selectedWorkspace.workspaceId, manifest.workspaces.items);
   const globalRoot = resolveGlobalRoot(manifest, options.workspaceFile, options);
   const workspaceRoots: WorkspaceContext['workspaceRoots'] = [];

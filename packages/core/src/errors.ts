@@ -11,6 +11,12 @@ export class CnosManifestError extends CnosError {
   }
 }
 
+export class CnosDiscoveryError extends CnosError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 export class CnosSecurityError extends CnosError {
   constructor(message: string) {
     super(message);

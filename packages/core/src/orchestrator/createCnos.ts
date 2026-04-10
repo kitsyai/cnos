@@ -111,14 +111,18 @@ function appendMetaEntries(graph: ResolvedGraph, cnosVersion?: string): Resolved
 }
 
 export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosRuntime> {
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+  });
   for (const key of loadedManifest.manifest.public.promote) {
     ensureProjectionAllowed(loadedManifest.manifest, key, 'public');
   }
-  const workspaceFile = await loadWorkspaceFile(loadedManifest.repoRoot);
+  const workspaceFile = await loadWorkspaceFile(loadedManifest.consumerRoot);
   const workspace = await resolveWorkspaceContext(loadedManifest.manifest, {
     manifestRoot: loadedManifest.manifestRoot,
     ...(workspaceFile ? { workspaceFile: workspaceFile.config } : {}),
+    ...(loadedManifest.anchoredWorkspace ? { anchoredWorkspace: loadedManifest.anchoredWorkspace } : {}),
     ...(options.workspace ? { workspace: options.workspace } : {}),
     ...(options.globalRoot ? { globalRoot: options.globalRoot } : {}),
     ...(options.processEnv ? { processEnv: options.processEnv } : {}),
@@ -170,5 +174,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     }, options.cnosVersion),
     plugins,
     secretCache,
+    options.processEnv,
+    options.cnosVersion,
   );
 }

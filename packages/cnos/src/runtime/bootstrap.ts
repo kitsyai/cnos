@@ -1,9 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-import type { ConfigEntry, ResolvedEntry, ResolvedGraph } from '@kitsy/cnos-core';
+import type { ConfigEntry, ResolvedEntry, ResolvedGraph, ServerProjection } from '@kitsy/cnos-core';
 import { isSecretReference } from '@kitsy/cnos-core';
 
 export const CNOS_GRAPH_ENV_VAR = '__CNOS_GRAPH__';
+export const CNOS_PROJECTION_ENV_VAR = '__CNOS_PROJECTION__';
 export const CNOS_SECRET_PAYLOAD_ENV_VAR = '__CNOS_SECRET_PAYLOAD__';
 export const CNOS_SESSION_KEY_ENV_VAR = '__CNOS_SESSION_KEY__';
 
@@ -24,6 +25,36 @@ interface SerializedSecretPayload {
   iv: string;
   tag: string;
   ciphertext: string;
+}
+
+export function serializeServerProjection(projection: ServerProjection): string {
+  return JSON.stringify(projection);
+}
+
+export function deserializeServerProjection(source: string): ServerProjection {
+  const payload = JSON.parse(source) as Partial<ServerProjection>;
+
+  if (
+    !payload ||
+    payload.version !== 1 ||
+    typeof payload.workspace !== 'string' ||
+    typeof payload.profile !== 'string' ||
+    typeof payload.resolvedAt !== 'string' ||
+    typeof payload.configHash !== 'string' ||
+    !payload.values ||
+    typeof payload.values !== 'object' ||
+    Array.isArray(payload.values) ||
+    !payload.secretRefs ||
+    typeof payload.secretRefs !== 'object' ||
+    Array.isArray(payload.secretRefs) ||
+    !Array.isArray(payload.publicKeys) ||
+    !payload.meta ||
+    typeof payload.meta !== 'object'
+  ) {
+    throw new Error('Invalid CNOS server projection payload');
+  }
+
+  return payload as ServerProjection;
 }
 
 export function serializeRuntimeGraph(graph: ResolvedGraph): string {
@@ -143,6 +174,18 @@ export function readRuntimeGraphFromEnv(
   }
 
   return graph;
+}
+
+export function readServerProjectionFromEnv(
+  processEnv: Record<string, string | undefined> = process.env,
+): ServerProjection | undefined {
+  const serialized = processEnv[CNOS_PROJECTION_ENV_VAR];
+
+  if (!serialized) {
+    return undefined;
+  }
+
+  return deserializeServerProjection(serialized);
 }
 
 export function graphRequiresSecretHydration(graph: ResolvedGraph): boolean {

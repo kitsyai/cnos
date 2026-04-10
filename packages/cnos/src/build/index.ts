@@ -1,4 +1,4 @@
-import { type CnosCreateOptions } from '@kitsy/cnos-core';
+import { type CnosCreateOptions, type ServerProjection } from '@kitsy/cnos-core';
 
 import { createCnos } from '../createCnos.js';
 
@@ -100,4 +100,11 @@ export async function resolveFrameworkEnv(
     framework,
     ...(envOptions.prefix ? { prefix: envOptions.prefix } : {}),
   });
+}
+
+export async function resolveServerProjection(
+  options: CnosCreateOptions = {},
+): Promise<ServerProjection> {
+  const runtime = await createCnos(options);
+  return runtime.toServerProjection();
 }

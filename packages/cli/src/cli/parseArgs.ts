@@ -33,6 +33,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--provider',
   '--passphrase',
   '--vault',
+  '--package-root',
   '--inherit',
   '--as',
   '--set',

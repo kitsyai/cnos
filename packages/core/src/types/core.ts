@@ -3,6 +3,7 @@ import type { CnosPlugin } from './plugin.js';
 import type { ProfileSource } from './profile.js';
 import type { SecretCache } from '../secrets/secretCache.js';
 import type { WorkspaceContext } from './workspace.js';
+import type { SecretReference } from '../secrets/types.js';
 
 export type LogicalKey = string;
 
@@ -74,11 +75,13 @@ export interface InspectResult {
 }
 
 export interface CnosCreateOptions {
+  cwd?: string;
   root?: string;
   profile?: string;
   workspace?: string;
   globalRoot?: string;
-  secretResolution?: 'eager' | 'lazy';
+  secretResolution?: 'eager' | 'lazy' | 'refreshing';
+  secretRefreshTtl?: number;
   cnosVersion?: string;
   plugins?: CnosPlugin[];
   cliArgs?: string[];
@@ -134,4 +137,24 @@ export interface CnosRuntime {
   toNamespace(namespace: NamespaceName): Record<string, unknown>;
   toEnv(options?: ToEnvOptions): Record<string, string>;
   toPublicEnv(options?: ToPublicEnvOptions): Record<string, string>;
+  toServerProjection(): ServerProjection;
+  refreshSecrets(): Promise<void>;
+  refreshSecret(key: LogicalKey): Promise<void>;
+}
+
+export interface ServerProjection {
+  version: 1;
+  workspace: string;
+  profile: string;
+  resolvedAt: string;
+  configHash: string;
+  values: Record<string, unknown>;
+  secretRefs: Record<string, SecretReference>;
+  publicKeys: string[];
+  meta: {
+    workspace: string;
+    profile: string;
+    cnos_version: string;
+    namespaces?: string[];
+  };
 }

@@ -10,13 +10,27 @@ In single-project mode, CNOS stays simple.
 For monorepos:
 
 ```bash
-cnos init --workspace api
-cnos use --workspace api
-cnos list values
+apps/travel/.cnosrc.yml
+root: ../../.cnos
+workspace: travel
 ```
+
+`.cnosrc.yml` is the only discovery anchor. CNOS does not walk upward looking for `.cnos` directories. It only looks for `.cnosrc.yml` within a small package-root search window.
 
 Override per command when needed:
 
 ```bash
 cnos list values --workspace webapp
+```
+
+Detach a child package into a standalone CNOS root:
+
+```bash
+cnos workspace detach --package-root apps/travel
+```
+
+Reattach it later:
+
+```bash
+cnos workspace attach --package-root apps/travel
 ```
