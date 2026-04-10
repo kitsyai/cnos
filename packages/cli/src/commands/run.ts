@@ -17,6 +17,14 @@ export interface RunCommandResult {
   stderr: string;
 }
 
+function shouldUseShellForCommand(command: string): boolean {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+
+  return !/[\\/]/.test(command);
+}
+
 function consumeOptions(args: string[], flag: string): string[] {
   const values: string[] = [];
 
@@ -113,7 +121,7 @@ export async function runCommand(
       cwd: options.root ?? process.cwd(),
       env,
       stdio: options.stdio === 'pipe' ? 'pipe' : 'inherit',
-      shell: false,
+      shell: shouldUseShellForCommand(executable),
     });
     let stdout = '';
     let stderr = '';

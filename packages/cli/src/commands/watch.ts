@@ -25,6 +25,14 @@ export interface StartWatchLoopOptions extends RuntimeServiceOptions {
   onRestart?: (payload: { changedKeys: string[] }) => void | Promise<void>;
 }
 
+function shouldUseShellForCommand(command: string): boolean {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+
+  return !/[\\/]/.test(command);
+}
+
 async function buildRunEnvironment(
   options: RuntimeServiceOptions,
 ): Promise<{
@@ -82,7 +90,7 @@ function spawnWatchedChild(command: string[], cwd: string, env: NodeJS.ProcessEn
     cwd,
     env,
     stdio: 'inherit',
-    shell: false,
+    shell: shouldUseShellForCommand(executable),
   });
 }
 
