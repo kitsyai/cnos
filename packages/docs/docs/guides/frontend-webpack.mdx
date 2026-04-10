@@ -16,7 +16,7 @@ public:
     - flags.upi_enabled
 ```
 
-Use an async webpack config:
+Use an async webpack config. If your repo already uses ESM webpack config, this is the cleanest shape:
 
 ```ts
 import { createCnos } from '@kitsy/cnos/configure';
@@ -40,6 +40,38 @@ export default async () => {
 };
 ```
 
+If your project uses CommonJS-style webpack config, keep `module.exports = async () => ...` and load CNOS with dynamic `import()` inside the async factory:
+
+```js
+const ESLintPlugin = require('eslint-webpack-plugin');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+
+module.exports = async () => {
+  const { createCnos } = await import('@kitsy/cnos/configure');
+  const { CnosWebpackPlugin } = await import('@kitsy/cnos-webpack');
+
+  const profile = process.env.NODE_ENV === 'production' ? 'prod' : 'local';
+  const cnos = await createCnos({ profile });
+
+  return {
+    devServer: {
+      port: Number(cnos.readOr('value.devServer.port', 3000)),
+    },
+    plugins: [
+      new CnosWebpackPlugin({ profile }),
+      new HtmlWebpackPlugin({
+        templateParameters: {
+          appName: cnos.read('public.app.name'),
+        },
+      }),
+      new MiniCssExtractPlugin(),
+      new ESLintPlugin(),
+    ],
+  };
+};
+```
+
 Read in browser code:
 
 ```ts
@@ -54,5 +86,35 @@ The webpack plugin:
 - injects `process.env.*` define replacements for promoted public values
 - embeds `globalThis.__CNOS_BROWSER_DATA__` for `@kitsy/cnos/browser`
 - keeps server-only `value.*` and `secret.*` out of the browser bundle
+- uses no prefix by default for webpack public env unless you configure `public.frameworks.webpack` or pass `prefix`
 
 If you need build-time server config such as `devServer.port`, read it in the webpack config through `createCnos()` so dev and production builds use the same CNOS source of truth.
+
+## Plugin order
+
+Recommended order:
+
+```ts
+plugins: [
+  new CnosWebpackPlugin({ profile }),
+  new HtmlWebpackPlugin(...),
+  new MiniCssExtractPlugin(...),
+  new CopyPlugin(...),
+  new ESLintPlugin(...),
+]
+```
+
+Guidance:
+- Put `CnosWebpackPlugin` early in the plugin list.
+- `HtmlWebpackPlugin`, `MiniCssExtractPlugin`, `CopyPlugin`, and `ESLintPlugin` can follow it.
+- If you need CNOS values in HTML templates, read them with `createCnos()` in the webpack config and pass them through `templateParameters`. `DefinePlugin` replacements do not automatically populate HTML templates.
+
+## Why `require is not defined` happens
+
+If webpack-cli logs a path like `file:///.../webpack.config.js`, it loaded your config as ESM. In that mode, `require(...)` is not available.
+
+Choose one style and stay consistent:
+- ESM: `webpack.config.mjs` or a package with `"type": "module"` and `import ...`
+- CommonJS: `webpack.config.cjs` or CommonJS `module.exports = async () => ...`, using dynamic `import()` for CNOS ESM packages
+
+Do not mix top-level `await` plus `require(...)` in a config file that webpack treats as ESM.

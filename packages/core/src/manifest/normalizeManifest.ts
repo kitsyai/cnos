@@ -24,6 +24,7 @@ const DEFAULT_FRAMEWORK_PREFIXES = {
   next: 'NEXT_PUBLIC_',
   vite: 'VITE_',
   nuxt: 'NUXT_PUBLIC_',
+  webpack: '',
 };
 const DEFAULT_NAMESPACES: Record<string, NamespaceDefinition> = {
   value: {

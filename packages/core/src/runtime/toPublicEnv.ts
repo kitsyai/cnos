@@ -40,13 +40,16 @@ function resolvePublicPrefix(
     return '';
   }
 
-  const configuredPrefix = manifest.public.frameworks[options.framework];
+  const hasConfiguredPrefix = Object.prototype.hasOwnProperty.call(
+    manifest.public.frameworks,
+    options.framework,
+  );
 
-  if (!configuredPrefix) {
+  if (!hasConfiguredPrefix) {
     throw new CnosManifestError(`Unknown public framework prefix: ${options.framework}`);
   }
 
-  return configuredPrefix;
+  return manifest.public.frameworks[options.framework] ?? '';
 }
 export function toPublicEnv(
   graph: ResolvedGraph,

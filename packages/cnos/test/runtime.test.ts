@@ -69,10 +69,25 @@ describe('@kitsy/cnos root runtime entry', () => {
     vi.resetModules();
 
     const { default: cnos } = await import('../src/index.js');
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await cnos.ready();
 
     expect(cnos.require('value.server.port')).toBe(3000);
     expect(cnos.value('server.port')).toBe(3000);
+    expect(cnos.inspect('value.server.port').value).toBe(3000);
+    expect(cnos.toNamespace('value')).toMatchObject({
+      server: {
+        port: 3000,
+      },
+    });
+    expect(cnos.toEnv()).toEqual({
+      PORT: '3000',
+    });
+    expect(cnos.format('Starting server at ${value.server.port}')).toBe('Starting server at 3000');
+    expect(cnos.log('Starting server at ${value.server.port}')).toBe('Starting server at 3000');
+    expect(consoleSpy).toHaveBeenCalledWith('Starting server at 3000');
+
+    consoleSpy.mockRestore();
   });
 });

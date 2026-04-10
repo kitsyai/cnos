@@ -17,7 +17,7 @@ afterEach(async () => {
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function createFixtureRoot(): Promise<string> {
+async function createFixtureRoot(options: { webpackPrefix?: string } = {}): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-webpack-'));
   fixtureRoots.push(root);
   await mkdir(path.join(root, '.cnos', 'values'), { recursive: true });
@@ -29,8 +29,9 @@ async function createFixtureRoot(): Promise<string> {
       'project:',
       '  name: webpack-fixture',
       'public:',
-      '  frameworks:',
-      '    webpack: APP_',
+      ...(options.webpackPrefix !== undefined
+        ? ['  frameworks:', `    webpack: ${options.webpackPrefix}`]
+        : []),
       '  promote:',
       '    - value.app.apiUrl',
       '    - value.flags.upi_enabled',
@@ -102,7 +103,7 @@ class FakeCompiler {
 
 describe('@kitsy/cnos-webpack', () => {
   it('loads CNOS public env for webpack with framework-specific prefixes', async () => {
-    const root = await createFixtureRoot();
+    const root = await createFixtureRoot({ webpackPrefix: 'APP_' });
 
     await expect(loadCnosWebpackEnv({ root })).resolves.toEqual({
       APP_API_URL: 'https://api.local',
@@ -110,8 +111,17 @@ describe('@kitsy/cnos-webpack', () => {
     });
   });
 
-  it('resolves build-time runtime config and browser bindings', async () => {
+  it('defaults webpack public env to an empty prefix when the manifest does not configure one', async () => {
     const root = await createFixtureRoot();
+
+    await expect(loadCnosWebpackEnv({ root })).resolves.toEqual({
+      APP_API_URL: 'https://api.local',
+      FLAGS_UPI_ENABLED: 'true',
+    });
+  });
+
+  it('resolves build-time runtime config and browser bindings', async () => {
+    const root = await createFixtureRoot({ webpackPrefix: 'APP_' });
     const config = await resolveCnosWebpackBuildConfig({
       root,
       profile: 'stage',
@@ -129,7 +139,7 @@ describe('@kitsy/cnos-webpack', () => {
   });
 
   it('injects process env definitions and browser data through DefinePlugin', async () => {
-    const root = await createFixtureRoot();
+    const root = await createFixtureRoot({ webpackPrefix: 'APP_' });
     const compiler = new FakeCompiler();
     const plugin = new CnosWebpackPlugin({
       root,
@@ -161,7 +171,7 @@ describe('@kitsy/cnos-webpack', () => {
   });
 
   it('resolves raw bindings for generic bundler consumption', async () => {
-    const root = await createFixtureRoot();
+    const root = await createFixtureRoot({ webpackPrefix: 'APP_' });
 
     await expect(resolveCnosWebpackBindings({ root })).resolves.toMatchObject({
       browserData: {

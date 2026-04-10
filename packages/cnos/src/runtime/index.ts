@@ -32,6 +32,14 @@ export interface CnosSingleton {
   value<T = unknown>(path: string): T | undefined;
   secret<T = unknown>(path: string): T | undefined;
   meta<T = unknown>(path: string): T | undefined;
+  inspect(key: LogicalKey): ReturnType<CnosRuntime['inspect']>;
+  toNamespace(namespace: string): ReturnType<CnosRuntime['toNamespace']>;
+  toEnv(options?: Parameters<CnosRuntime['toEnv']>[0]): ReturnType<CnosRuntime['toEnv']>;
+  toPublicEnv(
+    options?: Parameters<CnosRuntime['toPublicEnv']>[0],
+  ): ReturnType<CnosRuntime['toPublicEnv']>;
+  format(message: string): string;
+  log(message: string): string;
   ready(): Promise<void>;
 }
 
@@ -45,6 +53,39 @@ function getRuntimeOrThrow(): CnosRuntime {
   }
 
   return runtime;
+}
+
+function stringifyLogValue(value: unknown): string {
+  if (value === undefined) {
+    return '';
+  }
+
+  if (value === null) {
+    return 'null';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+
+  return JSON.stringify(value);
+}
+
+function formatMessage(runtime: CnosRuntime, message: string): string {
+  return message.replace(/\$\{([^}]+)\}/g, (match, rawKey) => {
+    const key = String(rawKey).trim();
+
+    if (!key) {
+      return match;
+    }
+
+    const value = runtime.read(key);
+    return value === undefined ? match : stringifyLogValue(value);
+  });
 }
 
 function attachBootstrappedGraph(graph: ResolvedGraph): void {
@@ -133,12 +174,6 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
     meta<T = unknown>(path: string): T | undefined {
       return readValue(graph, toLogicalKey('meta', path));
     },
-    inspect(key: LogicalKey) {
-      return inspectValue(graph, key);
-    },
-    toObject() {
-      return toNamespaceObject(graph);
-    },
     toNamespace(namespace) {
       return toNamespaceObject(graph, namespace);
     },
@@ -147,6 +182,12 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
     },
     toPublicEnv(options) {
       return toPublicEnv(graph, bootstrappedManifest, options);
+    },
+    inspect(key: LogicalKey) {
+      return inspectValue(graph, key);
+    },
+    toObject() {
+      return toNamespaceObject(graph);
     },
   } satisfies CnosRuntime;
 
@@ -192,6 +233,26 @@ const cnos = Object.assign(
     },
     meta<T = unknown>(path: string): T | undefined {
       return readValue(getRuntimeOrThrow().graph, toLogicalKey('meta', path));
+    },
+    inspect(key: LogicalKey) {
+      return getRuntimeOrThrow().inspect(key);
+    },
+    toNamespace(namespace: string) {
+      return getRuntimeOrThrow().toNamespace(namespace);
+    },
+    toEnv(options: Parameters<CnosRuntime['toEnv']>[0]) {
+      return getRuntimeOrThrow().toEnv(options);
+    },
+    toPublicEnv(options: Parameters<CnosRuntime['toPublicEnv']>[0]) {
+      return getRuntimeOrThrow().toPublicEnv(options);
+    },
+    format(message: string): string {
+      return formatMessage(getRuntimeOrThrow(), message);
+    },
+    log(message: string): string {
+      const formatted = formatMessage(getRuntimeOrThrow(), message);
+      console.log(formatted);
+      return formatted;
     },
     async ready(): Promise<void> {
       if (getSingletonRuntime() && !getBootstrappedSecretHydrationRequired()) {

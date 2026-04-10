@@ -275,6 +275,35 @@ console.log(cnos('public.flags.upi_enabled'));
 console.log(process.env.APP_API_BASE_URL);
 ```
 
+Recommended plugin order:
+
+```ts
+plugins: [
+  new CnosWebpackPlugin({ profile }),
+  new HtmlWebpackPlugin(...),
+  new MiniCssExtractPlugin(...),
+  new CopyPlugin(...),
+  new ESLintPlugin(...),
+]
+```
+
+Notes:
+- keep `CnosWebpackPlugin` near the top of the plugin list
+- for build-time server settings like `devServer.port`, read them through `createCnos()` in the webpack config
+- for HTML template values, read them through `createCnos()` and pass them to `HtmlWebpackPlugin.templateParameters`
+
+If your webpack config is CommonJS, do not mix top-level `await` with `require(...)` in a file webpack treats as ESM. Use:
+
+```js
+module.exports = async () => {
+  const { createCnos } = await import('@kitsy/cnos/configure');
+  const { CnosWebpackPlugin } = await import('@kitsy/cnos-webpack');
+  // ...
+};
+```
+
+If webpack-cli shows `file:///.../webpack.config.js`, it loaded your config as ESM, so `require(...)` is unavailable.
+
 ### Other bundlers
 
 For generic bundlers or custom build scripts, use `@kitsy/cnos/build`:

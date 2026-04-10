@@ -32,6 +32,8 @@ The runtime currently exposes:
 - `cnos.toNamespace(namespace)`
 - `cnos.toEnv()`
 - `cnos.toPublicEnv()`
+- `cnos.format(message)`
+- `cnos.log(message)`
 
 Example:
 
@@ -45,7 +47,12 @@ const dbPassword = cnos.secret('db.password');
 const profile = cnos.meta('profile');
 const port = cnos.readOr('value.server.port', 3000);
 const flags = cnos.toNamespace('flags');
+const line = cnos.format('Starting server at ${value.server.port}');
+
+cnos.log('Starting server at ${value.server.port}');
 ```
+
+`cnos.format(...)` and `cnos.log(...)` interpolate `${logical.key}` placeholders through the active runtime. Missing keys are left unchanged.
 
 ## Typed values
 
