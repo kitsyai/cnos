@@ -50,7 +50,7 @@ describe('@kitsy/cnos-next', () => {
     });
   });
 
-  it('maps Next phase to a CNOS profile and merges env into returned config', async () => {
+  it('maps Next phase to a CNOS profile and merges env plus browser data into returned config', async () => {
     const root = await createFixtureRoot();
     const nextConfig = withCnosNext(
       {
@@ -74,11 +74,15 @@ describe('@kitsy/cnos-next', () => {
     expect(resolved).toEqual({
       reactStrictMode: true,
       env: {
-        __CNOS_BROWSER_DATA__: JSON.stringify({
-          'public.app.apiUrl': 'https://api.stage',
-        }),
         NEXT_PUBLIC_APP_NAME: 'demo',
         NEXT_PUBLIC_APP_API_URL: 'https://api.stage',
+      },
+      compiler: {
+        define: {
+          'globalThis.__CNOS_BROWSER_DATA__': JSON.stringify({
+            'public.app.apiUrl': 'https://api.stage',
+          }),
+        },
       },
     });
   });

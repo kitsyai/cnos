@@ -3,6 +3,10 @@ import { createCnos, type CnosCreateOptions } from '@kitsy/cnos/configure';
 
 export interface NextConfigLike {
   env?: Record<string, string>;
+  compiler?: {
+    define?: Record<string, string>;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -75,8 +79,14 @@ export function withCnosNext(
       ...baseConfig,
       env: {
         ...(baseConfig.env ?? {}),
-        __CNOS_BROWSER_DATA__: JSON.stringify(browserData),
         ...publicEnv,
+      },
+      compiler: {
+        ...(baseConfig.compiler ?? {}),
+        define: {
+          ...(baseConfig.compiler?.define ?? {}),
+          'globalThis.__CNOS_BROWSER_DATA__': JSON.stringify(browserData),
+        },
       },
     };
   };
