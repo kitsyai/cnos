@@ -7,6 +7,7 @@ This guide is aligned to the current shipped packages:
 - `@kitsy/cnos-cli`
 - `@kitsy/cnos-vite`
 - `@kitsy/cnos-next`
+- `@kitsy/cnos-webpack`
 
 ## Before You Start
 
@@ -56,6 +57,12 @@ For deployment packaging:
 cnos build server --profile prod --to .cnos-server.json
 ```
 
+For containerized runtime env:
+
+```powershell
+cnos build env --profile prod --format docker-env --to .docker/runtime/current.env
+```
+
 ### Vite
 
 Keep `VITE_*` working first:
@@ -90,6 +97,48 @@ Example child anchor:
 ```yaml
 root: ../../.cnos
 workspace: travel
+```
+
+### Docker / Docker Compose / Kubernetes / GitHub Actions
+
+Use CNOS-generated artifacts, not hand-maintained runtime env files.
+
+Docker or Docker Compose:
+
+```powershell
+cnos build env --profile local-domain --format docker-env --to .docker/runtime/current.env
+docker compose up --build
+```
+
+Recommended compose pattern:
+
+```yaml
+services:
+  app:
+    env_file:
+      - ./.docker/runtime/current.env
+```
+
+Kubernetes:
+
+```powershell
+cnos build env --profile stage --format yaml --to k8s/generated/app-config.yaml
+```
+
+GitHub Actions:
+
+```yaml
+- name: Build CNOS env
+  run: cnos build env --profile stage --to .env.stage
+
+- name: Build app
+  run: pnpm build
+```
+
+For server packaging in CI:
+
+```powershell
+cnos build server --profile prod --to dist/.cnos-server.json
 ```
 
 ## 1. Pure Backend Project

@@ -15,6 +15,7 @@ Use generated env files as a **bridge**, not as the source of truth.
 cnos build env --profile local --to .env.local
 cnos build env --profile stage --to .env.stage
 cnos build env --profile prod --to .env.prod
+cnos build env --profile local-domain --format docker-env --to .docker/runtime/current.env
 ```
 
 ## Watched dev loop
@@ -36,3 +37,4 @@ cnos build env --public --framework next --profile prod --to .env.production
 - keep generated `.env.*` files gitignored
 - migrate app code toward direct CNOS reads over time
 - keep secrets on runtime/vault flows instead of materializing them into env files by default
+- use `docker-env` when Docker or Docker Compose expects a runtime env file

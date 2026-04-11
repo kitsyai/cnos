@@ -8,9 +8,10 @@ description: Use CNOS in build and deploy pipelines without committing generated
 Common patterns:
 
 ```bash
-cnos export env --profile stage --to .env.stage
-cnos export env --public --framework vite --profile stage --to .env.stage
+cnos build env --profile stage --to .env.stage
+cnos build public --framework vite --profile stage --to .env.stage
 cnos run --profile stage -- pnpm build
+cnos build server --profile prod --to dist/.cnos-server.json
 ```
 
 For CI-backed vaults:
@@ -19,3 +20,18 @@ For CI-backed vaults:
 cnos vault create github-ci --provider github-secrets --no-passphrase
 cnos secret set app.token APP_TOKEN --vault github-ci
 ```
+
+GitHub Actions example:
+
+```yaml
+- name: Install deps
+  run: pnpm install --frozen-lockfile
+
+- name: Build CNOS env
+  run: cnos build env --profile stage --to .env.stage
+
+- name: Build app
+  run: pnpm build
+```
+
+Use `cnos run` when you do not need an intermediate env file. Use `cnos build env` or `cnos build public` when the build tool or deploy step expects a file artifact.

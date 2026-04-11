@@ -29,6 +29,8 @@ sidebar:
         label: SSR Projects
       - path: guides/ci-cd
         label: CI/CD Pipelines
+      - path: guides/containers-and-actions
+        label: Containers and Actions
       - path: guides/workspaces
         label: Workspaces and Monorepos
       - path: guides/profiles

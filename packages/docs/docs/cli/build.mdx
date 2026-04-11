@@ -13,6 +13,7 @@ cnos build browser --to .cnos-browser.json
 cnos build env --profile local --to .env.local
 cnos build env --profile stage --to .env.stage
 cnos build public --framework vite --to .env.production
+cnos build env --profile local-domain --format docker-env --to .docker/runtime/current.env
 ```
 
 Targets:

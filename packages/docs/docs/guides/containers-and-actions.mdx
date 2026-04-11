@@ -1,0 +1,136 @@
+---
+title: Containers, Kubernetes, and GitHub Actions
+description: Use CNOS-generated artifacts in Docker, Docker Compose, Kubernetes, and GitHub Actions without making .env files the source of truth.
+---
+
+# Containers, Kubernetes, and GitHub Actions
+
+CNOS should stay the source of truth. Containers and pipelines should consume derived artifacts.
+
+Use these patterns:
+
+- `cnos build env` when the runtime expects flat env vars
+- `cnos build server` when a server runtime should consume a CNOS projection artifact
+- `cnos run` when a child process should get CNOS directly at launch time
+
+## Docker
+
+Generate a Docker-friendly env file:
+
+```bash
+cnos build env --profile local-domain --format docker-env --to .docker/runtime/current.env
+```
+
+That file is a derived artifact. Keep it gitignored.
+
+For a production-style local preview flow:
+
+```bash
+pnpm build:local-domain:all
+cnos build env --profile local-domain --format docker-env --to .docker/runtime/current.env
+docker compose up --build
+```
+
+Use this when:
+- your image or emulator runtime expects env vars
+- you want one fixed runtime env file per profile
+- the build already consumed the same CNOS profile
+
+## Docker Compose
+
+Recommended compose pattern:
+
+```yaml
+services:
+  app:
+    env_file:
+      - ./.docker/runtime/current.env
+```
+
+This keeps runtime env injection explicit and lets the same CNOS profile drive:
+- the build step
+- the container runtime
+- local emulators
+
+For browser builds behind nginx or another proxy:
+- build the app first with `cnos run --profile <name> -- pnpm build`
+- then feed compose/runtime with `cnos build env --format docker-env`
+
+## Kubernetes
+
+Use CNOS to render the env payload before applying manifests:
+
+```bash
+cnos build env --profile stage --format yaml --to k8s/generated/app-config.yaml
+```
+
+Or generate a flat env file and convert it into a ConfigMap or Secret with your existing tooling:
+
+```bash
+cnos build env --profile stage --format dotenv --to .artifacts/stage.env
+kubectl create configmap app-config --from-env-file=.artifacts/stage.env --dry-run=client -o yaml
+```
+
+Rules:
+- do not make Kubernetes manifests the source of truth for application config
+- do not embed decrypted CNOS secret values into build artifacts by default
+- prefer runtime secret providers or platform-native secrets for secret plaintext
+
+## GitHub Actions
+
+Two good patterns exist.
+
+### 1. Build with direct CNOS injection
+
+```yaml
+- name: Install deps
+  run: pnpm install --frozen-lockfile
+
+- name: Build with CNOS
+  run: cnos run --profile stage -- pnpm build
+```
+
+### 2. Materialize an env artifact first
+
+```yaml
+- name: Build CNOS env file
+  run: cnos build env --profile stage --to .env.stage
+
+- name: Build app
+  run: pnpm build
+```
+
+For browser-only frameworks:
+
+```yaml
+- name: Build public env for Vite
+  run: cnos build public --framework vite --profile stage --to .env.stage
+```
+
+For Next:
+
+```yaml
+- name: Build public env for Next
+  run: cnos build public --framework next --profile prod --to .env.production
+```
+
+For server packaging:
+
+```yaml
+- name: Build server projection
+  run: cnos build server --profile prod --to dist/.cnos-server.json
+```
+
+## Secret handling
+
+Keep this split clear:
+
+- non-secret config can become a build or runtime artifact
+- decrypted secret plaintext should not become a build artifact by default
+
+Use:
+- CNOS vault refs
+- platform env injection
+- runtime secret hydration
+
+Do not rely on generated env files for secret rotation-sensitive server secrets unless you deliberately accept that tradeoff.
