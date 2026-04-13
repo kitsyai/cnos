@@ -1,7 +1,17 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseYaml, stringifyYaml } from '@kitsy/cnos/internal';
+import { loadManifest, parseYaml, stringifyYaml } from '@kitsy/cnos/internal';
+
+async function resolveProfilesRoot(root = process.cwd()): Promise<string> {
+  try {
+    const loadedManifest = await loadManifest({ root });
+    return path.join(loadedManifest.manifestRoot, 'profiles');
+  } catch {
+    const loadedManifest = await loadManifest({ cwd: root });
+    return path.join(loadedManifest.manifestRoot, 'profiles');
+  }
+}
 
 export async function createProfileDefinition(
   root = process.cwd(),
@@ -9,7 +19,7 @@ export async function createProfileDefinition(
   inherit?: string,
   options: { noInherit?: boolean } = {},
 ): Promise<{ filePath: string; profile: string; inherit?: string; noInherit?: boolean }> {
-  const filePath = path.join(path.resolve(root), '.cnos', 'profiles', `${profile}.yml`);
+  const filePath = path.join(await resolveProfilesRoot(root), `${profile}.yml`);
   await mkdir(path.dirname(filePath), { recursive: true });
   const document = options.noInherit
     ? {
@@ -40,7 +50,7 @@ export async function createProfileDefinition(
 }
 
 export async function listProfiles(root = process.cwd()): Promise<string[]> {
-  const profilesRoot = path.join(path.resolve(root), '.cnos', 'profiles');
+  const profilesRoot = await resolveProfilesRoot(root);
 
   try {
     const entries = await readdir(profilesRoot, { withFileTypes: true });
@@ -62,7 +72,7 @@ export async function deleteProfileDefinition(
   root = process.cwd(),
   profile: string,
 ): Promise<{ filePath: string; deleted: boolean }> {
-  const filePath = path.join(path.resolve(root), '.cnos', 'profiles', `${profile}.yml`);
+  const filePath = path.join(await resolveProfilesRoot(root), `${profile}.yml`);
 
   try {
     await rm(filePath);
@@ -88,7 +98,7 @@ export async function readProfileDefinition(
     };
   }
 
-  const filePath = path.join(path.resolve(root), '.cnos', 'profiles', `${profile}.yml`);
+  const filePath = path.join(await resolveProfilesRoot(root), `${profile}.yml`);
 
   try {
     return parseYaml<Record<string, unknown>>(await readFile(filePath, 'utf8')) ?? undefined;

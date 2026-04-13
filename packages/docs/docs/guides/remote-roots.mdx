@@ -1,0 +1,86 @@
+---
+title: Remote Roots
+description: Point .cnosrc.yml at a remote git-backed CNOS root and consume it through the local cache.
+---
+
+# Remote Roots
+
+`.cnosrc.yml` can point at either a local `.cnos` directory or a remote git-backed root.
+
+Local:
+
+```yaml
+root: ./.cnos
+```
+
+Remote:
+
+```yaml
+root: git+https://github.com/org/config.git#v2.1.0
+workspace: travel
+```
+
+Remote roots are resolved into the CNOS cache, then loaded exactly like a local manifest root.
+
+## Supported URIs
+
+Recommended production form:
+
+```yaml
+root: git+https://github.com/org/config.git#v2.1.0
+```
+
+Private repo over SSH:
+
+```yaml
+root: git+ssh://git@github.com/org/private-config.git#main
+```
+
+Subpath inside the repo:
+
+```yaml
+root: git+https://github.com/org/monorepo.git#v2.1.0:config/.cnos
+```
+
+## Cache Behavior
+
+- semantic-version tags and commit SHAs are treated as immutable
+- branch refs are treated as mutable
+- runtime reads use a cache TTL
+- `cnos build` refreshes mutable refs before building artifacts
+- `cnos cache refresh` forces a re-fetch when needed
+
+Inspect the cache:
+
+```bash
+cnos cache list
+```
+
+Override TTL for one command when needed:
+
+```bash
+cnos read value.app.name --cache-ttl 0
+cnos watch --cache-ttl 15 -- node server.js
+```
+
+## Read-Only Model
+
+Remote roots are consumed as read-only config.
+
+These work:
+
+```bash
+cnos read value.app.name
+cnos build env --to .env.stage
+cnos run -- node server.js
+```
+
+These are blocked:
+
+```bash
+cnos value set app.name demo
+cnos promote value.app.name --to public
+cnos vault create default
+```
+
+The right workflow is to edit the source config repo and then let consumers refresh the cached root.

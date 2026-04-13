@@ -11,6 +11,10 @@ export async function loadManifest(options: LoadManifestOptions = {}): Promise<L
   const resolved = await resolveManifestRoot({
     ...(options.root ? { root: options.root } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
   });
   const manifestRoot = resolved.manifestRoot;
   const manifestPath = path.join(manifestRoot, 'cnos.yml');
@@ -34,6 +38,7 @@ export async function loadManifest(options: LoadManifestOptions = {}): Promise<L
     consumerRoot: resolved.consumerRoot,
     ...(resolved.anchorPath ? { anchorPath: resolved.anchorPath } : {}),
     ...(resolved.workspace ? { anchoredWorkspace: resolved.workspace } : {}),
+    rootResolution: resolved.rootResolution,
     manifestPath,
     manifest: normalizeManifest(rawManifest),
     rawManifest,

@@ -11,6 +11,7 @@ import { consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
+import { assertWritableConfigRoot } from '../services/rootAccess.js';
 
 type PromoteTarget = 'public' | 'env';
 
@@ -50,7 +51,15 @@ export async function runPromote(
     }
   }
 
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
+  await assertWritableConfigRoot(`promote ${keys.join(', ')}`, options);
 
   for (const key of keys) {
     ensureProjectionAllowed(loadedManifest.manifest, key, target);

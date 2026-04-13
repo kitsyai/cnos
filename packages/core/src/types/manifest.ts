@@ -15,6 +15,27 @@ export interface RuntimeNamespaceDefinition {
   builtIn?: boolean;
 }
 
+export type RemoteRootProtocol = 'local' | 'git' | 'cnos';
+
+export interface RootResolution {
+  rootUri: string;
+  protocol: RemoteRootProtocol;
+  remote: boolean;
+  readOnly: boolean;
+  cacheDir?: string;
+  cacheMetaPath?: string;
+  ref?: string;
+  subpath?: string;
+  immutable?: boolean;
+  resolvedCommit?: string;
+  cachedAt?: string;
+}
+
+export interface ResolvedRoot {
+  manifestRoot: string;
+  resolution: RootResolution;
+}
+
 export interface VaultAuthSourceConfig {
   from?: string[];
 }
@@ -150,6 +171,10 @@ export interface NormalizedManifest {
 export interface LoadManifestOptions {
   root?: string;
   cwd?: string;
+  processEnv?: Record<string, string | undefined>;
+  cacheMode?: 'runtime' | 'build' | 'dev';
+  cacheTtlSeconds?: number;
+  forceRefresh?: boolean;
 }
 
 export interface LoadedManifest {
@@ -158,6 +183,7 @@ export interface LoadedManifest {
   consumerRoot: string;
   anchorPath?: string;
   anchoredWorkspace?: string;
+  rootResolution: RootResolution;
   manifestPath: string;
   manifest: NormalizedManifest;
   rawManifest: ManifestFile;

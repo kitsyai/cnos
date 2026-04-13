@@ -4,7 +4,9 @@ import path from 'node:path';
 
 import { CnosManifestError } from '../errors.js';
 import { discoverCnosAnchor } from '../discovery/findCnosrc.js';
+import { resolveRootUri } from '../discovery/resolveRoot.js';
 import type { LogicalKey, NamespaceName } from '../types/core.js';
+import type { RootResolution } from '../types/manifest.js';
 
 export const PRIMARY_CNOS_DIR = '.cnos';
 export const LEGACY_CNOS_DIR = 'cnos';
@@ -40,13 +42,39 @@ export async function resolveCnosRoot(root = process.cwd()): Promise<string> {
 export async function resolveManifestRoot(options: {
   root?: string;
   cwd?: string;
+  processEnv?: Record<string, string | undefined>;
+  cacheMode?: 'runtime' | 'build' | 'dev';
+  cacheTtlSeconds?: number;
+  forceRefresh?: boolean;
 } = {}): Promise<{
   manifestRoot: string;
   consumerRoot: string;
+  rootResolution: RootResolution;
   anchorPath?: string;
   workspace?: string;
 }> {
   if (options.root) {
+    if (
+      options.root.startsWith('git+') ||
+      options.root.startsWith('cnos://')
+    ) {
+      const consumerRoot = path.resolve(options.cwd ?? process.cwd());
+      const resolvedRoot = await resolveRootUri(options.root, consumerRoot, {
+        ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+        ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+        ...(typeof options.cacheTtlSeconds === 'number'
+          ? { cacheTtlSeconds: options.cacheTtlSeconds }
+          : {}),
+        ...(options.forceRefresh ? { forceRefresh: true } : {}),
+      });
+
+      return {
+        manifestRoot: resolvedRoot.manifestRoot,
+        consumerRoot,
+        rootResolution: resolvedRoot.resolution,
+      };
+    }
+
     const manifestRoot = await resolveCnosRoot(options.root);
     const resolvedRoot = path.resolve(options.root);
     const consumerRoot =
@@ -57,13 +85,27 @@ export async function resolveManifestRoot(options: {
     return {
       manifestRoot,
       consumerRoot,
+      rootResolution: {
+        rootUri: manifestRoot,
+        protocol: 'local',
+        remote: false,
+        readOnly: false,
+      },
     };
   }
 
-  const discovered = await discoverCnosAnchor(options.cwd ?? process.cwd());
+  const discovered = await discoverCnosAnchor(options.cwd ?? process.cwd(), 3, {
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number'
+      ? { cacheTtlSeconds: options.cacheTtlSeconds }
+      : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
   return {
     manifestRoot: discovered.manifestRoot,
     consumerRoot: discovered.consumerRoot,
+    rootResolution: discovered.rootResolution,
     anchorPath: discovered.anchorPath,
     ...(discovered.workspace ? { workspace: discovered.workspace } : {}),
   };

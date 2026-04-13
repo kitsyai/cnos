@@ -1,6 +1,8 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -16,6 +18,7 @@ import {
   loadManifest,
   loadWorkspaceFile,
   logicalKeyToEnvVar,
+  parseGitUri,
   resolveWorkspaceContext,
   resolveActiveProfile,
   validateEnvMappingCollisions,
@@ -34,6 +37,78 @@ async function createFixtureRoot(manifestSource: string): Promise<string> {
   await writeFile(path.join(cnosRoot, 'cnos.yml'), manifestSource);
   fixtureRoots.push(root);
   return root;
+}
+
+async function runGit(
+  args: string[],
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('git', args, {
+      cwd,
+      env,
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+        return;
+      }
+
+      reject(new Error(stderr.trim() || stdout.trim() || `git exited with ${code ?? 1}`));
+    });
+  });
+}
+
+async function createRemoteGitFixture(): Promise<{
+  repoRoot: string;
+  consumerRoot: string;
+  rootUri: string;
+  cacheDir: string;
+}> {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-remote-repo-'));
+  const consumerRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-remote-consumer-'));
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'cnos-remote-cache-'));
+  fixtureRoots.push(repoRoot, consumerRoot, cacheDir);
+  await mkdir(path.join(repoRoot, '.cnos', 'workspaces', 'travel', 'values'), { recursive: true });
+  await writeFile(
+    path.join(repoRoot, '.cnos', 'cnos.yml'),
+    ['version: 1', 'project:', '  name: remote-config', 'workspaces:', '  default: travel', '  items:', '    travel: {}'].join('\n'),
+  );
+  await writeFile(
+    path.join(repoRoot, '.cnos', 'workspaces', 'travel', 'values', 'app.yml'),
+    ['app:', '  name: remote-travel', 'server:', '  port: 7703'].join('\n'),
+  );
+  await runGit(['init'], repoRoot);
+  await runGit(['config', 'user.email', 'cnos@example.com'], repoRoot);
+  await runGit(['config', 'user.name', 'CNOS Test'], repoRoot);
+  await runGit(['add', '.'], repoRoot);
+  await runGit(['commit', '-m', 'init-remote-config'], repoRoot);
+  await runGit(['branch', '-M', 'main'], repoRoot);
+  const rootUri = `git+${pathToFileURL(repoRoot).href}#main:.cnos`;
+  await writeFile(
+    path.join(consumerRoot, '.cnosrc.yml'),
+    ['root: ' + rootUri, 'workspace: travel'].join('\n'),
+  );
+
+  return {
+    repoRoot,
+    consumerRoot,
+    rootUri,
+    cacheDir,
+  };
 }
 
 function createFixtureLoader(id: string, entries: ConfigEntry[]): LoaderPlugin {
@@ -80,6 +155,48 @@ describe('@kitsy/cnos-core', () => {
     const root = await createFixtureRoot('version: 1\nproject: {}\n');
 
     await expect(loadManifest({ root })).rejects.toThrow('project.name');
+  });
+
+  it('parses git root URIs with refs and optional subpaths', () => {
+    expect(parseGitUri('git+https://github.com/org/repo.git#v2.1.0')).toMatchObject({
+      cloneUrl: 'https://github.com/org/repo.git',
+      ref: 'v2.1.0',
+      subpath: '.cnos',
+      transport: 'https',
+    });
+    expect(parseGitUri('git+ssh://git@github.com/org/repo.git#main:config/.cnos')).toMatchObject({
+      cloneUrl: 'ssh://git@github.com/org/repo.git',
+      ref: 'main',
+      subpath: 'config/.cnos',
+      transport: 'ssh',
+    });
+    expect(() => parseGitUri('git+https://github.com/org/repo.git')).toThrow('#ref');
+  });
+
+  it('loads a manifest from a git-backed remote root referenced by .cnosrc.yml', async () => {
+    const fixture = await createRemoteGitFixture();
+    const env = {
+      ...process.env,
+      CNOS_CACHE_DIR: fixture.cacheDir,
+    };
+    const loadedManifest = await loadManifest({
+      cwd: fixture.consumerRoot,
+      processEnv: env,
+    });
+
+    expect(loadedManifest.manifest.project.name).toBe('remote-config');
+    expect(loadedManifest.anchoredWorkspace).toBe('travel');
+    expect(loadedManifest.rootResolution).toMatchObject({
+      rootUri: fixture.rootUri,
+      protocol: 'git',
+      remote: true,
+      readOnly: true,
+      ref: 'main',
+      subpath: '.cnos',
+      immutable: false,
+    });
+
+    expect(loadedManifest.manifestRoot).toContain('repo');
   });
 
   it('normalizes manifest-defined vaults', async () => {

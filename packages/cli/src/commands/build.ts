@@ -8,6 +8,7 @@ import {
   buildServerProjectionArtifact,
   type ProjectionFormat,
 } from '../services/projections.js';
+import { resolveFilesystemBasePath } from '../services/paths.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 
 export async function runBuild(
@@ -74,5 +75,8 @@ export async function runBuild(
     });
   }
 
-  return `built ${subcommand} artifact at ${displayPath(targetPath, options.root ?? process.cwd())}`;
+  return `built ${subcommand} artifact at ${displayPath(
+    targetPath,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  )}`;
 }

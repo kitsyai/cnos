@@ -2,6 +2,7 @@
 
 import { parseArgs } from './cli/parseArgs.js';
 import { runBuild } from './commands/build.js';
+import { runCache } from './commands/cache.js';
 import { runDefine } from './commands/define.js';
 import { runDev } from './commands/dev.js';
 import { runDrift } from './commands/drift.js';
@@ -46,6 +47,10 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
   }
 
   if (command === 'build' && args[0] && ['env', 'server', 'browser', 'public'].includes(args[0])) {
+    return normalizeHelpTopic([command, args[0]]);
+  }
+
+  if (command === 'cache' && args[0] && ['list', 'clear', 'refresh'].includes(args[0])) {
     return normalizeHelpTopic([command, args[0]]);
   }
 
@@ -127,6 +132,11 @@ export async function main(argv: string[]): Promise<void> {
           globalRoot: options.globalRoot,
         }
       : {}),
+    ...(typeof options.cacheTtlSeconds === 'number'
+      ? {
+          cacheTtlSeconds: options.cacheTtlSeconds,
+        }
+      : {}),
     ...(options.json
       ? {
           json: true,
@@ -206,6 +216,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'build':
       process.stdout.write(`${await runBuild(args[0], runtimeOptions)}\n`);
+      return;
+    case 'cache':
+      process.stdout.write(`${await runCache(args, runtimeOptions)}\n`);
       return;
     case 'dev':
       process.stdout.write(`${await runDev(args[0], passthrough.length > 0 ? passthrough : args.slice(1), runtimeOptions)}\n`);

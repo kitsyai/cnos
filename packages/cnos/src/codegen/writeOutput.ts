@@ -40,7 +40,8 @@ export function resolveCodegenPaths(repoRoot: string, out?: string): {
 
 export async function writeCodegenOutput(options: WriteCodegenOutputOptions = {}): Promise<CodegenWriteResult> {
   const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
-  const paths = resolveCodegenPaths(loadedManifest.repoRoot, options.out);
+  const outputRoot = loadedManifest.rootResolution.remote ? loadedManifest.consumerRoot : loadedManifest.repoRoot;
+  const paths = resolveCodegenPaths(outputRoot, options.out);
   const generated = generateCodegenContent(loadedManifest.manifest, loadedManifest.manifestPath, paths.typeImportPath);
 
   await mkdir(path.dirname(paths.typesPath), { recursive: true });

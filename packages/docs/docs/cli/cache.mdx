@@ -1,0 +1,28 @@
+---
+title: cnos cache
+description: Inspect and manage cached remote CNOS roots.
+---
+
+# cnos cache
+
+Use `cache` when a package anchor points at a remote root such as a git-backed config repo.
+
+```bash
+cnos cache list
+cnos cache clear
+cnos cache clear git+https://github.com/org/config.git#v2.1.0
+cnos cache refresh
+cnos cache refresh git+ssh://git@github.com/org/config.git#main
+```
+
+Subcommands:
+
+- `cache list` shows cached remote roots, resolved commits, immutability, and size
+- `cache clear` removes all cached roots or one specific cached root
+- `cache refresh` forces a re-fetch for the current remote root or a specific git root URI
+
+Notes:
+
+- immutable refs such as semantic-version tags and commit SHAs stay cached permanently
+- mutable refs such as branches are refreshed based on CNOS cache policy
+- remote roots are read-only when consumed through CNOS

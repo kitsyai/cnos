@@ -4,6 +4,7 @@ import path from 'node:path';
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
+import { resolveFilesystemBasePath } from './paths.js';
 
 export interface MaterializedEnvResult {
   runtime: Awaited<ReturnType<typeof createRuntimeService>>;
@@ -78,7 +79,11 @@ export async function materializeEnvToFile(
   options: RuntimeServiceOptions = {},
 ): Promise<WrittenMaterializedEnvResult> {
   const result = await resolveMaterializedEnv(options);
-  const targetPath = await writeMaterializedEnvFile(to, result.output, options.root ?? process.cwd());
+  const targetPath = await writeMaterializedEnvFile(
+    to,
+    result.output,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  );
 
   return {
     ...result,
@@ -93,7 +98,11 @@ export async function materializeRuntimeEnvToFile(
 ): Promise<WrittenMaterializedEnvResult> {
   const env = resolveEnvFromRuntime(runtime, options.cliArgs ?? []);
   const output = formatEnvOutput(env);
-  const targetPath = await writeMaterializedEnvFile(to, output, options.root ?? process.cwd());
+  const targetPath = await writeMaterializedEnvFile(
+    to,
+    output,
+    resolveFilesystemBasePath(options.root, process.cwd()),
+  );
 
   return {
     runtime,

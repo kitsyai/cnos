@@ -11,6 +11,7 @@ import {
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
+import { assertWritableConfigRoot } from '../services/rootAccess.js';
 
 export async function runMigrate(options: RuntimeServiceOptions = {}): Promise<string> {
   const cliArgs = [...(options.cliArgs ?? [])];
@@ -23,8 +24,19 @@ export async function runMigrate(options: RuntimeServiceOptions = {}): Promise<s
     throw new Error(`Unknown migrate options: ${cliArgs.join(' ')}`);
   }
 
-  const manifest = await loadManifest(options.root ? { root: options.root } : {});
-  const scanRoot = path.resolve(manifest.repoRoot, scan ?? 'src');
+  if (apply) {
+    await assertWritableConfigRoot('apply migration mappings', options);
+  }
+
+  const manifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
+  const scanRoot = path.resolve(manifest.consumerRoot, scan ?? 'src');
   const usages = await scanEnvUsage(scanRoot);
   const uniqueProposals = new Map(usages.map((usage) => [usage.envVar, proposeMapping(usage.envVar)]));
   const proposals = Array.from(uniqueProposals.values()).sort((left, right) => left.envVar.localeCompare(right.envVar));

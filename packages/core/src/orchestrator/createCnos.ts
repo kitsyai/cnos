@@ -114,6 +114,10 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
   const loadedManifest = await loadManifest({
     ...(options.root ? { root: options.root } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
   });
   for (const key of loadedManifest.manifest.public.promote) {
     ensureProjectionAllowed(loadedManifest.manifest, key, 'public');

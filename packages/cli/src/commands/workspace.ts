@@ -152,6 +152,13 @@ async function runAttach(
 
   const parentManifestRoot = path.resolve(packageRoot, marker.originalCnosrc.root);
   const parentLoaded = await loadManifest({ root: parentManifestRoot });
+
+  if (parentLoaded.rootResolution.readOnly) {
+    throw new Error(
+      `Cannot attach workspace because the parent CNOS root is remote and read-only (${parentLoaded.rootResolution.rootUri}).`,
+    );
+  }
+
   const workspaceId = marker.originalCnosrc.workspace ?? marker.detachedWorkspace;
   const parentWorkspaceRoot = path.join(parentLoaded.manifestRoot, 'workspaces', workspaceId);
 

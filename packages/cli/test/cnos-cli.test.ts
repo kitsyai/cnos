@@ -1,11 +1,14 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseArgs } from '../src/cli/parseArgs.js';
 import { runBuild } from '../src/commands/build.js';
+import { runCache } from '../src/commands/cache.js';
 import { startDevEnvLoop } from '../src/commands/dev.js';
 import { runDefine } from '../src/commands/define.js';
 import { runDrift } from '../src/commands/drift.js';
@@ -135,6 +138,84 @@ async function createRuntimeFixture(): Promise<string> {
   return root;
 }
 
+async function runGit(
+  args: string[],
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('git', args, {
+      cwd,
+      env,
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+        return;
+      }
+
+      reject(new Error(stderr.trim() || stdout.trim() || `git exited with ${code ?? 1}`));
+    });
+  });
+}
+
+async function createRemoteRuntimeFixture(): Promise<{
+  consumerRoot: string;
+  cacheDir: string;
+  rootUri: string;
+}> {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-remote-repo-'));
+  const consumerRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-remote-consumer-'));
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-remote-cache-'));
+  fixtureRoots.push(repoRoot, consumerRoot, cacheDir);
+  await mkdir(path.join(repoRoot, '.cnos', 'workspaces', 'api', 'values'), { recursive: true });
+  await writeFile(
+    path.join(repoRoot, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: remote-cli-fixture',
+      'workspaces:',
+      '  default: api',
+      '  items:',
+      '    api: {}',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(repoRoot, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+    ['app:', '  name: remote-cli', 'server:', '  port: 8800'].join('\n'),
+  );
+  await runGit(['init'], repoRoot);
+  await runGit(['config', 'user.email', 'cnos@example.com'], repoRoot);
+  await runGit(['config', 'user.name', 'CNOS Test'], repoRoot);
+  await runGit(['add', '.'], repoRoot);
+  await runGit(['commit', '-m', 'init-remote'], repoRoot);
+  await runGit(['branch', '-M', 'main'], repoRoot);
+  const rootUri = `git+${pathToFileURL(repoRoot).href}#main:.cnos`;
+  await writeFile(
+    path.join(consumerRoot, '.cnosrc.yml'),
+    ['root: ' + rootUri, 'workspace: api'].join('\n'),
+  );
+
+  return {
+    consumerRoot,
+    cacheDir,
+    rootUri,
+  };
+}
+
 describe('@kitsy/cnos-cli', () => {
   it('parses workspace-aware global flags and preserves runtime cli args', () => {
     expect(
@@ -181,6 +262,17 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--to', '.env.local'],
       },
       passthrough: ['pnpm', 'dev'],
+    });
+  });
+
+  it('parses cache command groups', () => {
+    expect(parseArgs(['cache', 'list'])).toEqual({
+      command: 'cache',
+      args: ['list'],
+      options: {
+        cliArgs: [],
+      },
+      passthrough: [],
     });
   });
 
@@ -357,6 +449,28 @@ describe('@kitsy/cnos-cli', () => {
 
   it('prints the CLI version', () => {
     expect(runVersion()).toBe('1.7.0');
+  });
+
+  it('blocks remote-root writes and exposes cache listings', async () => {
+    const fixture = await createRemoteRuntimeFixture();
+    const processEnv = {
+      ...process.env,
+      CNOS_CACHE_DIR: fixture.cacheDir,
+    };
+
+    await expect(
+      runValue(['set', 'app.name', 'demo'], {
+        cwd: fixture.consumerRoot,
+        processEnv,
+      }),
+    ).rejects.toThrow('remote and read-only');
+
+    const listed = await runCache(['list'], {
+      processEnv,
+    });
+
+    expect(listed).toContain(fixture.rootUri);
+    expect(listed).toContain('immutable: no');
   });
 
   it('shows current CLI context without creating .cnos-workspace.yml', async () => {

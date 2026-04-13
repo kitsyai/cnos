@@ -8,7 +8,10 @@ export type FrameworkEnvTarget = 'generic' | 'vite' | 'next' | 'webpack' | (stri
 export async function resolveBrowserData(
   options: CnosCreateOptions = {},
 ): Promise<BrowserDataMap> {
-  const runtime = await createCnos(options);
+  const runtime = await createCnos({
+    ...options,
+    cacheMode: options.cacheMode ?? 'build',
+  });
   const browserData: BrowserDataMap = {};
 
   for (const [key] of runtime.graph.entries) {
@@ -106,11 +109,17 @@ export async function resolveFrameworkEnv(
   } = {},
 ): Promise<Record<string, string>> {
   if (framework === 'generic') {
-    const browserData = await resolveBrowserData(options);
+    const browserData = await resolveBrowserData({
+      ...options,
+      cacheMode: options.cacheMode ?? 'build',
+    });
     return toFrameworkEnv(browserData, framework, envOptions);
   }
 
-  const runtime = await createCnos(options);
+  const runtime = await createCnos({
+    ...options,
+    cacheMode: options.cacheMode ?? 'build',
+  });
   return runtime.toPublicEnv({
     framework,
     ...(envOptions.prefix ? { prefix: envOptions.prefix } : {}),
@@ -120,6 +129,9 @@ export async function resolveFrameworkEnv(
 export async function resolveServerProjection(
   options: CnosCreateOptions = {},
 ): Promise<ServerProjection> {
-  const runtime = await createCnos(options);
+  const runtime = await createCnos({
+    ...options,
+    cacheMode: options.cacheMode ?? 'build',
+  });
   return runtime.toServerProjection();
 }

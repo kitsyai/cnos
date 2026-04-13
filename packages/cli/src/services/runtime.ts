@@ -6,6 +6,9 @@ export interface RuntimeServiceOptions {
   workspace?: string;
   profile?: string;
   globalRoot?: string;
+  cacheMode?: 'runtime' | 'build' | 'dev';
+  cacheTtlSeconds?: number;
+  forceRefresh?: boolean;
   json?: boolean;
   verbose?: boolean;
   cliArgs?: string[];
@@ -21,6 +24,9 @@ export async function createRuntimeService(options: RuntimeServiceOptions = {}) 
     ...(options.workspace ? { workspace: options.workspace } : {}),
     ...(options.profile ? { profile: options.profile } : {}),
     ...(options.globalRoot ? { globalRoot: options.globalRoot } : {}),
+    cacheMode: options.cacheMode ?? 'runtime',
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
     ...(options.cliArgs && options.cliArgs.length > 0 ? { cliArgs: options.cliArgs } : {}),
     ...(options.secretResolution ? { secretResolution: options.secretResolution } : {}),
     ...(typeof options.secretRefreshTtl === 'number' ? { secretRefreshTtl: options.secretRefreshTtl } : {}),

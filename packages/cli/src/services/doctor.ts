@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   detectLegacyVaultFormat,
   isSecretReference,
+  loadManifest,
   parseYaml,
   readKeychain,
   resolveSecretStoreRoot,
@@ -11,6 +12,7 @@ import {
 } from '@kitsy/cnos/internal';
 
 import { createValidationSummary } from './validation.js';
+import { resolveFilesystemBasePath } from './paths.js';
 import type { RuntimeServiceOptions } from './runtime.js';
 
 export interface DoctorCheck {
@@ -149,7 +151,15 @@ async function checkSecretSecurity(
 }
 
 export async function evaluateDoctor(options: RuntimeServiceOptions = {}): Promise<DoctorCheck[]> {
-  const root = path.resolve(options.root ?? process.cwd());
+  const root = resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd());
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
   const { runtime, summary } = await createValidationSummary(options);
   const localRoot = runtime.graph.workspace.workspaceRoots.find((entry) => entry.scope === 'local');
   const globalRoot = runtime.graph.workspace.workspaceRoots.find((entry) => entry.scope === 'global');
@@ -168,6 +178,13 @@ export async function evaluateDoctor(options: RuntimeServiceOptions = {}): Promi
       name: 'workspace',
       ok: true,
       details: `${runtime.graph.workspace.workspaceId} via ${runtime.graph.workspace.workspaceSource}`,
+    },
+    {
+      name: 'root',
+      ok: true,
+      details: loadedManifest.rootResolution.remote
+        ? `${loadedManifest.rootResolution.rootUri} -> ${loadedManifest.manifestRoot}${loadedManifest.rootResolution.immutable ? ' | immutable' : ' | mutable ref'}${loadedManifest.rootResolution.resolvedCommit ? ` | commit ${loadedManifest.rootResolution.resolvedCommit}` : ''}`
+        : loadedManifest.manifestRoot,
     },
     {
       name: 'namespaces',

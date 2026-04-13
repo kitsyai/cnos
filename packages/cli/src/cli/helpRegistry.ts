@@ -42,7 +42,7 @@ export interface HelpDocument {
 const GLOBAL_OPTIONS: HelpOption[] = [
   {
     flag: '--root <path>',
-    description: 'Resolve the CNOS project from a specific filesystem root.',
+    description: 'Resolve the CNOS project from a specific filesystem root or remote root URI.',
   },
   {
     flag: '--workspace <id>',
@@ -55,6 +55,10 @@ const GLOBAL_OPTIONS: HelpOption[] = [
   {
     flag: '--global-root <path>',
     description: 'Override the configured global CNOS root used for workspace layering.',
+  },
+  {
+    flag: '--cache-ttl <seconds>',
+    description: 'Override the remote-root cache TTL for mutable refs during this invocation.',
   },
   {
     flag: '--json',
@@ -71,6 +75,43 @@ const GLOBAL_OPTIONS: HelpOption[] = [
 ];
 
 const COMMANDS: HelpCommand[] = [
+  {
+    id: 'cache',
+    summary: 'Inspect and manage cached remote roots.',
+    usage: 'cnos cache [list|clear|refresh] [root-uri] [global-options]',
+    description:
+      'Lists cached git-backed remote roots, clears cache entries, or forces a refresh for mutable refs.',
+    examples: [
+      'cnos cache list',
+      'cnos cache clear',
+      'cnos cache clear git+https://github.com/org/config.git#v2.1.0',
+      'cnos cache refresh',
+    ],
+  },
+  {
+    id: 'cache list',
+    summary: 'List cached remote roots.',
+    usage: 'cnos cache list [global-options]',
+    description:
+      'Lists git-backed remote roots cached under ~/.cnos/cache together with cache time, resolved commit, immutability, and size.',
+    examples: ['cnos cache list'],
+  },
+  {
+    id: 'cache clear',
+    summary: 'Clear cached remote roots.',
+    usage: 'cnos cache clear [root-uri] [global-options]',
+    description:
+      'Removes all cached remote roots by default, or clears one specific cached root when a full remote URI is provided.',
+    examples: ['cnos cache clear', 'cnos cache clear git+https://github.com/org/config.git#main'],
+  },
+  {
+    id: 'cache refresh',
+    summary: 'Force refresh mutable cached remote roots.',
+    usage: 'cnos cache refresh [root-uri] [global-options]',
+    description:
+      'Re-fetches a specific git-backed remote root, or refreshes the active remote root / all mutable cached roots when no URI is provided.',
+    examples: ['cnos cache refresh', 'cnos cache refresh git+ssh://git@github.com/org/config.git#main'],
+  },
   {
     id: 'init',
     summary: 'Scaffold a workspace-aware CNOS tree in the current project.',
@@ -924,6 +965,7 @@ export const HELP_DOCUMENT: HelpDocument = {
   examples: [
     'cnos use --profile stage',
     'cnos doctor --workspace api',
+    'cnos cache list',
     'cnos build env --profile stage --to .env.stage',
     'cnos dev env --profile local --to .env.local -- pnpm dev',
     'cnos export env --public --framework vite',

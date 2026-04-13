@@ -4,6 +4,7 @@ import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { materializeEnvToFile } from '../services/envMaterialization.js';
+import { resolveFilesystemBasePath } from '../services/paths.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import { spawnCommand } from '../services/spawn.js';
 import { startGraphWatchLoop } from '../services/watchLoop.js';
@@ -35,6 +36,7 @@ export async function startDevEnvLoop(
   const writeCurrent = async (): Promise<void> => {
     await materializeEnvToFile(to, {
       ...options,
+      cacheMode: 'dev',
       cliArgs: [...cliArgs],
     });
   };
@@ -51,6 +53,7 @@ export async function startDevEnvLoop(
 
   const watcher = await startGraphWatchLoop({
     ...options,
+    cacheMode: 'dev',
     cliArgs,
     debounceMs,
     async onChange(payload) {
@@ -123,7 +126,10 @@ export async function runDev(
   process.once('SIGINT', closeLoop);
   process.once('SIGTERM', closeLoop);
 
-  const targetPath = displayPath(to, options.root ?? process.cwd());
+  const targetPath = displayPath(
+    to,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  );
   return isSignal
     ? `watching config changes and rewriting ${targetPath} in signal mode`
     : `watching config changes, rewriting ${targetPath}, and restarting the child process`;

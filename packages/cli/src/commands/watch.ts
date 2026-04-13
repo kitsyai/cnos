@@ -37,6 +37,7 @@ async function buildRunEnvironment(
   const prefix = consumeOption(cliArgs, '--prefix');
   const runtime = await createRuntimeService({
     ...options,
+    cacheMode: 'dev',
     cliArgs,
   });
   const authenticatedSecrets =
@@ -92,12 +93,14 @@ export async function startWatchLoop(options: StartWatchLoopOptions): Promise<Wa
   const root = options.root ?? process.cwd();
   let current = await buildRunEnvironment({
     ...options,
+    cacheMode: 'dev',
     cliArgs,
   });
   let child = !isSignal ? spawnWatchedChild(command, root, current.env) : undefined;
   let closed = false;
   const watcher = await startGraphWatchLoop({
     ...options,
+    cacheMode: 'dev',
     cliArgs,
     debounceMs,
     async onChange(payload) {
@@ -107,6 +110,7 @@ export async function startWatchLoop(options: StartWatchLoopOptions): Promise<Wa
 
       current = await buildRunEnvironment({
         ...options,
+        cacheMode: 'dev',
         cliArgs,
       });
 

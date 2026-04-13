@@ -22,6 +22,13 @@ root: ../../.cnos
 workspace: travel
 ```
 
+Child app from a remote config repo:
+
+```yaml
+root: git+https://github.com/org/config.git#v2.1.0
+workspace: travel
+```
+
 `.cnosrc.yml` is the only discovery anchor. CNOS does not walk upward looking for `.cnos` directories. It looks for `.cnosrc.yml` within a bounded package-root search window, then resolves the real `.cnos` root from there.
 
 Typical manifest shape:

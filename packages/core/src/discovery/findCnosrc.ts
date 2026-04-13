@@ -2,7 +2,9 @@ import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { CnosDiscoveryError, CnosManifestError } from '../errors.js';
+import type { RootResolution } from '../types/manifest.js';
 import { parseYaml } from '../utils/yaml.js';
+import { resolveRootUri } from './resolveRoot.js';
 
 export interface CnosRcFile {
   root: string;
@@ -13,6 +15,7 @@ export interface DiscoveredCnosAnchor {
   anchorPath: string;
   consumerRoot: string;
   manifestRoot: string;
+  rootResolution: RootResolution;
   workspace?: string;
 }
 
@@ -68,7 +71,16 @@ export async function findCnosrc(startDir = process.cwd(), maxLevels = 3): Promi
   return undefined;
 }
 
-export async function discoverCnosAnchor(startDir = process.cwd(), maxLevels = 3): Promise<DiscoveredCnosAnchor> {
+export async function discoverCnosAnchor(
+  startDir = process.cwd(),
+  maxLevels = 3,
+  options: {
+    processEnv?: Record<string, string | undefined>;
+    cacheMode?: 'runtime' | 'build' | 'dev';
+    cacheTtlSeconds?: number;
+    forceRefresh?: boolean;
+  } = {},
+): Promise<DiscoveredCnosAnchor> {
   const anchorPath = await findCnosrc(startDir, maxLevels);
 
   if (!anchorPath) {
@@ -80,19 +92,13 @@ export async function discoverCnosAnchor(startDir = process.cwd(), maxLevels = 3
   const source = await readFile(anchorPath, 'utf8');
   const parsed = validateCnosrc(parseYaml<unknown>(source), anchorPath);
   const consumerRoot = path.dirname(anchorPath);
-  const manifestRoot = path.resolve(consumerRoot, parsed.root);
-  const manifestPath = path.join(manifestRoot, 'cnos.yml');
-
-  if (!(await exists(manifestPath))) {
-    throw new CnosDiscoveryError(
-      `.cnosrc.yml points to ${manifestRoot} but no cnos.yml found there.`,
-    );
-  }
+  const resolvedRoot = await resolveRootUri(parsed.root, consumerRoot, options);
 
   return {
     anchorPath,
     consumerRoot,
-    manifestRoot,
+    manifestRoot: resolvedRoot.manifestRoot,
+    rootResolution: resolvedRoot.resolution,
     ...(parsed.workspace ? { workspace: parsed.workspace } : {}),
   };
 }

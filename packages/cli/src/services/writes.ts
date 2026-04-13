@@ -16,6 +16,7 @@ import {
 } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
+import { assertWritableConfigRoot } from './rootAccess.js';
 
 function setNestedValue(target: Record<string, unknown>, pathSegments: string[], value: unknown): void {
   const [head, ...tail] = pathSegments;
@@ -123,6 +124,8 @@ export async function defineValue(
     deriveExprMode?: boolean;
   } = {},
 ): Promise<{ filePath: string; value: unknown }> {
+  await assertWritableConfigRoot(`write ${namespace}.${configPath}`, options);
+
   if (namespace === 'secret') {
     const secret = await setSecret(configPath, rawValue, {
       ...options,
@@ -257,6 +260,7 @@ export async function deleteSecret(
   configPath: string,
   options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
 ): Promise<{ filePath: string; deleted: boolean }> {
+  await assertWritableConfigRoot(`delete secret.${configPath}`, options);
   const runtime = await createRuntimeService(options);
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
@@ -297,6 +301,8 @@ export async function deleteValue(
   configPath: string,
   options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
 ): Promise<{ filePath: string; deleted: boolean }> {
+  await assertWritableConfigRoot(`delete ${namespace}.${configPath}`, options);
+
   if (namespace === 'secret') {
     return deleteSecret(configPath, options);
   }

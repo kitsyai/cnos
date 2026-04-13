@@ -3,6 +3,7 @@ export interface CommandOptions {
   workspace?: string;
   profile?: string;
   globalRoot?: string;
+  cacheTtlSeconds?: number;
   json?: boolean;
   help?: boolean;
   verbose?: boolean;
@@ -21,6 +22,7 @@ const OPTION_KEYS = {
   '--workspace': 'workspace',
   '--profile': 'profile',
   '--global-root': 'globalRoot',
+  '--cache-ttl': 'cacheTtlSeconds',
 } as const;
 
 const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
@@ -165,7 +167,18 @@ function setOption(
   key: ConfigOptionKey,
   value: string,
 ): void {
-  options[key] = value;
+  if (key === 'cacheTtlSeconds') {
+    const parsed = Number(value);
+
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error(`Invalid value for --cache-ttl: ${value}`);
+    }
+
+    options.cacheTtlSeconds = parsed;
+    return;
+  }
+
+  options[key] = value as never;
 }
 
 export function parseArgs(argv: string[]): ParsedCommand {

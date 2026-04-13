@@ -21,6 +21,7 @@ import {
 } from '@kitsy/cnos/internal';
 
 import type { RuntimeServiceOptions } from './runtime.js';
+import { assertWritableConfigRoot } from './rootAccess.js';
 
 export interface VaultRecord extends ResolvedVaultDefinition {
   authMethod: string;
@@ -61,6 +62,7 @@ export async function createVaultDefinition(
     noPassphrase?: boolean;
   } = {},
 ): Promise<VaultRecord & { manifestPath: string }> {
+  await assertWritableConfigRoot(`create vault ${name}`, options);
   const vault = name.trim() || 'default';
   const provider = options.provider?.trim() || 'local';
 
@@ -68,7 +70,14 @@ export async function createVaultDefinition(
     throw new Error('Local vaults cannot be passwordless.');
   }
 
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
   const vaultDefinition = buildVaultDefinition(vault, provider);
   const rawManifest = {
     ...loadedManifest.rawManifest,
@@ -105,7 +114,14 @@ export async function createVaultDefinition(
 }
 
 export async function listVaultDefinitions(options: RuntimeServiceOptions = {}): Promise<VaultRecord[]> {
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
   const localStoreVaults = await listSecretVaults(resolveSecretStoreRoot(options.processEnv));
 
   return Object.keys(loadedManifest.manifest.vaults)
@@ -124,8 +140,16 @@ export async function removeVaultDefinition(
   name: string,
   options: RuntimeServiceOptions = {},
 ): Promise<{ name: string; deleted: boolean; manifestPath: string; removedStore?: string }> {
+  await assertWritableConfigRoot(`remove vault ${name}`, options);
   const vault = name.trim() || 'default';
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
 
   if (!loadedManifest.rawManifest.vaults?.[vault]) {
     return {
@@ -172,7 +196,14 @@ export async function ensureVaultDefinition(
   name: string,
   options: RuntimeServiceOptions = {},
 ): Promise<ResolvedVaultDefinition> {
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
   return resolveVaultDefinition(loadedManifest.manifest.vaults, name.trim() || 'default');
 }
 
@@ -185,7 +216,14 @@ export async function authenticateVault(
   options: RuntimeServiceOptions & { storeKeychain?: boolean } = {},
 ): Promise<{ name: string; method: string; storedInKeychain: boolean; sessionPath: string }> {
   const vault = name.trim() || 'default';
-  const loadedManifest = await loadManifest(options.root ? { root: options.root } : {});
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
   const definition = loadedManifest.manifest.vaults[vault];
 
   if (!definition) {

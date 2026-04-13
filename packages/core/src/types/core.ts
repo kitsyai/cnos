@@ -112,6 +112,9 @@ export interface CnosCreateOptions {
   profile?: string;
   workspace?: string;
   globalRoot?: string;
+  cacheMode?: 'runtime' | 'build' | 'dev';
+  cacheTtlSeconds?: number;
+  forceRefresh?: boolean;
   secretResolution?: 'eager' | 'lazy' | 'refreshing';
   secretRefreshTtl?: number;
   cnosVersion?: string;

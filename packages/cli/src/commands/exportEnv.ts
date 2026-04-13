@@ -5,6 +5,7 @@ import {
   materializeEnvToFile,
   resolveMaterializedEnv,
 } from '../services/envMaterialization.js';
+import { resolveFilesystemBasePath } from '../services/paths.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 
 export async function runExportEnv(options: RuntimeServiceOptions = {}): Promise<string> {
@@ -30,7 +31,10 @@ export async function runExportEnv(options: RuntimeServiceOptions = {}): Promise
       });
     }
 
-    return `Wrote ${Object.keys(result.env).length} env vars to ${displayPath(result.targetPath, options.root ?? process.cwd())}`;
+    return `Wrote ${Object.keys(result.env).length} env vars to ${displayPath(
+      result.targetPath,
+      resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+    )}`;
   }
 
   const result = await resolveMaterializedEnv(baseOptions);

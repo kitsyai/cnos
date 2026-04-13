@@ -28,7 +28,27 @@ Core concepts:
 - custom data namespaces such as `flags.*` can be written and promoted in v1 when declared under `namespaces`.
 - `process.*` is a built-in server-only namespace for ambient runtime state such as `process.env.*`, `process.cwd`, and `process.node.version`.
 - derived values let you compose config inside CNOS through `$derive`.
+- `.cnosrc.yml` can point at either a local `.cnos` root or a remote git-backed root.
 - local secret material is stored outside the repo under `~/.cnos/secrets`.
+
+## Remote Roots
+
+Use a remote root when config is authored in a separate config repo and consumed read-only by apps:
+
+```yaml
+root: git+https://github.com/org/config.git#v2.1.0
+workspace: api
+```
+
+Useful cache commands:
+
+```powershell
+cnos cache list
+cnos cache refresh
+cnos cache clear
+```
+
+Remote roots resolve into the local CNOS cache and then behave like local roots for read/build/run flows. Writes to the config root are blocked, so manifest edits still happen in the source config repo.
 
 ## Derived Values
 

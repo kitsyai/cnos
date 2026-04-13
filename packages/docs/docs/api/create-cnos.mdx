@@ -21,7 +21,18 @@ Common options:
 - `workspace`
 - `profile`
 - `globalRoot`
+- `cacheMode`
+- `cacheTtlSeconds`
 - `processEnv`
+
+`root` can be a local path or a remote git root URI:
+
+```ts
+const runtime = await createCnos({
+  root: 'git+https://github.com/org/config.git#v2.1.0',
+  workspace: 'travel',
+});
+```
 
 Derived values and runtime namespaces work through the explicit runtime too:
 

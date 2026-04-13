@@ -3,8 +3,10 @@ import path from 'node:path';
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
+import { resolveFilesystemBasePath } from '../services/paths.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import { saveCliContext } from '../services/context.js';
+import { assertWritableConfigRoot } from '../services/rootAccess.js';
 import {
   createProfileDefinition,
   deleteProfileDefinition,
@@ -30,10 +32,12 @@ function normalizeProfileAction(args: string[]): { action: 'create' | 'list' | '
 
 export async function runProfile(args: string[], options: RuntimeServiceOptions = {}): Promise<string> {
   const { action, tail } = normalizeProfileAction(args);
-  const root = path.resolve(options.root ?? process.cwd());
+  const root = options.root ?? process.cwd();
+  const displayRoot = resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd());
   const cliArgs = [...(options.cliArgs ?? [])];
 
   if (action === 'create') {
+    await assertWritableConfigRoot(`create profile ${tail[0] ?? 'stage'}`, options);
     const profile = tail[0] ?? 'stage';
     const inherit = consumeOption(cliArgs, '--inherit');
     const noInherit = consumeFlag(cliArgs, '--no-inherit');
@@ -49,16 +53,16 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
     }
 
     if (noInherit) {
-      return `created profile ${profile} at ${displayPath(result.filePath, root)} without inheriting base`;
+      return `created profile ${profile} at ${displayPath(result.filePath, displayRoot)} without inheriting base`;
     }
 
-    return `created profile ${profile} at ${displayPath(result.filePath, root)}; inherits values from base by default`;
+    return `created profile ${profile} at ${displayPath(result.filePath, displayRoot)}; inherits values from base by default`;
   }
 
   if (action === 'use') {
     const profile = tail[0] ?? 'base';
     const result = await saveCliContext({
-      root,
+      root: path.resolve(root),
       profile,
     });
 
@@ -66,10 +70,11 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
       return printJson(result);
     }
 
-    return `active profile set to ${profile} in ${displayPath(result.filePath, root)}`;
+    return `active profile set to ${profile} in ${displayPath(result.filePath, displayRoot)}`;
   }
 
   if (action === 'delete') {
+    await assertWritableConfigRoot(`delete profile ${tail[0] ?? 'base'}`, options);
     const profile = tail[0] ?? 'base';
     const result = await deleteProfileDefinition(root, profile);
 

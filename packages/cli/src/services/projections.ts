@@ -5,6 +5,7 @@ import { resolveBrowserData, resolveFrameworkEnv, resolveServerProjection } from
 import { stringifyYaml } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
+import { resolveFilesystemBasePath } from './paths.js';
 
 export type ProjectionFormat = 'dotenv' | 'docker-env' | 'json' | 'shell' | 'toml' | 'yaml';
 
@@ -66,12 +67,19 @@ export async function buildServerProjectionArtifact(
   options: RuntimeServiceOptions = {},
   format: ProjectionFormat = 'json',
 ): Promise<{ targetPath: string; output: string }> {
-  const projection = await resolveServerProjection(options);
+  const projection = await resolveServerProjection({
+    ...options,
+    cacheMode: 'build',
+  });
   const output =
     format === 'yaml'
       ? stringifyYaml(projection)
       : `${JSON.stringify(projection, null, 2)}\n`;
-  const targetPath = await writeProjectionFile(to, output, options.root ?? process.cwd());
+  const targetPath = await writeProjectionFile(
+    to,
+    output,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  );
 
   return { targetPath, output };
 }
@@ -81,12 +89,19 @@ export async function buildBrowserProjectionArtifact(
   options: RuntimeServiceOptions = {},
   format: ProjectionFormat = 'json',
 ): Promise<{ targetPath: string; output: string }> {
-  const projection = await resolveBrowserData(options);
+  const projection = await resolveBrowserData({
+    ...options,
+    cacheMode: 'build',
+  });
   const output =
     format === 'yaml'
       ? stringifyYaml(projection)
       : `${JSON.stringify(projection, null, 2)}\n`;
-  const targetPath = await writeProjectionFile(to, output, options.root ?? process.cwd());
+  const targetPath = await writeProjectionFile(
+    to,
+    output,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  );
 
   return { targetPath, output };
 }
@@ -100,9 +115,19 @@ export async function buildPublicProjectionArtifact(
   const frameworkIndex = cliArgs.indexOf('--framework');
   const framework =
     frameworkIndex >= 0 && cliArgs[frameworkIndex + 1] ? cliArgs[frameworkIndex + 1] : 'generic';
-  const env = await resolveFrameworkEnv(options, framework as Parameters<typeof resolveFrameworkEnv>[1]);
+  const env = await resolveFrameworkEnv(
+    {
+      ...options,
+      cacheMode: 'build',
+    },
+    framework as Parameters<typeof resolveFrameworkEnv>[1],
+  );
   const output = formatKeyValueMap(env, format);
-  const targetPath = await writeProjectionFile(to, output, options.root ?? process.cwd());
+  const targetPath = await writeProjectionFile(
+    to,
+    output,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  );
   return { targetPath, output, env };
 }
 
@@ -113,6 +138,7 @@ export async function buildEnvProjectionArtifact(
 ): Promise<{ targetPath: string; output: string; env: Record<string, string> }> {
   const runtime = await createRuntimeService({
     ...options,
+    cacheMode: 'build',
     cliArgs: [...(options.cliArgs ?? [])],
   });
   const env = runtime.toEnv();
@@ -126,6 +152,10 @@ export async function buildEnvProjectionArtifact(
   }
 
   const output = formatKeyValueMap(env, format);
-  const targetPath = await writeProjectionFile(to, output, options.root ?? process.cwd());
+  const targetPath = await writeProjectionFile(
+    to,
+    output,
+    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
+  );
   return { targetPath, output, env };
 }
