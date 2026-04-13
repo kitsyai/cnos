@@ -16,3 +16,30 @@ Only promoted browser-safe values are available here.
 Framework integrations such as `@kitsy/cnos-vite`, `@kitsy/cnos-next`, and `@kitsy/cnos-webpack` are responsible for embedding that browser payload during the build.
 
 The browser runtime does not fetch config over the network. It reads from data already embedded into the bundle/runtime globals by the framework integration, so it follows the same bundle and service-worker caching behavior as the rest of your frontend assets.
+
+## Cross-App Browser Config
+
+Use the same runtime for shared browser-safe values such as sibling app origins, CDN roots, public feature flags, or analytics ids.
+
+```yaml
+public:
+  promote:
+    - value.apps.docs.origin
+    - value.apps.console.origin
+```
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const docsOrigin = cnos('public.apps.docs.origin');
+const consoleOrigin = cnos('public.apps.console.origin');
+```
+
+This is intentionally simple:
+
+1. define the values in CNOS
+2. promote them to `public.*`
+3. install the framework integration
+4. read them in browser code with `@kitsy/cnos/browser`
+
+You should not need a second app-specific browser config mechanism on top of CNOS.

@@ -74,6 +74,25 @@ cnos dev env --public --framework vite --profile local --to .env.local -- pnpm d
 
 Then move browser reads to `@kitsy/cnos/browser`.
 
+For shared browser routing or cross-app links, keep the data in CNOS instead of introducing a second frontend config layer:
+
+```yaml
+public:
+  promote:
+    - value.apps.main.origin
+    - value.apps.cnos.origin
+    - value.apps.coop.origin
+```
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const mainOrigin = cnos('public.apps.main.origin');
+const cnosOrigin = cnos('public.apps.cnos.origin');
+```
+
+That is the intended DX. Promote once, then read with `cnos('public.*')` anywhere in the browser app. The Vite or Next integration is responsible for making those values available before the UI code runs.
+
 ### Next.js
 
 Keep `NEXT_PUBLIC_*` working first:
@@ -351,6 +370,22 @@ import cnos from '@kitsy/cnos/browser';
 
 console.log(cnos('public.app.apiBaseUrl'));
 console.log(import.meta.env.VITE_APP_API_BASE_URL);
+```
+
+For multi-app frontends, use the same pattern for shared public origins:
+
+```yaml
+public:
+  promote:
+    - value.apps.main.origin
+    - value.apps.docs.origin
+```
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const docsOrigin = cnos('public.apps.docs.origin');
+window.location.href = `${docsOrigin}/getting-started`;
 ```
 
 Useful checks:

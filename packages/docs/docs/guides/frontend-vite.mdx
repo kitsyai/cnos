@@ -40,6 +40,37 @@ console.log(cnos('public.app.apiBaseUrl'));
 console.log(import.meta.env.VITE_APP_API_BASE_URL);
 ```
 
+Cross-app browser links work the same way. Put the browser-safe origins in CNOS, promote them, and let the Vite plugin handle the embedding:
+
+```yaml
+public:
+  promote:
+    - value.apps.main.origin
+    - value.apps.cnos.origin
+    - value.apps.coop.origin
+```
+
+```yaml
+apps:
+  main:
+    origin: https://kitsy.ai
+  cnos:
+    origin: https://cnos.kitsy.ai
+  coop:
+    origin: https://coop.kitsy.ai
+```
+
+Then in UI code:
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const cnosOrigin = cnos('public.apps.cnos.origin');
+const coopOrigin = cnos('public.apps.coop.origin');
+```
+
+That is the point of the integration. You promote once, keep using the same logical reads in UI code, and `@kitsy/cnos-vite` makes sure the values are already present in the browser bundle.
+
 Migration path:
 
 1. keep `VITE_*` working through generated env files
