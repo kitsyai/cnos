@@ -3,9 +3,13 @@ export { defaultPlugins } from '../defaultPlugins.js';
 export type {
   ConfigEntry,
   CnosCreateOptions,
+  DerivedFormula,
+  DerivedValue,
+  ExprNode,
   InspectResult,
   LoaderPlugin,
   LogicalKey,
+  ParsedDerivation,
   CnosPlugin,
   CnosRuntime,
   DumpOptions,
@@ -14,6 +18,7 @@ export type {
   DumpResult,
   ManifestFile,
   NormalizedManifest,
+  RuntimeProvider,
   ToEnvOptions,
   ToPublicEnvOptions,
 } from '@kitsy/cnos-core';

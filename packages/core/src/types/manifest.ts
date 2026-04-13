@@ -9,6 +9,12 @@ export type NamespaceProjectionSource = 'promote' | 'envMapping';
 export type VaultProviderName = 'local' | 'github-secrets' | (string & {});
 export type VaultAuthMethod = 'passphrase' | 'environment' | 'token' | 'iam' | 'keychain';
 
+export interface RuntimeNamespaceDefinition {
+  description?: string;
+  serverOnly: boolean;
+  builtIn?: boolean;
+}
+
 export interface VaultAuthSourceConfig {
   from?: string[];
 }
@@ -72,7 +78,15 @@ export interface ManifestFile {
     promote?: LogicalKey[];
     frameworks?: Record<string, string>;
   };
-  namespaces?: Record<string, Partial<NamespaceDefinition>>;
+  namespaces?: (Record<string, Partial<NamespaceDefinition>> & {
+    runtime?: Record<
+      string,
+      {
+        description?: string;
+        server_only?: boolean;
+      }
+    >;
+  }) | undefined;
   vaults?: Record<string, Partial<VaultDefinition>>;
   writePolicy?: {
     define?: {
@@ -122,6 +136,7 @@ export interface NormalizedManifest {
     frameworks: Record<string, string>;
   };
   namespaces: Record<string, NamespaceDefinition>;
+  runtimeNamespaces: Record<string, RuntimeNamespaceDefinition>;
   vaults: Record<string, VaultDefinition>;
   writePolicy: {
     define: {

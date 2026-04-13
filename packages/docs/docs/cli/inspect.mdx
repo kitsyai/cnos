@@ -9,3 +9,31 @@ description: Inspect resolved values, provenance, and overrides.
 cnos inspect value.app.name
 cnos inspect secret.app.token --reveal
 ```
+
+`cnos inspect` also shows derived metadata.
+
+```bash
+cnos inspect value.app.origin
+```
+
+Typical output includes:
+
+- resolved value
+- expression or template source
+- dependency keys
+- whether the value is runtime-dependent
+- which runtime namespaces it depends on
+
+Example:
+
+```text
+key: value.app.origin
+value: https://api.kitsy.ai:443
+derivedType: template
+derivedExpression: ${value.app.protocol}://${value.app.host}:${value.app.port}
+runtimeDependent: false
+dependencies:
+  - value.app.host
+  - value.app.port
+  - value.app.protocol
+```

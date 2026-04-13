@@ -8,6 +8,7 @@ type StoredNamespace = string;
 export interface ListEntry {
   key: string;
   value: unknown;
+  derived?: boolean;
 }
 
 interface StoredCandidate {
@@ -78,21 +79,41 @@ function toStoredEntry(
   return {
     key: entry.key,
     value: selectedCandidate.value,
+    ...(typeof selectedCandidate.value === 'object' &&
+    selectedCandidate.value !== null &&
+    !Array.isArray(selectedCandidate.value) &&
+    '$derive' in selectedCandidate.value
+      ? {
+          derived: true,
+        }
+      : {}),
   };
 }
 
-function listStoredNamespace(
+async function listStoredNamespace(
   namespace: StoredNamespace,
   options: RuntimeServiceOptions & SecretListFilter,
 ): Promise<ListEntry[]> {
-  return createRuntimeService(options).then((runtime) =>
-    Array.from(runtime.graph.entries.values())
-      .filter((entry) => entry.namespace === namespace)
-      .map((entry) => toStoredEntry(namespace, entry, options))
-      .filter((entry): entry is ListEntry => Boolean(entry))
-      .filter((entry) => matchesPrefix(entry.key, options.prefix))
-      .sort((left, right) => left.key.localeCompare(right.key)),
-  );
+  const runtime = await createRuntimeService(options);
+
+  return Array.from(runtime.graph.entries.values())
+    .filter((entry) => entry.namespace === namespace)
+    .map((entry) => {
+      const stored = toStoredEntry(namespace, entry, options);
+
+      if (!stored) {
+        return undefined;
+      }
+
+      return {
+        ...stored,
+        value: stored.derived ? runtime.read(entry.key) : stored.value,
+      };
+    })
+    .filter((entry): entry is ListEntry => Boolean(entry))
+    .filter((entry) => entry.value !== undefined)
+    .filter((entry) => matchesPrefix(entry.key, options.prefix))
+    .sort((left, right) => left.key.localeCompare(right.key));
 }
 
 function listProjectedNamespace(

@@ -3,6 +3,7 @@ import type {
   ManifestFile,
   NamespaceDefinition,
   NormalizedManifest,
+  RuntimeNamespaceDefinition,
   VaultAuthDefinition,
   VaultDefinition,
 } from '../types/manifest.js';
@@ -59,6 +60,13 @@ const DEFAULT_NAMESPACES: Record<string, NamespaceDefinition> = {
     readonly: true,
   },
 };
+const DEFAULT_RUNTIME_NAMESPACES: Record<string, RuntimeNamespaceDefinition> = {
+  process: {
+    description: 'Live process runtime values.',
+    serverOnly: true,
+    builtIn: true,
+  },
+};
 
 function validateResolveFrom(resolveFrom: ProfileResolveFrom[]): ProfileResolveFrom[] {
   const validValues: ProfileResolveFrom[] = ['cli.profile', 'env.CNOS_PROFILE', 'default'];
@@ -94,7 +102,9 @@ function normalizeNamespaces(
   namespaces?: Record<string, Partial<NamespaceDefinition>>,
 ): Record<string, NamespaceDefinition> {
   const normalized = Object.fromEntries(
-    Object.entries(namespaces ?? {}).map(([namespace, definition]) => [
+    Object.entries(namespaces ?? {})
+      .filter(([namespace]) => namespace !== 'runtime')
+      .map(([namespace, definition]) => [
       namespace,
       {
         kind: definition.kind ?? 'data',
@@ -108,6 +118,36 @@ function normalizeNamespaces(
 
   return {
     ...DEFAULT_NAMESPACES,
+    ...normalized,
+  };
+}
+
+function normalizeRuntimeNamespaces(
+  namespaces?: ManifestFile['namespaces'],
+): Record<string, RuntimeNamespaceDefinition> {
+  const runtimeEntries = namespaces?.runtime ?? {};
+  const normalized = Object.fromEntries(
+    Object.entries(runtimeEntries).map(([namespace, definition]) => [
+      namespace,
+      {
+        ...(definition.description?.trim()
+          ? {
+              description: definition.description.trim(),
+            }
+          : {}),
+        serverOnly: definition.server_only ?? true,
+      } satisfies RuntimeNamespaceDefinition,
+    ]),
+  );
+
+  for (const namespace of Object.keys(normalized)) {
+    if (DEFAULT_NAMESPACES[namespace] || namespace === 'runtime') {
+      throw new CnosManifestError(`Runtime namespace "${namespace}" conflicts with a built-in or reserved namespace.`);
+    }
+  }
+
+  return {
+    ...DEFAULT_RUNTIME_NAMESPACES,
     ...normalized,
   };
 }
@@ -243,6 +283,7 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
   const defaultProfile = manifest.profiles?.default?.trim() || 'base';
   const workspaceItems = normalizeWorkspaceItems(manifest.workspaces?.items);
   const resolveFrom = validateResolveFrom(manifest.profiles?.resolveFrom ?? DEFAULT_RESOLVE_FROM);
+  const runtimeNamespaces = normalizeRuntimeNamespaces(manifest.namespaces);
   const filesystemValues = {
     root: './',
     format: 'yaml',
@@ -323,6 +364,7 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
       },
     },
     namespaces: normalizeNamespaces(manifest.namespaces),
+    runtimeNamespaces,
     vaults: normalizeVaults(manifest.vaults),
     writePolicy: {
       define: {

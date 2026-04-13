@@ -9,6 +9,26 @@ export type LogicalKey = string;
 
 export type NamespaceName = string;
 
+export interface DerivedValue {
+  $derive: string | { expr: string };
+}
+
+export type ExprNode =
+  | { type: 'literal'; value: string | number | boolean | null }
+  | { type: 'ref'; path: string }
+  | { type: 'call'; name: string; args: ExprNode[] };
+
+export interface ParsedDerivation {
+  type: 'template' | 'expression';
+  raw: string;
+  ast: ExprNode;
+  refs: string[];
+  runtimeRefs: string[];
+  isRuntimeDependent: boolean;
+}
+
+export type RuntimeProvider = (key: string) => unknown;
+
 export interface ConfigOrigin {
   file?: string;
   line?: number;
@@ -72,6 +92,18 @@ export interface InspectResult {
     value: unknown;
     origin?: ConfigOrigin;
   }>;
+  derived?: {
+    type: ParsedDerivation['type'];
+    expression: string;
+    dependencies: Array<{
+      key: string;
+      value: unknown;
+      runtimeNamespace?: string;
+    }>;
+    runtimeDependent: boolean;
+    runtimeNamespaces: string[];
+    promotionWarning?: string;
+  };
 }
 
 export interface CnosCreateOptions {
@@ -138,8 +170,15 @@ export interface CnosRuntime {
   toEnv(options?: ToEnvOptions): Record<string, string>;
   toPublicEnv(options?: ToPublicEnvOptions): Record<string, string>;
   toServerProjection(): ServerProjection;
+  registerRuntimeProvider(namespace: string, provider: RuntimeProvider): void;
   refreshSecrets(): Promise<void>;
   refreshSecret(key: LogicalKey): Promise<void>;
+}
+
+export interface DerivedFormula {
+  expr: string;
+  deps: string[];
+  runtimeRefs: string[];
 }
 
 export interface ServerProjection {
@@ -149,8 +188,10 @@ export interface ServerProjection {
   resolvedAt: string;
   configHash: string;
   values: Record<string, unknown>;
+  derived: Record<string, DerivedFormula>;
   secretRefs: Record<string, SecretReference>;
   publicKeys: string[];
+  runtimeNamespaces: string[];
   meta: {
     workspace: string;
     profile: string;

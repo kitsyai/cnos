@@ -41,6 +41,34 @@ async function createFixtureRoot(): Promise<string> {
   return root;
 }
 
+async function createRuntimeDependentFixtureRoot(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-browser-runtime-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'values'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: browser-runtime-fixture',
+      'public:',
+      '  promote:',
+      '    - value.app.origin',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'values', 'app.yml'),
+    [
+      'app:',
+      '  host: kitsy.local',
+      '  origin:',
+      '    $derive:',
+      "      expr: \"concat('https://', coalesce(process.env.PUBLIC_HOST, value.app.host))\"",
+    ].join('\n'),
+  );
+  return root;
+}
+
 describe('@kitsy/cnos/browser', () => {
   it('reads promoted public values and supports value.* aliases', async () => {
     const root = await createFixtureRoot();
@@ -92,5 +120,16 @@ describe('@kitsy/cnos/build', () => {
       NEXT_PUBLIC_APP_API_URL: 'https://api.local',
       NEXT_PUBLIC_FLAG_AUTH_UPI_ENABLED: 'true',
     });
+  });
+
+  it('rejects promoted runtime-dependent values for browser/public output', async () => {
+    const root = await createRuntimeDependentFixtureRoot();
+
+    await expect(resolveBrowserData({ root })).rejects.toThrow(
+      'Cannot build browser projection: public.app.origin depends on runtime namespaces process.',
+    );
+    await expect(resolveFrameworkEnv({ root }, 'vite')).rejects.toThrow(
+      'Cannot resolve value.app.origin for public output because it depends on runtime namespace process.',
+    );
   });
 });

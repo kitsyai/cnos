@@ -56,5 +56,7 @@ export async function runList(args: string[] = [], options: RuntimeServiceOption
     return '';
   }
 
-  return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');
+  return entries
+    .map((entry) => `${entry.key}=${printValue(entry.value)}${entry.derived ? '  (derived)' : ''}`)
+    .join('\n');
 }

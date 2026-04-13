@@ -12,6 +12,22 @@ cnos value list --prefix app.
 cnos value delete app.name
 ```
 
+## Derived values
+
+Use `--derive` for template shorthand:
+
+```bash
+cnos value set app.origin --derive '${value.app.protocol}://${value.app.host}'
+```
+
+Use `--derive --expr` for expression form:
+
+```bash
+cnos value set app.effective_port --derive --expr "coalesce(process.env.PORT, value.app.default_port, '3000')"
+```
+
+CNOS stores these as first-class derived values, not as opaque strings.
+
 ## Typed input
 
 `cnos value set` parses the input as YAML before writing it. That means you can store more than strings.
@@ -46,3 +62,4 @@ cnos read value.app.name
 - Values are private by default.
 - To expose a value to browser/public surfaces, use `cnos promote`.
 - To expose a value as shell env, map it through `envMapping.explicit` or `cnos promote --to env`.
+- Derived values can be authored only under writable data namespaces such as `value.*` and custom writable data namespaces.

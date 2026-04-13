@@ -30,6 +30,31 @@ const port = cnos.value('server.port');
 const token = cnos.secret('app.token');
 ```
 
+Derived server config stays inside CNOS too:
+
+```yaml
+server:
+  effective_port:
+    $derive:
+      expr: "coalesce(process.env.PORT, value.server.default_port, '3000')"
+```
+
+```ts
+const port = cnos.value('server.effective_port');
+```
+
+If you need live request or session context, declare a runtime namespace and register a provider:
+
+```ts
+cnos.registerRuntimeProvider('request', (key) => {
+  if (key === 'headers.host') {
+    return currentRequest?.headers.host;
+  }
+
+  return undefined;
+});
+```
+
 Env export bridge:
 
 ```bash

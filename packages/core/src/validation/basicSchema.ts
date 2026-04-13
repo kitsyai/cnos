@@ -1,6 +1,7 @@
 import type { ConfigEntry, ResolvedEntry, ResolvedGraph } from '../types/core.js';
 import type { ValidationIssue } from '../types/plugin.js';
 import type { SchemaRule } from '../types/schema.js';
+import { isDerivedValue } from '../derive/evaluator.js';
 
 function describeValueType(value: unknown): string {
   if (Array.isArray(value)) {
@@ -132,6 +133,11 @@ export function applySchemaRules(
         });
       }
 
+      continue;
+    }
+
+    if (isDerivedValue(resolvedEntry.value)) {
+      nextEntries.set(key, resolvedEntry);
       continue;
     }
 

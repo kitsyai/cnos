@@ -34,3 +34,27 @@ export class CnosKeyNotFoundError extends CnosError {
     super(`Missing required CNOS config key: ${key}`);
   }
 }
+
+export class CnosDerivedExpressionError extends CnosError {
+  constructor(message: string, readonly expression?: string) {
+    super(expression ? `${message} (${expression})` : message);
+  }
+}
+
+export class CnosDerivedCycleError extends CnosError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+export class CnosDerivedResolutionError extends CnosError {
+  constructor(readonly key: string, message: string) {
+    super(message);
+  }
+}
+
+export class CnosRuntimeProviderError extends CnosError {
+  constructor(message: string) {
+    super(message);
+  }
+}

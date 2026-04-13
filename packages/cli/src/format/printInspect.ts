@@ -23,5 +23,27 @@ export function printInspect(record: InspectResult): string {
     );
   }
 
+  if (record.derived) {
+    lines.push(`derivedType: ${record.derived.type}`);
+    lines.push(`derivedExpression: ${record.derived.expression}`);
+    lines.push(`runtimeDependent: ${record.derived.runtimeDependent ? 'yes' : 'no'}`);
+
+    if (record.derived.runtimeNamespaces.length > 0) {
+      lines.push(`runtimeNamespaces: ${record.derived.runtimeNamespaces.join(', ')}`);
+    }
+
+    if (record.derived.dependencies.length > 0) {
+      lines.push(
+        `dependencies: ${record.derived.dependencies
+          .map((entry) => `${entry.key}=${String(entry.value)}${entry.runtimeNamespace ? ` (${entry.runtimeNamespace})` : ''}`)
+          .join(', ')}`,
+      );
+    }
+
+    if (record.derived.promotionWarning) {
+      lines.push(`warning: ${record.derived.promotionWarning}`);
+    }
+  }
+
   return lines.join('\n');
 }

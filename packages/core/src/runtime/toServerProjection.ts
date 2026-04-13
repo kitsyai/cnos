@@ -21,10 +21,17 @@ export function toServerProjection(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
   cnosVersion = '0.0.0-dev',
+  helpers: {
+    read?: (key: string) => unknown;
+    isRuntimeDependent?: (key: string) => boolean;
+    toServerFormula?: (key: string) => ServerProjection['derived'][string] | undefined;
+  } = {},
 ): ServerProjection {
   const values: Record<string, unknown> = {};
+  const derived: ServerProjection['derived'] = {};
   const secretRefs: ServerProjection['secretRefs'] = {};
   const namespaces = new Set<string>();
+  const runtimeNamespaces = new Set<string>();
   const publicKeys = Array.from(graph.entries.values())
     .filter((entry) => entry.namespace === 'public')
     .map((entry) => entry.key.slice('public.'.length))
@@ -41,7 +48,20 @@ export function toServerProjection(
     }
 
     if (entry.namespace === 'value') {
-      values[stripValuePrefix(key)] = entry.value;
+      if (helpers.isRuntimeDependent?.(key)) {
+        const formula = helpers.toServerFormula?.(key);
+
+        if (formula) {
+          derived[stripValuePrefix(key)] = formula;
+          for (const ref of formula.runtimeRefs) {
+            runtimeNamespaces.add(ref.split('.')[0] ?? '');
+          }
+        }
+        continue;
+      }
+
+      const value = helpers.read ? helpers.read(key) : entry.value;
+      values[stripValuePrefix(key)] = value;
       continue;
     }
 
@@ -53,7 +73,19 @@ export function toServerProjection(
       !namespaceDefinition.sensitive &&
       entry.namespace !== 'public'
     ) {
-      values[key] = entry.value;
+      if (helpers.isRuntimeDependent?.(key)) {
+        const formula = helpers.toServerFormula?.(key);
+
+        if (formula) {
+          derived[key] = formula;
+          for (const ref of formula.runtimeRefs) {
+            runtimeNamespaces.add(ref.split('.')[0] ?? '');
+          }
+        }
+        continue;
+      }
+
+      values[key] = helpers.read ? helpers.read(key) : entry.value;
       namespaces.add(entry.namespace);
     }
   }
@@ -65,8 +97,10 @@ export function toServerProjection(
     resolvedAt: graph.resolvedAt,
     configHash: configHash(values),
     values: stableSortObject(values),
+    derived: stableSortObject(derived) as ServerProjection['derived'],
     secretRefs: stableSortObject(secretRefs) as ServerProjection['secretRefs'],
     publicKeys,
+    runtimeNamespaces: Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right)),
     meta: {
       workspace: graph.workspace.workspaceId,
       profile: graph.profile,

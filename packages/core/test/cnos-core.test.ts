@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   applySchemaRules,
   createCnos,
+  createDefaultRuntimeProviders,
+  createDerivedRuntimeSupport,
   envVarToLogicalKey,
   expandProfileChain,
   expandWorkspaceChain,
@@ -166,6 +168,192 @@ describe('@kitsy/cnos-core', () => {
         from: 'manifest-default',
       },
     });
+  });
+
+  it('resolves config-only derived values and precomputes them for repeated reads', async () => {
+    const root = await createFixtureRoot('version: 1\nproject:\n  name: derived-config\n');
+    const loader = createFixtureLoader('derived-loader', [
+      {
+        key: 'value.app.protocol',
+        value: 'https',
+        namespace: 'value',
+        sourceId: 'derived-loader',
+        pluginId: 'derived-loader',
+        workspaceId: 'derived-config',
+      },
+      {
+        key: 'value.app.host',
+        value: 'api.kitsy.ai',
+        namespace: 'value',
+        sourceId: 'derived-loader',
+        pluginId: 'derived-loader',
+        workspaceId: 'derived-config',
+      },
+      {
+        key: 'value.app.port',
+        value: 443,
+        namespace: 'value',
+        sourceId: 'derived-loader',
+        pluginId: 'derived-loader',
+        workspaceId: 'derived-config',
+      },
+      {
+        key: 'value.app.origin',
+        value: {
+          $derive: '${value.app.protocol}://${value.app.host}:${value.app.port}',
+        },
+        namespace: 'value',
+        sourceId: 'derived-loader',
+        pluginId: 'derived-loader',
+        workspaceId: 'derived-config',
+      },
+    ]);
+
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+    });
+
+    expect(runtime.value('app.origin')).toBe('https://api.kitsy.ai:443');
+    expect(runtime.inspect('value.app.origin').derived).toMatchObject({
+      type: 'template',
+      runtimeDependent: false,
+    });
+    expect(runtime.inspect('value.app.origin').derived?.dependencies).toEqual([
+      { key: 'value.app.host', value: 'api.kitsy.ai' },
+      { key: 'value.app.port', value: 443 },
+      { key: 'value.app.protocol', value: 'https' },
+    ]);
+
+    const support = createDerivedRuntimeSupport(
+      runtime.graph,
+      runtime.manifest,
+      createDefaultRuntimeProviders(runtime.manifest, {}),
+    );
+    let baseReads = 0;
+    const readBase = (key: string) => {
+      baseReads += 1;
+      return runtime.graph.entries.get(key)?.value;
+    };
+
+    expect(support.read('value.app.origin', readBase)).toBe('https://api.kitsy.ai:443');
+    expect(support.read('value.app.origin', readBase)).toBe('https://api.kitsy.ai:443');
+    expect(baseReads).toBe(0);
+  });
+
+  it('treats runtime-dependent derivations as live and keeps them in server projections', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: derived-runtime',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('runtime-loader', [
+      {
+        key: 'value.app.defaultHost',
+        value: 'api.kitsy.ai',
+        namespace: 'value',
+        sourceId: 'runtime-loader',
+        pluginId: 'runtime-loader',
+        workspaceId: 'derived-runtime',
+      },
+      {
+        key: 'value.app.publicHost',
+        value: {
+          $derive: {
+            expr: "coalesce(process.env.PUBLIC_HOST, value.app.defaultHost)",
+          },
+        },
+        namespace: 'value',
+        sourceId: 'runtime-loader',
+        pluginId: 'runtime-loader',
+        workspaceId: 'derived-runtime',
+      },
+    ]);
+    const env = {
+      PUBLIC_HOST: 'stage.kitsy.dev',
+    };
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+      processEnv: env,
+    });
+
+    expect(runtime.value('app.publicHost')).toBe('stage.kitsy.dev');
+    env.PUBLIC_HOST = 'prod.kitsy.ai';
+    expect(runtime.value('app.publicHost')).toBe('prod.kitsy.ai');
+    expect(runtime.inspect('value.app.publicHost').derived).toMatchObject({
+      runtimeDependent: true,
+      runtimeNamespaces: ['process'],
+      promotionWarning: 'Cannot be promoted to browser/public.',
+    });
+
+    const projection = runtime.toServerProjection();
+
+    expect(projection.values).toMatchObject({
+      'app.defaultHost': 'api.kitsy.ai',
+    });
+    expect(projection.derived).toMatchObject({
+      'app.publicHost': {
+        expr: "coalesce(process.env.PUBLIC_HOST, value.app.defaultHost)",
+        deps: ['value.app.defaultHost'],
+        runtimeRefs: ['process.env.PUBLIC_HOST'],
+      },
+    });
+    expect(projection.runtimeNamespaces).toEqual(['process']);
+  });
+
+  it('supports declared custom runtime namespaces through runtime providers', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: runtime-providers',
+        'namespaces:',
+        '  runtime:',
+        '    request:',
+        '      description: Request context',
+        '      server_only: true',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('request-loader', [
+      {
+        key: 'value.app.defaultHost',
+        value: 'fallback.kitsy.ai',
+        namespace: 'value',
+        sourceId: 'request-loader',
+        pluginId: 'request-loader',
+        workspaceId: 'runtime-providers',
+      },
+      {
+        key: 'value.app.currentHost',
+        value: {
+          $derive: {
+            expr: 'coalesce(request.headers.host, value.app.defaultHost)',
+          },
+        },
+        namespace: 'value',
+        sourceId: 'request-loader',
+        pluginId: 'request-loader',
+        workspaceId: 'runtime-providers',
+      },
+    ]);
+    const requestContext: {
+      host?: string;
+    } = {};
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+    });
+
+    runtime.registerRuntimeProvider('request', (key) =>
+      key === 'headers.host' ? requestContext.host : undefined,
+    );
+
+    expect(runtime.value('app.currentHost')).toBe('fallback.kitsy.ai');
+    requestContext.host = 'live.kitsy.dev';
+    expect(runtime.value('app.currentHost')).toBe('live.kitsy.dev');
   });
 
   it('flattens nested records', () => {

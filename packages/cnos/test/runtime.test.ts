@@ -22,21 +22,48 @@ async function createFixtureRoot(): Promise<string> {
   await writeFile(path.join(root, '.cnosrc.yml'), 'root: ./.cnos\n');
   await writeFile(
     path.join(root, '.cnos', 'cnos.yml'),
-    ['version: 1', 'project:', '  name: runtime-fixture', 'envMapping:', '  explicit:', '    PORT: value.server.port'].join(
-      '\n',
-    ),
+    [
+      'version: 1',
+      'project:',
+      '  name: runtime-fixture',
+      'envMapping:',
+      '  explicit:',
+      '    PORT: value.server.port',
+      'namespaces:',
+      '  runtime:',
+      '    request:',
+      '      description: Request context',
+      '      server_only: true',
+    ].join('\n'),
   );
-  await writeFile(path.join(root, '.cnos', 'values', 'app.yml'), ['server:', '  port: 3000'].join('\n'));
+  await writeFile(
+    path.join(root, '.cnos', 'values', 'app.yml'),
+    [
+      'server:',
+      '  port: 3000',
+      'app:',
+      '  effectivePort:',
+      '    $derive:',
+      "      expr: \"coalesce(process.env.PORT, value.server.port, '3000')\"",
+      '  currentHost:',
+      '    $derive:',
+      "      expr: \"coalesce(request.headers.host, 'kitsy.local')\"",
+    ].join('\n'),
+  );
   return root;
 }
 
 beforeEach(() => {
   delete process.env[CNOS_GRAPH_ENV_VAR];
+  delete process.env[CNOS_PROJECTION_ENV_VAR];
+  delete process.env.PORT;
 });
 
 afterEach(async () => {
   process.chdir(originalCwd);
   delete process.env[CNOS_GRAPH_ENV_VAR];
+  delete process.env[CNOS_PROJECTION_ENV_VAR];
+  delete process.env.PORT;
   vi.resetModules();
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -131,5 +158,29 @@ describe('@kitsy/cnos root runtime entry', () => {
     const { default: cnos } = await import('../src/index.js');
 
     expect(cnos.value('server.port')).toBe(3000);
+  });
+
+  it('keeps runtime-dependent formulas live after projection bootstrap', async () => {
+    const root = await createFixtureRoot();
+    process.env.PORT = '4500';
+    const runtime = await createCnos({
+      root,
+      processEnv: process.env,
+    });
+
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(runtime.toServerProjection());
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    expect(cnos.value('app.effectivePort')).toBe('4500');
+    process.env.PORT = '4700';
+    expect(cnos.value('app.effectivePort')).toBe('4700');
+
+    let host = 'console.kitsy.local';
+    cnos.registerRuntimeProvider('request', (key) => (key === 'headers.host' ? host : undefined));
+    expect(cnos.value('app.currentHost')).toBe('console.kitsy.local');
+    host = 'cnos.kitsy.local';
+    expect(cnos.value('app.currentHost')).toBe('cnos.kitsy.local');
   });
 });

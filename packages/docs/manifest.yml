@@ -35,6 +35,8 @@ sidebar:
         label: Workspaces and Monorepos
       - path: guides/profiles
         label: Profiles and Environments
+      - path: guides/derived-values
+        label: Derived Values
       - path: guides/secrets
         label: Secrets and Vaults
       - path: guides/migration

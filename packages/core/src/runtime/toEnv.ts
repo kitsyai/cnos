@@ -23,6 +23,10 @@ export function toEnv(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
   options: ToEnvOptions = {},
+  helpers: {
+    read?: (key: string) => unknown;
+    isRuntimeDependent?: (key: string) => boolean;
+  } = {},
 ): Record<string, string> {
   const includeSecrets = options.includeSecrets ?? true;
   const output: Record<string, string> = {};
@@ -51,7 +55,13 @@ export function toEnv(
       continue;
     }
 
-    output[envVar] = normalizeEnvValue(entry.value);
+    const value = helpers.read ? helpers.read(logicalKey) : entry.value;
+
+    if (value === undefined) {
+      continue;
+    }
+
+    output[envVar] = normalizeEnvValue(value);
   }
 
   return output;

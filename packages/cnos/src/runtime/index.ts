@@ -2,14 +2,18 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import {
+  createDefaultRuntimeProviders,
+  createDerivedRuntimeSupport,
   inspectValue,
+  isDerivedValue,
+  parseDerivation,
+  registerRuntimeProvider,
   type CnosRuntime,
   type LogicalKey,
   type NormalizedManifest,
   type ResolvedGraph,
   type ResolvedEntry,
   type ServerProjection,
-  readOrValue,
   readValue,
   requireValue,
   toEnv,
@@ -53,6 +57,7 @@ export interface CnosSingleton {
   format(message: string): string;
   log(message: string): string;
   loadProjection(source: string): Promise<void>;
+  registerRuntimeProvider(namespace: string, provider: Parameters<CnosRuntime['registerRuntimeProvider']>[1]): void;
   refreshSecrets(): Promise<void>;
   refreshSecret(key: LogicalKey): Promise<void>;
   ready(): Promise<void>;
@@ -111,6 +116,36 @@ function formatMessage(runtime: CnosRuntime, message: string): string {
   });
 }
 
+function discoverRuntimeNamespacesFromGraph(graph: ResolvedGraph): string[] {
+  const configNamespaces = new Set<string>(['value', 'secret', 'meta', 'public']);
+
+  for (const entry of graph.entries.values()) {
+    configNamespaces.add(entry.namespace);
+  }
+
+  const runtimeNamespaces = new Set<string>();
+
+  for (const entry of graph.entries.values()) {
+    if (!isDerivedValue(entry.value)) {
+      continue;
+    }
+
+    const parsed = parseDerivation(entry.value);
+
+    for (const ref of parsed.refs) {
+      const namespace = ref.split('.')[0] ?? '';
+
+      if (!namespace || configNamespaces.has(namespace)) {
+        continue;
+      }
+
+      runtimeNamespaces.add(namespace);
+    }
+  }
+
+  return Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right));
+}
+
 function attachBootstrappedGraph(graph: ResolvedGraph): void {
   if (getSingletonRuntime()) {
     return;
@@ -162,6 +197,21 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
       frameworks: {},
     },
     namespaces: {},
+    runtimeNamespaces: {
+      process: {
+        description: 'Live process runtime values.',
+        serverOnly: true,
+        builtIn: true,
+      },
+      ...Object.fromEntries(
+        discoverRuntimeNamespacesFromGraph(graph).map((namespace) => [
+          namespace,
+          {
+            serverOnly: true,
+          },
+        ]),
+      ),
+    },
     vaults: {},
     writePolicy: {
       define: {
@@ -174,19 +224,43 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
     },
     schema: {},
   };
+  const runtimeProviders = createDefaultRuntimeProviders(bootstrappedManifest, process.env);
+  const derivedSupport = createDerivedRuntimeSupport(graph, bootstrappedManifest, runtimeProviders);
+
+  const resolveProjectedSourceKey = (key: string): string => {
+    if (!key.startsWith('public.')) {
+      return key;
+    }
+
+    const promotedFrom = graph.entries.get(key)?.winner.metadata?.promotedFrom;
+
+    if (typeof promotedFrom === 'string') {
+      return promotedFrom;
+    }
+
+    const fallback = `value.${key.slice('public.'.length)}`;
+    return graph.entries.has(fallback) ? fallback : key;
+  };
 
   const runtime = {
     manifest: bootstrappedManifest,
     plugins: [],
     graph,
     read<T = unknown>(key: LogicalKey): T | undefined {
-      return readValue(graph, key);
+      return derivedSupport.read(key, (ref) => readValue(graph, ref)) as T | undefined;
     },
     require<T = unknown>(key: LogicalKey): T {
-      return requireValue(graph, key);
+      const value = this.read<T>(key);
+
+      if (value === undefined) {
+        return requireValue(graph, key);
+      }
+
+      return value;
     },
     readOr<T>(key: LogicalKey, fallback: T): T {
-      return readOrValue(graph, key, fallback);
+      const value = this.read<T>(key);
+      return (value === undefined ? fallback : value) as T;
     },
     value<T = unknown>(path: string): T | undefined {
       return readValue(graph, toLogicalKey('value', path));
@@ -198,22 +272,35 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
       return readValue(graph, toLogicalKey('meta', path));
     },
     toNamespace(namespace) {
-      return toNamespaceObject(graph, namespace);
+      return toNamespaceObject(graph, namespace, (key) => this.read(key));
     },
     toEnv(options) {
-      return toEnv(graph, bootstrappedManifest, options);
+      return toEnv(graph, bootstrappedManifest, options, {
+        read: (key) => this.read(key),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(key),
+      });
     },
     toPublicEnv(options) {
-      return toPublicEnv(graph, bootstrappedManifest, options);
+      return toPublicEnv(graph, bootstrappedManifest, options, {
+        read: (key) =>
+          derivedSupport.toConcreteValue(resolveProjectedSourceKey(key), (ref) => readValue(graph, ref), 'public'),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(resolveProjectedSourceKey(key)),
+      });
     },
     inspect(key: LogicalKey) {
-      return inspectValue(graph, key);
+      return inspectValue(graph, key, {
+        read: (ref) => this.read(ref),
+        describeDerived: (ref) => derivedSupport.describe(ref, (candidate) => readValue(graph, candidate)),
+      });
     },
     toObject() {
-      return toNamespaceObject(graph);
+      return toNamespaceObject(graph, undefined, (key) => this.read(key));
     },
     toServerProjection() {
       throw new Error('CNOS graph bootstrap payload does not support server projection export.');
+    },
+    registerRuntimeProvider(namespace, provider) {
+      registerRuntimeProvider(bootstrappedManifest, runtimeProviders, namespace, provider);
     },
     async refreshSecrets() {
       return;
@@ -227,7 +314,10 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
   setBootstrappedSecretHydrationRequired(graphRequiresSecretHydration(graph));
 }
 
-function toBootstrappedManifest(graph: ResolvedGraph): NormalizedManifest {
+function toBootstrappedManifest(
+  graph: ResolvedGraph,
+  runtimeNamespaces: string[] = [],
+): NormalizedManifest {
   return {
     version: 1,
     project: {
@@ -272,7 +362,25 @@ function toBootstrappedManifest(graph: ResolvedGraph): NormalizedManifest {
       value: { kind: 'data', shareable: true },
       secret: { kind: 'data', shareable: false, sensitive: true },
       meta: { kind: 'system', shareable: false, readonly: true },
+      process: { kind: 'system', shareable: false, readonly: true },
       public: { kind: 'projection', shareable: true, readonly: true, source: 'promote' },
+    },
+    runtimeNamespaces: {
+      process: {
+        description: 'Live process runtime values.',
+        serverOnly: true,
+        builtIn: true,
+      },
+      ...Object.fromEntries(
+        runtimeNamespaces
+          .filter((namespace) => namespace !== 'process')
+          .map((namespace) => [
+            namespace,
+            {
+              serverOnly: true,
+            },
+          ]),
+      ),
     },
     vaults: {},
     writePolicy: {
@@ -312,6 +420,36 @@ function graphFromProjection(projection: ServerProjection): ResolvedGraph {
     entries.set(logicalKey, {
       key: logicalKey,
       value,
+      namespace,
+      winner,
+      overridden: [],
+    });
+  }
+
+  for (const [key, formula] of Object.entries(projection.derived)) {
+    const firstSegment = key.split('.')[0] ?? '';
+    const logicalKey =
+      key.startsWith('value.') || key.startsWith('public.') || explicitNamespaces.has(firstSegment)
+        ? key
+        : `value.${key}`;
+    const namespace = logicalKey.slice(0, logicalKey.indexOf('.'));
+    const winner = {
+      key: logicalKey,
+      value: {
+        $derive: {
+          expr: formula.expr,
+        },
+      },
+      namespace,
+      sourceId: 'server-projection',
+      pluginId: 'cnos',
+      workspaceId: projection.workspace,
+      profile: projection.profile,
+    };
+
+    entries.set(logicalKey, {
+      key: logicalKey,
+      value: winner.value,
       namespace,
       winner,
       overridden: [],
@@ -358,6 +496,9 @@ function graphFromProjection(projection: ServerProjection): ResolvedGraph {
         pluginId: 'cnos',
         workspaceId: projection.workspace,
         profile: projection.profile,
+        metadata: {
+          promotedFrom: valueKey,
+        },
       },
       overridden: [],
     });
@@ -399,8 +540,24 @@ function attachBootstrappedProjection(projection: ServerProjection, force = fals
   }
 
   const graph = graphFromProjection(projection);
-  const manifest = toBootstrappedManifest(graph);
+  const manifest = toBootstrappedManifest(graph, projection.runtimeNamespaces);
   const hydratedSecrets = new Map<string, unknown>();
+  const runtimeProviders = createDefaultRuntimeProviders(manifest, process.env);
+  const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
+  const resolveProjectedSourceKey = (key: string): string => {
+    if (!key.startsWith('public.')) {
+      return key;
+    }
+
+    const promotedFrom = graph.entries.get(key)?.winner.metadata?.promotedFrom;
+
+    if (typeof promotedFrom === 'string') {
+      return promotedFrom;
+    }
+
+    const fallback = `value.${key.slice('public.'.length)}`;
+    return graph.entries.has(fallback) ? fallback : key;
+  };
 
   const resolveSecretValue = async (key: string): Promise<unknown> => {
     const entry = graph.entries.get(key);
@@ -433,17 +590,19 @@ function attachBootstrappedProjection(projection: ServerProjection, force = fals
     plugins: [],
     graph,
     read<T = unknown>(key: LogicalKey): T | undefined {
-      const entry = graph.entries.get(key);
+      return derivedSupport.read(key, (ref) => {
+        const entry = graph.entries.get(ref);
 
-      if (!entry) {
-        return undefined;
-      }
+        if (!entry) {
+          return undefined;
+        }
 
-      if (entry.namespace === 'secret') {
-        return hydratedSecrets.get(key) as T | undefined;
-      }
+        if (entry.namespace === 'secret') {
+          return hydratedSecrets.get(ref);
+        }
 
-      return entry.value as T | undefined;
+        return entry.value;
+      }) as T | undefined;
     },
     require<T = unknown>(key: LogicalKey): T {
       const value = this.read<T>(key);
@@ -480,22 +639,65 @@ function attachBootstrappedProjection(projection: ServerProjection, force = fals
           ),
         },
         key,
+        {
+          read: (ref) => this.read(ref),
+          describeDerived: (ref) =>
+            derivedSupport.describe(ref, (candidate) => {
+              const entry = graph.entries.get(candidate);
+
+              if (!entry) {
+                return undefined;
+              }
+
+              if (entry.namespace === 'secret') {
+                return hydratedSecrets.get(candidate);
+              }
+
+              return entry.value;
+            }),
+        },
       );
     },
     toObject() {
-      return toNamespaceObject(graph);
+      return toNamespaceObject(graph, undefined, (key) => this.read(key));
     },
     toNamespace(namespace: string) {
-      return toNamespaceObject(graph, namespace);
+      return toNamespaceObject(graph, namespace, (key) => this.read(key));
     },
     toEnv(options) {
-      return toEnv(graph, manifest, options);
+      return toEnv(graph, manifest, options, {
+        read: (key) => this.read(key),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(key),
+      });
     },
     toPublicEnv(options) {
-      return toPublicEnv(graph, manifest, options);
+      return toPublicEnv(graph, manifest, options, {
+        read: (key) =>
+          derivedSupport.toConcreteValue(
+            resolveProjectedSourceKey(key),
+            (ref) => {
+              const entry = graph.entries.get(ref);
+
+              if (!entry) {
+                return undefined;
+              }
+
+              if (entry.namespace === 'secret') {
+                return hydratedSecrets.get(ref);
+              }
+
+              return entry.value;
+            },
+            'public',
+          ),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(resolveProjectedSourceKey(key)),
+      });
     },
     toServerProjection() {
       return projection;
+    },
+    registerRuntimeProvider(namespace, provider) {
+      registerRuntimeProvider(manifest, runtimeProviders, namespace, provider);
     },
     async refreshSecrets() {
       for (const key of Object.keys(projection.secretRefs).map((segment) => `secret.${segment}`)) {
@@ -641,6 +843,9 @@ const cnos = Object.assign(
       const projection = deserializeServerProjection(readFileSync(resolvedSource, 'utf8'));
       attachBootstrappedProjection(projection, true);
       setBootstrappedSecretHydrationRequired(Object.keys(projection.secretRefs).length > 0);
+    },
+    registerRuntimeProvider(namespace: string, provider: Parameters<CnosRuntime['registerRuntimeProvider']>[1]): void {
+      getRuntimeOrThrow().registerRuntimeProvider(namespace, provider);
     },
     async refreshSecrets(): Promise<void> {
       await getRuntimeOrThrow().refreshSecrets();

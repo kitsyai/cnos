@@ -27,7 +27,36 @@ Core concepts:
 - shell env export comes from `envMapping.explicit`.
 - custom data namespaces such as `flags.*` can be written and promoted in v1 when declared under `namespaces`.
 - `process.*` is a built-in server-only namespace for ambient runtime state such as `process.env.*`, `process.cwd`, and `process.node.version`.
+- derived values let you compose config inside CNOS through `$derive`.
 - local secret material is stored outside the repo under `~/.cnos/secrets`.
+
+## Derived Values
+
+Template shorthand:
+
+```yaml
+app:
+  origin:
+    $derive: "${value.app.protocol}://${value.app.host}:${value.app.port}"
+```
+
+Expression form:
+
+```yaml
+app:
+  effective_port:
+    $derive:
+      expr: "coalesce(process.env.PORT, value.app.default_port, '3000')"
+```
+
+CLI authoring:
+
+```powershell
+cnos value set app.origin --derive '${value.app.protocol}://${value.app.host}'
+cnos value set app.effective_port --derive --expr "coalesce(process.env.PORT, value.app.default_port, '3000')"
+```
+
+Custom runtime namespaces are declared under `namespaces.runtime` and populated in code with `cnos.registerRuntimeProvider(namespace, provider)`.
 
 ## Migration Stories
 

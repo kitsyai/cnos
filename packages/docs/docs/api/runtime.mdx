@@ -36,6 +36,7 @@ The runtime currently exposes:
 - `cnos.format(message)`
 - `cnos.log(message)`
 - `cnos.loadProjection(path)`
+- `cnos.registerRuntimeProvider(namespace, provider)`
 - `cnos.refreshSecrets()`
 - `cnos.refreshSecret(key)`
 
@@ -66,6 +67,49 @@ import cnos from '@kitsy/cnos';
 await cnos.loadProjection('./.cnos-server.json');
 await cnos.ready();
 ```
+
+## Derived Values
+
+Derived values resolve transparently through the same read APIs.
+
+```yaml
+app:
+  origin:
+    $derive: "${value.app.protocol}://${value.app.host}:${value.app.port}"
+```
+
+```ts
+const origin = cnos.value('app.origin');
+```
+
+Config-only derivations are cached for the active runtime. Runtime-dependent derivations stay live:
+
+```yaml
+server:
+  effective_port:
+    $derive:
+      expr: "coalesce(process.env.PORT, value.server.default_port, '3000')"
+```
+
+```ts
+const port = cnos.value('server.effective_port');
+```
+
+## Runtime Providers
+
+Declare custom runtime namespaces in the manifest, then register a provider at runtime.
+
+```ts
+cnos.registerRuntimeProvider('request', (key) => {
+  if (key === 'headers.host') {
+    return currentRequest?.headers.host;
+  }
+
+  return undefined;
+});
+```
+
+That lets server-side derived values depend on live request, session, or app-framework context without adding a second config layer.
 
 ## Typed values
 

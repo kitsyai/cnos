@@ -71,6 +71,27 @@ const coopOrigin = cnos('public.apps.coop.origin');
 
 That is the point of the integration. You promote once, keep using the same logical reads in UI code, and `@kitsy/cnos-vite` makes sure the values are already present in the browser bundle.
 
+Derived public values work the same way as long as they are build-safe:
+
+```yaml
+apps:
+  cnos:
+    origin:
+      $derive: "${value.platform.protocol}://${value.apps.cnos.host}"
+
+public:
+  promote:
+    - value.apps.cnos.origin
+```
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const cnosOrigin = cnos('public.apps.cnos.origin');
+```
+
+If a promoted derived value depends on a server-only runtime namespace such as `process.*` or a custom `request.*`, CNOS rejects the browser/public build instead of leaking an unstable value.
+
 Migration path:
 
 1. keep `VITE_*` working through generated env files

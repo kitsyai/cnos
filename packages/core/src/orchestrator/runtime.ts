@@ -3,10 +3,11 @@ import type { CnosRuntime, ResolvedGraph } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
 import { resolveSecretEntryValue } from '../secrets/batchResolve.js';
 import type { SecretCache } from '../secrets/secretCache.js';
+import { createDerivedRuntimeSupport, registerRuntimeProvider } from '../derive/runtime.js';
 import { inspectValue } from '../runtime/inspect.js';
 import { toNamespaceObject } from '../runtime/projection.js';
-import { readOrValue } from '../runtime/readOr.js';
 import { requireValue } from '../runtime/require.js';
+import { createDefaultRuntimeProviders } from '../runtime/runtimeProviders.js';
 import { toServerProjection } from '../runtime/toServerProjection.js';
 import { toEnv } from '../runtime/toEnv.js';
 import { toPublicEnv } from '../runtime/toPublicEnv.js';
@@ -23,6 +24,24 @@ export function createRuntime(
   processEnv: Record<string, string | undefined> = process.env,
   cnosVersion = '0.0.0-dev',
 ): CnosRuntime {
+  const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
+  const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
+
+  function resolveProjectedSourceKey(key: string): string {
+    if (!key.startsWith('public.')) {
+      return key;
+    }
+
+    const promotedFrom = graph.entries.get(key)?.winner.metadata?.promotedFrom;
+
+    if (typeof promotedFrom === 'string') {
+      return promotedFrom;
+    }
+
+    const fallback = `value.${key.slice('public.'.length)}`;
+    return graph.entries.has(fallback) ? fallback : key;
+  }
+
   async function refreshSecretEntry(key: string): Promise<void> {
     const entry = graph.entries.get(key);
 
@@ -64,6 +83,24 @@ export function createRuntime(
   }
 
   function readLogicalKey<T = unknown>(key: string): T | undefined {
+    const resolved = derivedSupport.read(key, (ref) => {
+      const entry = graph.entries.get(ref);
+
+      if (!entry) {
+        return undefined;
+      }
+
+      if (!secretCache) {
+        return entry.value;
+      }
+
+      return resolveSecretEntryValue(ref, entry.value, secretCache);
+    });
+
+    if (resolved !== undefined || graph.entries.has(key) || manifest.runtimeNamespaces[key.split('.')[0] ?? '']) {
+      return resolved as T | undefined;
+    }
+
     const entry = graph.entries.get(key);
 
     if (!entry) {
@@ -94,7 +131,8 @@ export function createRuntime(
       return value as T;
     },
     readOr(key, fallback) {
-      return readOrValue(graph, key, fallback);
+      const value = readLogicalKey(key);
+      return (value === undefined ? fallback : value) as typeof fallback;
     },
     value(path) {
       return readLogicalKey(toLogicalKey('value', path));
@@ -106,22 +144,55 @@ export function createRuntime(
       return readLogicalKey(toLogicalKey('meta', path));
     },
     inspect(key) {
-      return inspectValue(graph, key);
+      return inspectValue(graph, key, {
+        read: (ref) => readLogicalKey(ref),
+        describeDerived: (ref) => derivedSupport.describe(ref, (candidate) => {
+          const entry = graph.entries.get(candidate);
+
+          if (!entry) {
+            return undefined;
+          }
+
+          if (!secretCache) {
+            return entry.value;
+          }
+
+          return resolveSecretEntryValue(candidate, entry.value, secretCache);
+        }),
+      });
     },
     toObject() {
-      return toNamespaceObject(graph);
+      return toNamespaceObject(graph, undefined, (key) => readLogicalKey(key));
     },
     toNamespace(namespace) {
-      return toNamespaceObject(graph, namespace);
+      return toNamespaceObject(graph, namespace, (key) => readLogicalKey(key));
     },
     toEnv(options) {
-      return toEnv(graph, manifest, options);
+      return toEnv(graph, manifest, options, {
+        read: (key) => readLogicalKey(key),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(key),
+      });
     },
     toPublicEnv(options) {
-      return toPublicEnv(graph, manifest, options);
+      return toPublicEnv(graph, manifest, options, {
+        read: (key) =>
+          derivedSupport.toConcreteValue(
+            resolveProjectedSourceKey(key),
+            (candidate) => readLogicalKey(candidate),
+            'public',
+          ),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(resolveProjectedSourceKey(key)),
+      });
     },
     toServerProjection() {
-      return toServerProjection(graph, manifest, cnosVersion);
+      return toServerProjection(graph, manifest, cnosVersion, {
+        read: (key) => derivedSupport.toConcreteValue(key, (candidate) => readLogicalKey(candidate), 'server'),
+        isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(key),
+        toServerFormula: (key) => derivedSupport.toServerFormula(key),
+      });
+    },
+    registerRuntimeProvider(namespace, provider) {
+      registerRuntimeProvider(manifest, runtimeProviders, namespace, provider);
     },
     async refreshSecrets() {
       await refreshAllSecrets();

@@ -55,6 +55,10 @@ export function toPublicEnv(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
   options: ToPublicEnvOptions = {},
+  helpers: {
+    read?: (key: string) => unknown;
+    isRuntimeDependent?: (key: string) => boolean;
+  } = {},
 ): Record<string, string> {
   const prefix = resolvePublicPrefix(manifest, options);
   const output: Record<string, string> = {};
@@ -63,9 +67,23 @@ export function toPublicEnv(
     .sort((left, right) => left.key.localeCompare(right.key));
 
   for (const resolved of promotions) {
+    if (helpers.isRuntimeDependent?.(resolved.key)) {
+      const value = helpers.read?.(resolved.key);
+
+      if (value === undefined) {
+        throw new CnosManifestError(`Cannot build public output for ${resolved.key} because it depends on runtime-only values.`);
+      }
+    }
+
     const baseEnvVar = fallbackPublicEnvVar(stripNamespace(resolved.key));
     const envVar = prefix && !baseEnvVar.startsWith(prefix) ? `${prefix}${baseEnvVar}` : baseEnvVar;
-    output[envVar] = normalizeEnvValue(resolved.value);
+    const value = helpers.read ? helpers.read(resolved.key) : resolved.value;
+
+    if (value === undefined) {
+      continue;
+    }
+
+    output[envVar] = normalizeEnvValue(value);
   }
 
   return output;

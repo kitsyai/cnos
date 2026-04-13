@@ -29,6 +29,7 @@ export function setNestedValue(
 export function toNamespaceObject(
   graph: ResolvedGraph,
   namespace?: NamespaceName,
+  readValueForKey: (key: string) => unknown = (key) => graph.entries.get(key)?.value,
 ): Record<string, unknown> {
   const output: Record<string, unknown> = {};
   const resolvedEntries = Array.from(graph.entries.values()).sort((left, right) =>
@@ -41,7 +42,13 @@ export function toNamespaceObject(
     }
 
     const valuePath = namespace ? stripNamespace(entry.key) : entry.key;
-    setNestedValue(output, valuePath.split('.'), entry.value);
+    const value = readValueForKey(entry.key);
+
+    if (value === undefined) {
+      continue;
+    }
+
+    setNestedValue(output, valuePath.split('.'), value);
   }
 
   return output;

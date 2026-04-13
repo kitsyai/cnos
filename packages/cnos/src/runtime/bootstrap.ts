@@ -54,7 +54,14 @@ export function deserializeServerProjection(source: string): ServerProjection {
     throw new Error('Invalid CNOS server projection payload');
   }
 
-  return payload as ServerProjection;
+  return {
+    ...payload,
+    derived:
+      payload.derived && typeof payload.derived === 'object' && !Array.isArray(payload.derived)
+        ? payload.derived
+        : {},
+    runtimeNamespaces: Array.isArray(payload.runtimeNamespaces) ? payload.runtimeNamespaces : [],
+  } as ServerProjection;
 }
 
 export function serializeRuntimeGraph(graph: ResolvedGraph): string {

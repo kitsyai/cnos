@@ -403,6 +403,8 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
+    expect(runHelp('value set')).toContain('--derive');
+    expect(runHelp('value set')).toContain('--expr');
     expect(runHelp('list')).toContain('--namespace <name>');
     expect(runHelp('list')).toContain('cnos list flags');
     expect(runHelp('list')).toContain('cnos list process');
@@ -425,6 +427,7 @@ describe('@kitsy/cnos-cli', () => {
     expect(rootPayload.integrations.some((integration: { id: string }) => integration.id === 'next')).toBe(true);
     expect(commandPayload.command.id).toBe('export env');
     expect(buildPayload.command.id).toBe('build env');
+    expect(JSON.parse(runHelpAi('value set', ['--format=json'])).command.options.some((option: { flag: string }) => option.flag === '--derive')).toBe(true);
     expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
       true,
     );
@@ -487,6 +490,48 @@ describe('@kitsy/cnos-cli', () => {
     await expect(runSecret('app.token', { root, workspace: 'api', processEnv: {} })).resolves.toBe(
       '****',
     );
+  });
+
+  it('writes and surfaces derived values across read, list, and inspect commands', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runValue(['set', 'app.origin'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--derive', '${value.api.baseUrl}/v1'],
+      }),
+    ).resolves.toContain('set value.app.origin');
+
+    await expect(
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'), 'utf8'),
+    ).resolves.toContain('$derive: ${value.api.baseUrl}/v1');
+
+    await expect(
+      runRead('value.app.origin', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toBe('https://api.local/v1');
+
+    await expect(
+      runList(['value'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--prefix', 'value.app.origin'],
+      }),
+    ).resolves.toContain('value.app.origin=https://api.local/v1  (derived)');
+
+    await expect(
+      runInspect('value.app.origin', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('derivedExpression: ${value.api.baseUrl}/v1');
   });
 
   it('resolves vault-backed secrets through read and secret get after vault auth', async () => {

@@ -142,6 +142,14 @@ const COMMANDS: HelpCommand[] = [
         description: 'Choose whether writes land in the local project workspace or the configured global root.',
       },
       {
+        flag: '--derive',
+        description: 'Write a derived value instead of a literal. Use the second positional value as a template, or combine with --expr.',
+      },
+      {
+        flag: '--expr <expression>',
+        description: 'With --derive, write an expression-form derived value instead of template shorthand.',
+      },
+      {
         flag: '--prefix <path>',
         description: 'Filter value list output to keys that begin with this logical path or key prefix.',
       },
@@ -149,6 +157,8 @@ const COMMANDS: HelpCommand[] = [
     examples: [
       'cnos value app.name',
       'cnos value set server.port 3000',
+      "cnos value set app.origin --derive '${value.app.protocol}://${value.app.host}'",
+      `cnos value set app.display_name --derive --expr "coalesce(value.app.custom_name, value.app.name, 'Unnamed')"`,
       'cnos add value app.name demo',
       'cnos value list --prefix app.',
     ],
@@ -156,9 +166,28 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'value set',
     summary: 'Write a value.',
-    usage: 'cnos value set <path> <value> [--target <local|global>] [global-options]',
-    description: 'Writes a deterministic value document into the selected workspace or explicit global target.',
-    examples: ['cnos value set app.name demo', 'cnos add value server.port 3000 --target global'],
+    usage: 'cnos value set <path> <value> [--target <local|global>] [--derive] [--expr <expression>] [global-options]',
+    description: 'Writes either a literal value or a first-class derived value into the selected workspace or explicit global target.',
+    options: [
+      {
+        flag: '--target <local|global>',
+        description: 'Choose whether writes land in the local project workspace or the configured global root.',
+      },
+      {
+        flag: '--derive',
+        description: 'Interpret the provided value as a derived template, or combine with --expr for expression syntax.',
+      },
+      {
+        flag: '--expr <expression>',
+        description: 'With --derive, store the value as an expression-form derivation instead of template shorthand.',
+      },
+    ],
+    examples: [
+      'cnos value set app.name demo',
+      "cnos value set app.origin --derive '${value.app.protocol}://${value.app.host}'",
+      `cnos value set app.display_name --derive --expr "coalesce(value.app.custom_name, value.app.name, 'Unnamed')"`,
+      'cnos add value server.port 3000 --target global',
+    ],
   },
   {
     id: 'value list',
@@ -338,7 +367,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'List resolved config entries.',
     usage: 'cnos list [<namespace>|all] [--prefix <path>] [--framework <name>] [global-options]',
     description:
-      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering. Custom data namespaces such as flags are supported, and process exposes server-only ambient runtime state.',
+      'Lists stored config or derived projections across one namespace or the full effective graph, with optional prefix filtering. Derived values are annotated with `(derived)`. Custom data namespaces such as flags are supported, and process exposes server-only ambient runtime state.',
     options: [
       {
         flag: '--namespace <name>',
@@ -469,7 +498,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Inspect the winning value and provenance for a key.',
     usage: 'cnos inspect <key> [global-options]',
     description:
-      'Shows the resolved value, namespace, active profile, workspace context, and the loader/origin that won precedence.',
+      'Shows the resolved value, namespace, active profile, workspace context, loader/origin, and derived-expression metadata when the key is computed from other CNOS keys or runtime namespaces.',
     arguments: [
       {
         name: 'key',

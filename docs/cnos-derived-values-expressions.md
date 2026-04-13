@@ -1,36 +1,13 @@
 # CNOS — Derived Values and Safe Runtime Expressions
 
-**Status:** Implementation-ready.
-**Scope:** `cnos` repo. Adds derived value support to the config authoring model, runtime, CLI, and projection pipeline.
+**Status:** Implementation-ready. Final.
+**Scope:** `cnos` repo.
 
 ---
 
 ## 1. What This Adds
 
-Authors can define config values that are computed from other config values, without writing application code.
-
-```yaml
-# Before: developer computes origin in app code
-# const origin = `${config.protocol}://${config.host}:${config.port}`
-
-# After: CNOS computes it from config
-app:
-  protocol: https
-  host: api.kitsy.ai
-  port: 443
-  origin:
-    $derive: "${value.app.protocol}://${value.app.host}:${value.app.port}"
-```
-
-The result: `cnos.value("app.origin")` returns `"https://api.kitsy.ai:443"`. The derivation is evaluated at read time against the resolved graph. It works in CLI, runtime, build outputs, and projections.
-
----
-
-## 2. Authoring Model
-
-### 2.1 Two syntaxes for `$derive`
-
-**Template shorthand** — for simple interpolation (80% of cases):
+Authors can define config values computed from other config values and live runtime inputs, without writing application code.
 
 ```yaml
 app:
@@ -38,214 +15,23 @@ app:
     $derive: "${value.app.protocol}://${value.app.host}:${value.app.port}"
 ```
 
-Template strings use `${ref}` syntax. The parser converts them to `concat(...)` calls internally. No conditionals, no logic — just interpolation.
-
-**Expression syntax** — for conditionals and logic (20% of cases):
-
-```yaml
-app:
-  origin:
-    $derive:
-      expr: "concat(value.app.protocol, '://', value.app.host, when(value.app.port, concat(':', value.app.port), ''))"
-
-  display_name:
-    $derive:
-      expr: "coalesce(value.app.custom_name, value.app.name, 'Unnamed App')"
-
-  debug_enabled:
-    $derive:
-      expr: "eq(value.app.env, 'development')"
-```
-
-### 2.2 Detection
-
-A value is a derivation when its YAML value is an object with a `$derive` key:
-
-```ts
-function isDerivedValue(value: unknown): value is DerivedValue {
-  return typeof value === "object" && value !== null && "$derive" in value;
-}
-
-interface DerivedValue {
-  $derive: string | { expr: string };
-}
-```
-
-If `$derive` is a string, it's a template. If `$derive` is an object with `expr`, it's an expression.
-
-### 2.3 Authoring rules
-
-| Rule | Enforcement |
-|------|-------------|
-| Derived values can live in writable data namespaces only (`value.*`, custom data namespaces) | Write-time validation |
-| Cannot author under `public.*` (public is a projection) | Write-time rejection |
-| Cannot author under `meta.*` (meta is system-populated) | Write-time rejection |
-| Cannot author under `secret.*` (secrets come from vaults) | Write-time rejection |
-| Expressions may reference: `value.*`, custom shareable namespaces, `meta.*`, `process.*` | Parse-time validation |
-| Expressions may NOT reference: `secret.*`, `public.*` | Parse-time rejection |
+`cnos.value("app.origin")` returns `"https://api.kitsy.ai:443"`, evaluated at read time.
 
 ---
 
-## 3. Expression Language
+## 2. Runtime Namespaces
 
-### 3.1 Grammar
+### 2.1 The concept
 
-```
-expression   := literal | ref | call
-literal      := string | number | boolean | null
-string       := "'" chars "'"
-number       := digit+ ("." digit+)?
-boolean      := "true" | "false"
-null         := "null"
-ref          := namespace "." path    // value.app.host, process.env.PORT, meta.profile
-call         := name "(" args ")"
-args         := expression ("," expression)*
-name         := "concat" | "coalesce" | "when" | "exists" | "eq" | "ne"
-```
+CNOS has two categories of namespaces:
 
-### 3.2 Built-in functions
+**Config namespaces** — values come from config files, env files, CLI args, vaults. They are resolved once during `createCnos()` / `cnos.ready()` and do not change between reads. Examples: `value.*`, `secret.*`, `meta.*`.
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `concat(a, b, ...)` | `(...args: any[]) → string` | Concatenate all arguments as strings. Nulls become empty string. |
-| `coalesce(a, b, ...)` | `(...args: any[]) → any` | Return first non-null, non-undefined argument. |
-| `when(condition, then, else)` | `(cond: any, then: any, else: any) → any` | If `condition` is truthy, return `then`, else return `else`. |
-| `exists(ref)` | `(ref: any) → boolean` | True if the referenced key exists and is not null/undefined. |
-| `eq(a, b)` | `(a: any, b: any) → boolean` | Strict equality (`===`). |
-| `ne(a, b)` | `(a: any, b: any) → boolean` | Strict inequality (`!==`). |
+**Runtime namespaces** — values come from the live execution context. They are provided by the host process, can change between reads, and are never cached. Examples: `process.*`, and any user-defined runtime namespace.
 
-### 3.3 Template shorthand parsing
+### 2.2 Built-in runtime namespace: `process`
 
-Template strings are syntactic sugar over `concat`:
-
-```
-"${value.app.protocol}://${value.app.host}:${value.app.port}"
-```
-
-Parses to:
-
-```
-concat(value.app.protocol, '://', value.app.host, ':', value.app.port)
-```
-
-Rules:
-- `${...}` contains a single ref (no nested expressions inside templates).
-- Everything outside `${...}` is a string literal.
-- Templates cannot contain function calls — use `expr` syntax for that.
-- Empty template `""` is a literal empty string, not a derivation.
-
-### 3.4 What is NOT in the expression language
-
-- No arithmetic (`+`, `-`, `*`, `/`)
-- No comparison operators (`>`, `<`, `>=`, `<=`)
-- No logical operators (`&&`, `||`, `!`)
-- No string methods (`.length`, `.toUpperCase()`)
-- No array operations
-- No arbitrary JavaScript
-- No `import`, `require`, `eval`, `Function`
-- No network/filesystem/time/random access
-
-This is intentional. The expression language is for value composition and conditional selection, not for computation. If you need computation, do it in application code and store the result as a regular CNOS value.
-
----
-
-## 4. Evaluation Model
-
-### 4.1 When evaluation happens
-
-Derived values are evaluated **at read time**, not at resolution time. This means:
-
-- The resolved graph stores `DerivedValue` objects, not concrete values.
-- When `cnos.read("value.app.origin")` is called, the evaluator runs the expression against the current graph snapshot.
-- If the expression references `process.env.PORT`, the value changes when `PORT` changes — it's live.
-
-### 4.2 Dependency resolution
-
-Derived values can depend on other derived values:
-
-```yaml
-app:
-  base_url:
-    $derive: "${value.app.protocol}://${value.app.host}"
-  api_url:
-    $derive: "${value.app.base_url}/api/v1"
-```
-
-The evaluator resolves dependencies in topological order:
-
-```
-1. Extract dependency graph from all derivation expressions.
-2. Topological sort.
-3. Detect cycles BEFORE any evaluation.
-4. If cycle found: throw CnosDerivedCycleError with the full dependency chain.
-5. Evaluate in topological order: leaves first, then dependents.
-6. Cache resolved values for the current read pass.
-```
-
-### 4.3 Evaluation algorithm
-
-```ts
-function evaluateDerived(
-  key: string,
-  derivation: DerivedValue,
-  graph: ResolvedGraph,
-  evaluationCache: Map<string, unknown>,
-  evaluationStack: Set<string>,  // for cycle detection
-): unknown {
-  // Cycle detection
-  if (evaluationStack.has(key)) {
-    const chain = [...evaluationStack, key].join(" → ");
-    throw new CnosDerivedCycleError(`Derivation cycle detected: ${chain}`);
-  }
-  evaluationStack.add(key);
-
-  // Check cache (already evaluated in this read pass)
-  if (evaluationCache.has(key)) {
-    evaluationStack.delete(key);
-    return evaluationCache.get(key);
-  }
-
-  // Parse expression
-  const ast = parseExpression(derivation);
-
-  // Evaluate
-  const value = evalAST(ast, {
-    resolve: (ref: string) => {
-      // ref is like "value.app.host" or "process.env.PORT"
-      if (ref.startsWith("process.")) {
-        return resolveProcessRef(ref);
-      }
-      const entry = graph.entries.get(ref);
-      if (!entry) return undefined;
-      if (isDerivedValue(entry.value)) {
-        // Recursively evaluate dependent derivation
-        return evaluateDerived(ref, entry.value, graph, evaluationCache, evaluationStack);
-      }
-      return entry.value;
-    },
-  });
-
-  evaluationCache.set(key, value);
-  evaluationStack.delete(key);
-  return value;
-}
-```
-
-### 4.4 Determinism rules
-
-- No side effects.
-- No network, filesystem, or module access.
-- Repeated reads of a derived value return the same result if inputs haven't changed.
-- `process.*` references are the only source of non-determinism — they read from the live process environment.
-- The expression language has no random, time, or counter functions.
-
----
-
-## 5. `process.*` Namespace Rules
-
-`process.*` is a read-only virtual namespace that exposes runtime process state. In v1, it exposes only `process.env.*`.
-
-### 5.1 Reference syntax
+Always available in server context. Exposes `process.env.*`.
 
 ```yaml
 app:
@@ -254,32 +40,242 @@ app:
       expr: "coalesce(process.env.PORT, value.app.default_port, '3000')"
 ```
 
-`process.env.PORT` resolves to `process.env["PORT"]` at read time.
+### 2.3 User-defined runtime namespaces
 
-### 5.2 Constraints
+Declared in the manifest under `namespaces.runtime`:
 
-| Rule | Rationale |
-|------|-----------|
-| `process.*` refs allowed in server-context derivations only | Browser has no `process.env` |
-| A derived key that references `process.*` **cannot** be promoted to public | Browser projection must be concrete at build time |
-| A derived key that references `process.*` **cannot** appear in browser projection | Same reason |
-| `cnos build server` preserves `process.*` derivations as formulas in the projection | Server projection evaluates at runtime |
-| `cnos build browser` / `cnos build public` resolve all derivations to concrete values — `process.*` derivations that couldn't be resolved at build time cause a build error | Build must be deterministic |
-| `cnos validate` skips type-checking for `process.*`-dependent derivations (value unknown until runtime) | Can't validate what doesn't exist yet |
-| `cnos inspect` shows "depends on runtime: process.env.PORT" for such keys | Developer visibility |
+```yaml
+namespaces:
+  runtime:
+    request:
+      description: "HTTP request context"
+      server_only: true
+    session:
+      description: "User session context"
+      server_only: true
+    flags:
+      description: "Live feature flag evaluations"
+      server_only: false    # available in browser too (injected by app framework)
+```
 
-### 5.3 Detection
-
-A derivation is `process.*`-dependent if its expression AST (recursively, through dependent derivations) references any `process.*` key.
+Runtime namespaces are never populated from config files. They are populated by the host application via a runtime provider API:
 
 ```ts
-function isProcessDependent(derivation: DerivedValue, graph: ResolvedGraph): boolean {
-  const deps = extractAllRefs(derivation);
-  for (const dep of deps) {
-    if (dep.startsWith("process.")) return true;
-    const entry = graph.entries.get(dep);
+const cnos = await createCnos();
+
+// Register runtime namespace providers
+cnos.registerRuntimeProvider("request", (key: string) => {
+  // Called on every read of a request.*-dependent derivation
+  return currentRequest?.headers?.[key];
+});
+
+cnos.registerRuntimeProvider("session", (key: string) => {
+  return currentSession?.get(key);
+});
+
+// Now derivations that reference request.* or session.* work
+cnos.value("app.greeting");
+// $derive: "concat('Hello ', coalesce(session.user_name, 'Guest'))"
+// → "Hello Prashant"
+```
+
+### 2.4 `process` is just the default runtime namespace
+
+`process` is pre-registered with a built-in provider that reads `process.env`. It is not special-cased in the evaluator — it follows the same runtime namespace contract as user-defined ones.
+
+```ts
+// This is what CNOS does internally at startup:
+cnos.registerRuntimeProvider("process", (key: string) => {
+  // key is "env.PORT" when the expression says process.env.PORT
+  const segments = key.split(".");
+  if (segments[0] === "env") {
+    return process.env[segments.slice(1).join(".")];
+  }
+  return undefined;
+});
+```
+
+### 2.5 Properties of runtime namespaces
+
+| Property | Config namespaces | Runtime namespaces |
+|----------|------------------|-------------------|
+| Source | Files, env files, vaults, CLI | Host process / app framework |
+| Populated by | CNOS loaders | `registerRuntimeProvider()` |
+| Resolved when | `createCnos()` / `cnos.ready()` | Every read (live) |
+| Cacheable | Yes (within resolution pass) | **No — never cached** |
+| Available at build time | Yes | Only if provider is registered during build |
+| Writable via CLI | Yes (`cnos value set`) | No (read-only) |
+| Promotable to browser | Yes | Only if `server_only: false` in declaration |
+
+---
+
+## 3. Authoring Model
+
+### 3.1 Two syntaxes
+
+**Template shorthand** (80% of cases):
+
+```yaml
+app:
+  origin:
+    $derive: "${value.app.protocol}://${value.app.host}:${value.app.port}"
+```
+
+**Expression syntax** (conditionals, logic):
+
+```yaml
+app:
+  origin:
+    $derive:
+      expr: "concat(value.app.protocol, '://', value.app.host, when(value.app.port, concat(':', value.app.port), ''))"
+```
+
+### 3.2 Detection
+
+```ts
+interface DerivedValue {
+  $derive: string | { expr: string };
+}
+```
+
+String → template. Object with `expr` → expression.
+
+### 3.3 Authoring rules
+
+| Rule | Detail |
+|------|--------|
+| Allowed target namespaces | `value.*`, custom writable data namespaces |
+| Forbidden target namespaces | `public.*`, `meta.*`, `secret.*`, any runtime namespace |
+| Allowed references in expressions | `value.*`, `meta.*`, custom shareable data namespaces, any declared runtime namespace |
+| Forbidden references | `secret.*`, `public.*` |
+
+---
+
+## 4. Expression Language
+
+### 4.1 Built-in functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `concat(a, b, ...)` | `(...args) → string` | Concatenate. Nulls → empty string. |
+| `coalesce(a, b, ...)` | `(...args) → any` | First non-null, non-undefined. |
+| `when(cond, then, else)` | `(any, any, any) → any` | Conditional. |
+| `exists(ref)` | `(any) → boolean` | True if non-null/undefined. |
+| `eq(a, b)` | `(any, any) → boolean` | Strict equality. |
+| `ne(a, b)` | `(any, any) → boolean` | Strict inequality. |
+
+### 4.2 Template parsing
+
+`"${value.app.host}:${value.app.port}"` → `concat(value.app.host, ':', value.app.port)`
+
+Rules: `${...}` contains a single ref. No nested expressions. No function calls inside templates.
+
+### 4.3 What is NOT in the language
+
+No arithmetic, no comparison operators, no logical operators, no string methods, no arrays, no JavaScript, no import/require/eval, no network/filesystem/time/random.
+
+---
+
+## 5. Evaluation Model and Caching
+
+### 5.1 The caching rule
+
+This is the single source of truth for caching behavior. There is no other caching rule anywhere in the system.
+
+| Derivation type | How to detect | Caching behavior |
+|-----------------|---------------|-----------------|
+| **Config-only** — all dependencies are config namespaces (`value.*`, `meta.*`, custom data) | No runtime namespace refs in dependency tree | **Cached once per resolution pass.** Same result on every read until the next `createCnos()` or `cnos.ready()`. |
+| **Runtime-dependent** — any dependency (direct or transitive) is a runtime namespace (`process.*`, `request.*`, `session.*`, or any user-defined runtime namespace) | At least one runtime namespace ref in dependency tree | **Never cached. Evaluated fresh on every read.** Result may differ between consecutive reads. |
+
+### 5.2 Why this rule
+
+Config-only derivations are deterministic — their inputs don't change between reads. Caching them avoids redundant computation (especially for derivations that other derivations depend on).
+
+Runtime-dependent derivations are non-deterministic — `process.env.PORT` can change, `request.headers.host` changes per request, `session.user_name` changes per user. Caching would serve stale data. They must always be live.
+
+### 5.3 Evaluation algorithm
+
+```ts
+function evaluateDerived(
+  key: string,
+  derivation: DerivedValue,
+  graph: ResolvedGraph,
+  runtimeProviders: Map<string, RuntimeProvider>,
+  evaluationCache: Map<string, unknown>,
+  evaluationStack: Set<string>,
+): unknown {
+  // Cycle detection
+  if (evaluationStack.has(key)) {
+    const chain = [...evaluationStack, key].join(" → ");
+    throw new CnosDerivedCycleError(`Derivation cycle: ${chain}`);
+  }
+  evaluationStack.add(key);
+
+  // Cache check — ONLY for non-runtime-dependent derivations
+  const parsed = parseDerivation(derivation);
+  if (!parsed.isRuntimeDependent && evaluationCache.has(key)) {
+    evaluationStack.delete(key);
+    return evaluationCache.get(key);
+  }
+
+  // Evaluate
+  const value = evalAST(parsed.ast, {
+    resolve: (ref: string) => {
+      const nsRoot = ref.split(".")[0];
+
+      // Runtime namespace → call provider, never cache
+      if (runtimeProviders.has(nsRoot)) {
+        const provider = runtimeProviders.get(nsRoot)!;
+        const subKey = ref.slice(nsRoot.length + 1);
+        return provider(subKey);
+      }
+
+      // Config namespace → read from graph
+      const entry = graph.entries.get(ref);
+      if (!entry) return undefined;
+      if (isDerivedValue(entry.value)) {
+        return evaluateDerived(ref, entry.value, graph, runtimeProviders, evaluationCache, evaluationStack);
+      }
+      return entry.value;
+    },
+  });
+
+  // Cache only if config-only
+  if (!parsed.isRuntimeDependent) {
+    evaluationCache.set(key, value);
+  }
+
+  evaluationStack.delete(key);
+  return value;
+}
+```
+
+### 5.4 Dependency resolution order
+
+Before any reads, during `createCnos()`:
+
+1. Extract dependency graph from all derivation expressions in the resolved graph.
+2. Topological sort.
+3. Detect cycles. If found → throw `CnosDerivedCycleError` with full chain.
+4. Pre-evaluate all config-only derivations and cache results.
+5. Runtime-dependent derivations are left unevaluated until first read.
+
+### 5.5 Runtime-dependent detection
+
+```ts
+function isRuntimeDependent(
+  derivation: ParsedDerivation,
+  graph: ResolvedGraph,
+  runtimeNamespaces: Set<string>,
+): boolean {
+  for (const ref of derivation.refs) {
+    const nsRoot = ref.split(".")[0];
+    if (runtimeNamespaces.has(nsRoot)) return true;
+    // Check transitive dependencies
+    const entry = graph.entries.get(ref);
     if (entry && isDerivedValue(entry.value)) {
-      if (isProcessDependent(entry.value, graph)) return true;
+      const depParsed = parseDerivation(entry.value);
+      if (isRuntimeDependent(depParsed, graph, runtimeNamespaces)) return true;
     }
   }
   return false;
@@ -288,39 +284,83 @@ function isProcessDependent(derivation: DerivedValue, graph: ResolvedGraph): boo
 
 ---
 
-## 6. Projection Behavior
+## 6. Runtime Provider API
 
-### 6.1 Browser / public projections
+### 6.1 Interface
 
-**Always emit concrete values.** The browser runtime receives resolved values, never formulas.
+```ts
+/**
+ * A function that resolves a key within a runtime namespace.
+ * Called on every read of a runtime-dependent derivation.
+ * Must be synchronous (derivation evaluation is synchronous).
+ */
+type RuntimeProvider = (key: string) => unknown;
 
-```yaml
-# Config
-app:
-  origin:
-    $derive: "${value.app.protocol}://${value.app.host}"
-  protocol: https
-  host: api.kitsy.ai
+interface CnosRuntime {
+  // ... existing methods ...
 
-# public.promote includes value.app.origin
+  /**
+   * Register a provider for a runtime namespace.
+   * The namespace must be declared in manifest under namespaces.runtime.
+   * "process" is pre-registered and cannot be overridden.
+   */
+  registerRuntimeProvider(namespace: string, provider: RuntimeProvider): void;
+}
 ```
 
-Browser projection output:
-```json
-{ "public.app.origin": "https://api.kitsy.ai" }
+### 6.2 Usage example
+
+```ts
+import { createCnos } from "@kitsy/cnos";
+import { getCurrentRequest } from "./http-context";
+
+const cnos = await createCnos();
+
+// Register request context (called per-request in middleware)
+cnos.registerRuntimeProvider("request", (key) => {
+  const req = getCurrentRequest();
+  if (key.startsWith("headers.")) return req?.headers?.[key.slice(8)];
+  if (key === "method") return req?.method;
+  if (key === "url") return req?.url;
+  return undefined;
+});
+
+// Now this derivation works:
+// value.app.current_host:
+//   $derive:
+//     expr: "coalesce(request.headers.host, value.app.default_host)"
+const host = cnos.value("app.current_host"); // live per-request
 ```
 
-If a promoted derived key depends on `process.*`, `cnos build browser` / `cnos build public` throws:
+### 6.3 Constraints
 
+- Runtime providers must be **synchronous**. No async. Derivation evaluation is synchronous because `cnos.read()` / `cnos.value()` are synchronous APIs.
+- Providers must be **idempotent within a single call** — calling the provider twice for the same key in the same derivation evaluation must return the same value.
+- Providers must not have side effects.
+- Unregistered runtime namespace refs → `undefined` (not an error, because the provider might be registered later in the app lifecycle).
+
+---
+
+## 7. Projection Behavior
+
+### 7.1 Browser / public projections
+
+**Always emit concrete values.** Never formulas.
+
+If a promoted derived key is runtime-dependent:
+- If the runtime namespace has `server_only: true` → **build error**.
+- If the runtime namespace has `server_only: false` AND a provider is registered during build → **resolve and emit concrete value**.
+- If the runtime namespace has `server_only: false` BUT no provider during build → **build error**.
+
+```bash
+cnos build browser
+# Error: Cannot build browser projection: value.app.greeting depends on
+# session.user_name (runtime namespace "session" is server_only).
 ```
-Error: Cannot build browser projection: value.app.port depends on process.env.PORT
-which is not available at build time. Remove the process.* dependency or remove
-this key from public.promote.
-```
 
-### 6.2 Server projection
+### 7.2 Server projection
 
-Server projections carry derivation formulas for `process.*`-dependent keys. All other derived values are resolved to concrete values at build time.
+Server projections partition derived values:
 
 ```ts
 interface ServerProjection {
@@ -330,176 +370,118 @@ interface ServerProjection {
   resolvedAt: string;
   configHash: string;
 
-  values: Record<string, unknown>;       // concrete resolved values (including resolved derivations)
-  derived: Record<string, DerivedFormula>; // live derivations (process.*-dependent only)
+  values: Record<string, unknown>;          // concrete values (including resolved config-only derivations)
+  derived: Record<string, DerivedFormula>;   // live derivations (runtime-dependent only)
   secretRefs: Record<string, SecretRef>;
   publicKeys: string[];
+
+  runtimeNamespaces: string[];              // which runtime namespaces are needed by derived formulas
 
   meta: { workspace: string; profile: string; cnos_version: string };
 }
 
 interface DerivedFormula {
-  expr: string;               // the expression
-  deps: string[];             // dependency keys
-  processRefs: string[];      // process.* refs used
+  expr: string;
+  deps: string[];              // config keys this depends on (already in values)
+  runtimeRefs: string[];       // runtime namespace refs (e.g., ["process.env.PORT", "request.headers.host"])
 }
 ```
 
-At server startup, the runtime:
-1. Loads the projection.
-2. Concrete `values` are immediately readable.
-3. `derived` entries are evaluated against the projection's `values` + live `process.env`.
-4. Results are cached for the lifetime of the runtime instance.
+At server startup:
+1. Concrete `values` → immediately readable.
+2. `derived` formulas → evaluated on every read against `values` + registered runtime providers.
+3. The runtime checks that all namespaces in `runtimeNamespaces` have registered providers. Missing provider → warning (not error, because it may be registered later).
 
-### 6.3 Env projection
+### 7.3 Env projection
 
-`cnos build env` resolves all derivations to concrete values. If a derived key depends on `process.*` and the referenced env var exists at build time, it resolves. If not, the key is skipped with a warning:
+All derivations resolved to concrete values at build time. Runtime-dependent derivations with unresolvable refs → skipped with warning.
+
+---
+
+## 8. Promotion Safety
+
+Transitive dependency check applies to all namespaces:
 
 ```
-Warning: Skipping value.app.port in env export — depends on process.env.PORT
-which is not set. Set PORT in your environment or use cnos run to inject at runtime.
+For each dependency of a promoted derived value:
+  If dependency namespace is secret.* → REJECT
+  If dependency namespace is sensitive custom → REJECT
+  If dependency is a runtime namespace with server_only: true → REJECT for browser/public
+  If dependency is another derived value → recursively check ITS dependencies
 ```
 
 ---
 
-## 7. CLI Surface
+## 9. CLI Surface
 
-### 7.1 Writing derived values
+### 9.1 Writing
 
 ```bash
-# Template shorthand
+# Template
 cnos value set app.origin --derive '${value.app.protocol}://${value.app.host}'
 
-# Expression syntax
-cnos value set app.display_name --derive --expr "coalesce(value.app.custom_name, value.app.name, 'Unnamed')"
+# Expression
+cnos value set app.display --derive --expr "coalesce(value.app.custom_name, value.app.name, 'Unnamed')"
 
 # Normal value (unchanged)
 cnos value set app.host api.kitsy.ai
 ```
 
-`--derive` triggers derivation mode. Without it, the value is stored as a literal.
+### 9.2 Write-time validation
 
-`--derive '<template>'` stores a template derivation.
-`--derive --expr '<expression>'` stores an expression derivation.
+1. Syntax check → invalid → error with position.
+2. Namespace check → `secret.*` or `public.*` ref → error.
+3. Target namespace check → `meta.*`, `public.*`, runtime namespace → error.
 
-### 7.2 Write-time validation
-
-When `--derive` is used, CNOS validates before writing:
-
-1. **Syntax check:** Parse the expression/template. Invalid syntax → error with position indicator.
-2. **Namespace check:** All referenced namespaces must be allowed. `secret.*` or `public.*` ref → error.
-3. **Namespace writability:** Target must be a writable data namespace. `meta.*`, `public.*` → error.
-
-```bash
-cnos value set app.leaked --derive '${secret.db.password}'
-# Error: Derived expressions cannot reference secret.* keys.
-
-cnos value set app.x --derive '${invalid syntax'
-# Error: Invalid derivation template: unclosed ${...} at position 24.
-```
-
-### 7.3 Reading derived values
-
-All read commands resolve derivations transparently:
+### 9.3 Reading
 
 ```bash
 cnos read value.app.origin
 # https://api.kitsy.ai:443
 
-cnos value get app.origin
-# https://api.kitsy.ai:443
-
 cnos list values
-# app.host         = api.kitsy.ai
-# app.port         = 443
-# app.protocol     = https
-# app.origin       = https://api.kitsy.ai:443  (derived)
+# app.host     = api.kitsy.ai
+# app.origin   = https://api.kitsy.ai:443  (derived)
 ```
 
-The `(derived)` annotation in `list` output tells the developer this value is computed.
-
-### 7.4 Inspecting derived values
+### 9.4 Inspect
 
 ```bash
 cnos inspect value.app.origin
 # Key:        value.app.origin
 # Value:      https://api.kitsy.ai:443
-# Namespace:  value
 # Type:       derived
 # Expression: ${value.app.protocol}://${value.app.host}:${value.app.port}
-# Depends on:
-#   value.app.protocol = "https"     (from: values/local/app.yml)
-#   value.app.host     = "api.kitsy.ai" (from: values/local/app.yml)
-#   value.app.port     = 443        (from: values/local/app.yml)
-# Process-dependent: no
-```
+# Dependencies:
+#   value.app.protocol = "https"
+#   value.app.host     = "api.kitsy.ai"
+#   value.app.port     = 443
+# Runtime-dependent: no
 
-For `process.*`-dependent derivations:
-
-```bash
 cnos inspect value.app.effective_port
 # Key:        value.app.effective_port
-# Value:      8080  (current process.env.PORT)
+# Value:      8080  (live)
 # Type:       derived
 # Expression: coalesce(process.env.PORT, value.app.default_port, '3000')
-# Depends on:
-#   process.env.PORT       = "8080"  (live runtime)
-#   value.app.default_port = 3000    (from: values/local/app.yml)
-# Process-dependent: yes
-# ⚠ Cannot be promoted to public/browser
+# Dependencies:
+#   process.env.PORT       = "8080"  (runtime: process)
+#   value.app.default_port = 3000
+# Runtime-dependent: yes (process)
+# ⚠ Cannot be promoted to browser/public
 ```
 
 ---
 
-## 8. Schema Validation
+## 10. Schema Validation
 
-Schema validation runs against the **resolved value** of a derivation, not the raw `$derive` object.
+Validates the **resolved value**, not the `$derive` object.
 
-```yaml
-# Schema
-schema:
-  value.app.origin:
-    type: string
-    required: true
-    pattern: "^https?://"
-```
-
-At validation time:
-1. Evaluate the derivation.
-2. Type-check the result against the schema rule.
-3. If the derivation depends on `process.*` and the process ref isn't available → skip validation for this key with a warning.
+- Config-only derivation → resolve, then validate type/required/enum/pattern.
+- Runtime-dependent derivation → skip validation with warning: "Cannot validate value.app.effective_port — depends on runtime namespace process."
 
 ---
 
-## 9. Promotion Safety
-
-Derived values follow the same promotion rules as regular values, with additional transitive checks.
-
-### 9.1 Transitive dependency check for promotion
-
-When a derived key is in `public.promote`, CNOS checks ALL dependencies transitively:
-
-```
-For each dependency of the derived value:
-  If dependency namespace is secret.* → REJECT
-  If dependency namespace is sensitive custom → REJECT
-  If dependency is process.* → REJECT (browser has no process.env)
-  If dependency is another derived value → recursively check ITS dependencies
-```
-
-```bash
-# This is OK: all deps are value.*
-cnos promote value.app.origin --to public
-
-# This fails: depends on process.*
-cnos promote value.app.effective_port --to public
-# Error: Cannot promote value.app.effective_port — depends on process.env.PORT
-# (process.* is not available in browser context)
-```
-
----
-
-## 10. Internal Types
+## 11. Internal Types
 
 ```ts
 interface DerivedValue {
@@ -508,160 +490,161 @@ interface DerivedValue {
 
 interface ParsedDerivation {
   type: "template" | "expression";
-  raw: string;                    // original string
-  ast: ExprNode;                  // parsed AST
-  refs: string[];                 // all referenced keys (extracted from AST)
-  processRefs: string[];          // subset that are process.* refs
-  isProcessDependent: boolean;    // true if any ref is process.*
+  raw: string;
+  ast: ExprNode;
+  refs: string[];                    // all referenced keys
+  runtimeRefs: string[];             // subset from runtime namespaces
+  isRuntimeDependent: boolean;       // true if runtimeRefs.length > 0
 }
 
-// AST nodes
 type ExprNode =
   | { type: "literal"; value: string | number | boolean | null }
-  | { type: "ref"; path: string }      // "value.app.host"
+  | { type: "ref"; path: string }
   | { type: "call"; name: string; args: ExprNode[] };
 ```
 
 ---
 
-## 11. Module Layout
+## 12. Module Layout
 
 ```
 packages/cnos/src/
   derive/
     types.ts                    # DerivedValue, ParsedDerivation, ExprNode
-    parser.ts                   # expression string → AST
-    templateParser.ts           # template string → AST (${...} → concat)
-    evaluator.ts                # AST + graph snapshot → resolved value
-    depGraph.ts                 # extract dependency graph, topological sort, cycle detection
-    builtins.ts                 # concat, coalesce, when, exists, eq, ne implementations
+    parser.ts                   # expression → AST
+    templateParser.ts           # template → AST
+    evaluator.ts                # AST + graph + providers → value
+    depGraph.ts                 # dependency extraction, topo sort, cycle detection
+    builtins.ts                 # concat, coalesce, when, exists, eq, ne
     validate.ts                 # namespace checks, syntax validation
-    processRefs.ts              # detect and resolve process.* references
+  runtime/
+    runtimeProviders.ts         # provider registry, process.* default provider
   orchestrator/
-    runtime.ts                  # UPDATED: intercept derived values in read/require/readOr
+    runtime.ts                  # UPDATED: intercept derived values, call evaluator
   projection/
-    serverProjection.ts         # UPDATED: partition derived into concrete vs live formulas
+    serverProjection.ts         # UPDATED: partition config-only vs runtime-dependent
   exporters/
-    toEnv.ts                    # UPDATED: resolve derivations before export
-    toPublicEnv.ts              # UPDATED: resolve derivations, reject process.*-dependent
+    toEnv.ts                    # UPDATED: resolve derivations
+    toPublicEnv.ts              # UPDATED: resolve, reject runtime-dependent
 
 packages/cli/src/
   commands/
     value.ts                    # UPDATED: --derive flag
-    inspect.ts                  # UPDATED: derived metadata in output
+    inspect.ts                  # UPDATED: derived metadata
     list.ts                     # UPDATED: (derived) annotation
 ```
 
 ---
 
-## 12. Test Plan
+## 13. Test Plan
 
-### Authoring
+### Authoring (DRV-A)
 
-- [ ] DRV-A-1: Template `$derive: "${value.x}"` stored as structured YAML.
-- [ ] DRV-A-2: Expression `$derive: { expr: "..." }` stored correctly.
-- [ ] DRV-A-3: `cnos value set x --derive '<template>'` writes correct YAML.
-- [ ] DRV-A-4: `cnos value set x --derive --expr '<expr>'` writes correct YAML.
+- [ ] DRV-A-1: Template stored as structured YAML.
+- [ ] DRV-A-2: Expression stored correctly.
+- [ ] DRV-A-3: CLI `--derive '<template>'` writes correct YAML.
+- [ ] DRV-A-4: CLI `--derive --expr '<expr>'` writes correct YAML.
 - [ ] DRV-A-5: Derivation under `secret.*` → rejected.
 - [ ] DRV-A-6: Derivation under `meta.*` → rejected.
 - [ ] DRV-A-7: Derivation under `public.*` → rejected.
-- [ ] DRV-A-8: Derivation referencing `secret.*` → rejected at write time.
-- [ ] DRV-A-9: Derivation referencing `public.*` → rejected.
-- [ ] DRV-A-10: Invalid syntax → rejected with position info.
+- [ ] DRV-A-8: Derivation under runtime namespace → rejected.
+- [ ] DRV-A-9: Derivation referencing `secret.*` → rejected.
+- [ ] DRV-A-10: Derivation referencing `public.*` → rejected.
+- [ ] DRV-A-11: Invalid syntax → rejected with position info.
 
-### Template parsing
+### Template parsing (DRV-T)
 
-- [ ] DRV-T-1: `"${value.x}"` → `concat(value.x)` → value of x.
-- [ ] DRV-T-2: `"hello ${value.name}"` → `concat('hello ', value.name)`.
-- [ ] DRV-T-3: `"${value.a}://${value.b}:${value.c}"` → correct concat.
-- [ ] DRV-T-4: No `${...}` → treated as literal string, NOT a derivation.
+- [ ] DRV-T-1: `"${value.x}"` → value of x.
+- [ ] DRV-T-2: `"hello ${value.name}"` → `"hello <name>"`.
+- [ ] DRV-T-3: `"${value.a}://${value.b}:${value.c}"` → correct.
+- [ ] DRV-T-4: No `${...}` → literal string, not derivation.
 - [ ] DRV-T-5: Unclosed `${...` → parse error.
-- [ ] DRV-T-6: Empty template `""` → literal empty string.
-- [ ] DRV-T-7: Nested `${...}` not allowed → parse error.
+- [ ] DRV-T-6: Empty template → literal empty string.
+- [ ] DRV-T-7: Nested `${...}` → parse error.
 
-### Expression parsing
+### Expression parsing (DRV-E)
 
 - [ ] DRV-E-1: `concat('a', 'b')` → `"ab"`.
-- [ ] DRV-E-2: `coalesce(null, undefined, 'fallback')` → `"fallback"`.
+- [ ] DRV-E-2: `coalesce(null, 'fallback')` → `"fallback"`.
 - [ ] DRV-E-3: `coalesce(value.x, 'default')` where x exists → x's value.
-- [ ] DRV-E-4: `coalesce(value.x, 'default')` where x is undefined → `"default"`.
+- [ ] DRV-E-4: `coalesce(value.x, 'default')` where x undefined → `"default"`.
 - [ ] DRV-E-5: `when(true, 'yes', 'no')` → `"yes"`.
 - [ ] DRV-E-6: `when(false, 'yes', 'no')` → `"no"`.
-- [ ] DRV-E-7: `when(value.x, 'yes', 'no')` where x is truthy → `"yes"`.
-- [ ] DRV-E-8: `when(value.x, 'yes', 'no')` where x is falsy → `"no"`.
-- [ ] DRV-E-9: `exists(value.x)` where x exists → `true`.
-- [ ] DRV-E-10: `exists(value.x)` where x doesn't exist → `false`.
-- [ ] DRV-E-11: `eq('a', 'a')` → `true`.
-- [ ] DRV-E-12: `eq('a', 'b')` → `false`.
-- [ ] DRV-E-13: `ne('a', 'b')` → `true`.
-- [ ] DRV-E-14: Nested calls: `concat('x', when(true, 'y', 'z'))` → `"xy"`.
-- [ ] DRV-E-15: String literal with single quotes: `'hello world'`.
-- [ ] DRV-E-16: Number literal: `42` → `42`.
-- [ ] DRV-E-17: Boolean literal: `true` → `true`.
-- [ ] DRV-E-18: Null literal: `null` → `null`.
+- [ ] DRV-E-7: `exists(value.x)` where x exists → `true`.
+- [ ] DRV-E-8: `exists(value.x)` where x missing → `false`.
+- [ ] DRV-E-9: `eq('a', 'a')` → `true`.
+- [ ] DRV-E-10: `ne('a', 'b')` → `true`.
+- [ ] DRV-E-11: Nested: `concat('x', when(true, 'y', 'z'))` → `"xy"`.
+- [ ] DRV-E-12: Literals: string, number, boolean, null all parse.
 
-### Evaluation
+### Evaluation + Caching (DRV-V)
 
-- [ ] DRV-V-1: Simple derived value resolves correctly at read time.
-- [ ] DRV-V-2: Derived value depending on another derived value resolves in correct order.
-- [ ] DRV-V-3: Three-level derivation chain resolves correctly.
-- [ ] DRV-V-4: Cycle (a → b → a) detected → `CnosDerivedCycleError` with chain.
-- [ ] DRV-V-5: Self-reference (a → a) detected → cycle error.
-- [ ] DRV-V-6: Diamond dependency (a → b, a → c, b → d, c → d) resolves correctly, d evaluated once.
-- [ ] DRV-V-7: Missing ref in derivation: `read()` returns undefined. `require()` throws `CnosDerivedResolutionError`.
-- [ ] DRV-V-8: `readOr()` with failing derivation returns fallback.
-- [ ] DRV-V-9: `concat()` with null arg → null becomes empty string.
-- [ ] DRV-V-10: Evaluation cache prevents re-evaluation within same read pass.
+- [ ] DRV-V-1: Simple derived value resolves at read time.
+- [ ] DRV-V-2: Derived depending on derived → correct order.
+- [ ] DRV-V-3: Three-level chain resolves.
+- [ ] DRV-V-4: Cycle (a → b → a) → `CnosDerivedCycleError` with chain.
+- [ ] DRV-V-5: Self-reference → cycle error.
+- [ ] DRV-V-6: Diamond (a → b → d, a → c → d) → d evaluated once.
+- [ ] DRV-V-7: Missing ref: `read()` → undefined. `require()` → error.
+- [ ] DRV-V-8: `readOr()` with failing derivation → fallback.
+- [ ] DRV-V-9: **Config-only derivation cached across reads.** Two consecutive `read()` calls return same value, evaluator called once.
+- [ ] DRV-V-10: **Runtime-dependent derivation NOT cached.** Two consecutive reads with changed `process.env` between them return different values.
+- [ ] DRV-V-11: Config-only derivation with diamond dep → cache hit on shared dep, single evaluation.
 
-### Process refs
+### Runtime namespaces (DRV-R)
 
-- [ ] DRV-P-1: `process.env.PORT` resolves to `process.env["PORT"]`.
-- [ ] DRV-P-2: `process.env.PORT` changes → re-read returns new value.
-- [ ] DRV-P-3: `process.env.MISSING` → undefined.
-- [ ] DRV-P-4: `coalesce(process.env.PORT, '3000')` with PORT unset → `"3000"`.
-- [ ] DRV-P-5: Process-dependent derivation detected correctly.
-- [ ] DRV-P-6: Transitive process dependency detected (a → b → process.env.X).
+- [ ] DRV-R-1: `process.env.PORT` resolves from `process.env`.
+- [ ] DRV-R-2: `process.env.PORT` changes → re-read returns new value.
+- [ ] DRV-R-3: Unset `process.env.MISSING` → undefined.
+- [ ] DRV-R-4: Custom runtime namespace `request.headers.host` resolves from provider.
+- [ ] DRV-R-5: Custom runtime namespace re-read reflects provider change.
+- [ ] DRV-R-6: Unregistered runtime namespace → undefined (not error).
+- [ ] DRV-R-7: Transitive runtime dependency detected (a → b → process.env.X).
+- [ ] DRV-R-8: `registerRuntimeProvider()` for undeclared namespace → error.
+- [ ] DRV-R-9: `registerRuntimeProvider("process", ...)` → error (built-in, not overridable).
 
-### Projections
+### Projections (DRV-PR)
 
-- [ ] DRV-PR-1: Browser projection resolves all derivations to concrete values.
-- [ ] DRV-PR-2: Browser projection with process-dependent promoted key → build error.
-- [ ] DRV-PR-3: Server projection: non-process derivations → concrete in `values`.
-- [ ] DRV-PR-4: Server projection: process-dependent derivations → in `derived` section with formula.
-- [ ] DRV-PR-5: Server runtime evaluates `derived` formulas against `values` + live `process.env`.
-- [ ] DRV-PR-6: Env export resolves derivations to concrete values.
-- [ ] DRV-PR-7: Env export with unresolvable process ref → skip with warning.
+- [ ] DRV-PR-1: Browser → all derivations concrete.
+- [ ] DRV-PR-2: Browser with runtime-dependent (`server_only: true`) promoted key → build error.
+- [ ] DRV-PR-3: Server → config-only derivations in `values` as concrete.
+- [ ] DRV-PR-4: Server → runtime-dependent derivations in `derived` with formula.
+- [ ] DRV-PR-5: Server runtime evaluates `derived` against `values` + providers.
+- [ ] DRV-PR-6: Env export resolves config-only derivations.
+- [ ] DRV-PR-7: Env export skips unresolvable runtime-dependent with warning.
+- [ ] DRV-PR-8: `runtimeNamespaces` in projection lists needed namespaces.
 
-### Promotion safety
+### Promotion safety (DRV-S)
 
-- [ ] DRV-S-1: Promote derived value with only `value.*` deps → OK.
-- [ ] DRV-S-2: Promote derived value with `process.*` dep → rejected.
-- [ ] DRV-S-3: Promote derived value with transitive `secret.*` dep → rejected.
-- [ ] DRV-S-4: Promote derived value with transitive `process.*` dep (a → b → process.env.X) → rejected.
+- [ ] DRV-S-1: Promote derived with only `value.*` deps → OK.
+- [ ] DRV-S-2: Promote derived with `process.*` dep → rejected.
+- [ ] DRV-S-3: Promote derived with transitive `secret.*` dep → rejected.
+- [ ] DRV-S-4: Promote derived with `server_only` runtime dep → rejected for browser.
+- [ ] DRV-S-5: Promote derived with `server_only: false` runtime dep + provider at build → OK.
 
-### Schema
+### Schema (DRV-SC)
 
-- [ ] DRV-SC-1: Schema validates resolved value, not `$derive` object.
-- [ ] DRV-SC-2: Type mismatch in resolved derived value → validation error.
-- [ ] DRV-SC-3: Process-dependent derivation → schema validation skipped with warning.
+- [ ] DRV-SC-1: Validates resolved value, not `$derive` object.
+- [ ] DRV-SC-2: Type mismatch in resolved → error.
+- [ ] DRV-SC-3: Runtime-dependent → validation skipped with warning.
 
-### CLI
+### CLI (DRV-CL)
 
-- [ ] DRV-CL-1: `cnos list values` shows `(derived)` annotation.
-- [ ] DRV-CL-2: `cnos inspect` shows expression, dependencies, resolved value.
-- [ ] DRV-CL-3: `cnos inspect` for process-dependent shows warning about promotion.
-- [ ] DRV-CL-4: `cnos read` resolves derived value transparently.
-- [ ] DRV-CL-5: `cnos export env` resolves derived values in output.
+- [ ] DRV-CL-1: `list` shows `(derived)` annotation.
+- [ ] DRV-CL-2: `inspect` shows expression, deps, resolved value.
+- [ ] DRV-CL-3: `inspect` for runtime-dependent shows namespaces and promotion warning.
+- [ ] DRV-CL-4: `read` resolves transparently.
+- [ ] DRV-CL-5: `export env` resolves derivations.
 
-### Edge cases
+### Edge cases (DRV-ED)
 
-- [ ] DRV-ED-1: Derived value that resolves to a number → type preserved.
-- [ ] DRV-ED-2: Derived value that resolves to a boolean → type preserved.
-- [ ] DRV-ED-3: Derived value that resolves to null → null returned.
-- [ ] DRV-ED-4: Derived value referencing a key overridden by CLI arg → uses CLI arg value.
-- [ ] DRV-ED-5: Derived value in profile-specific file → profile override applies normally.
-- [ ] DRV-ED-6: Derived value overridden by a concrete value in higher-precedence source → concrete wins, derivation ignored.
-- [ ] DRV-ED-7: 50 derived values in dependency chain → resolves without stack overflow.
-- [ ] DRV-ED-8: Template with unicode: `"${value.greeting} 世界"` → correct.
-- [ ] DRV-ED-9: Expression with deeply nested calls (5 levels) → resolves correctly.
-- [ ] DRV-ED-10: Derived value in workspace A, dependency in workspace B (inherited) → resolves across workspaces.
+- [ ] DRV-ED-1: Derived → number type preserved.
+- [ ] DRV-ED-2: Derived → boolean type preserved.
+- [ ] DRV-ED-3: Derived → null returned.
+- [ ] DRV-ED-4: Derived ref overridden by CLI arg → uses CLI value.
+- [ ] DRV-ED-5: Derived in profile-specific file → profile override works.
+- [ ] DRV-ED-6: Concrete value at higher precedence overrides derivation completely.
+- [ ] DRV-ED-7: 50 derivations in chain → no stack overflow.
+- [ ] DRV-ED-8: Unicode in template: `"${value.greeting} 世界"`.
+- [ ] DRV-ED-9: Nested calls 5 levels deep → correct.
+- [ ] DRV-ED-10: Derivation in workspace A, dep in workspace B (inherited) → cross-workspace.

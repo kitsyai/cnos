@@ -65,6 +65,13 @@ describe('@kitsy/cnos codegen', () => {
           frameworks: {},
         },
         namespaces: {},
+        runtimeNamespaces: {
+          process: {
+            description: 'Live process runtime values.',
+            serverOnly: true,
+            builtIn: true,
+          },
+        },
         vaults: {},
         writePolicy: {
           define: {

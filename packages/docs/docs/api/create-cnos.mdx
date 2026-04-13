@@ -13,3 +13,33 @@ const runtime = await createCnos({
   profile: 'stage',
 });
 ```
+
+Common options:
+
+- `cwd`
+- `root`
+- `workspace`
+- `profile`
+- `globalRoot`
+- `processEnv`
+
+Derived values and runtime namespaces work through the explicit runtime too:
+
+```ts
+import { createCnos } from '@kitsy/cnos/configure';
+
+const runtime = await createCnos({
+  cwd: process.cwd(),
+  profile: 'prod',
+});
+
+runtime.registerRuntimeProvider('request', (key) => {
+  if (key === 'headers.host') {
+    return currentRequest?.headers.host;
+  }
+
+  return undefined;
+});
+
+const origin = runtime.value('app.origin');
+```

@@ -11,12 +11,27 @@ export async function resolveBrowserData(
   const runtime = await createCnos(options);
   const browserData: BrowserDataMap = {};
 
-  for (const [key, entry] of runtime.graph.entries) {
+  for (const [key] of runtime.graph.entries) {
     if (!key.startsWith('public.')) {
       continue;
     }
 
-    browserData[key] = entry.value;
+    const inspect = runtime.inspect(key);
+
+    if (inspect.derived?.runtimeDependent) {
+      throw new Error(
+        `Cannot build browser projection: ${key} depends on runtime namespaces ${inspect.derived.runtimeNamespaces.join(', ') || 'runtime'}.`,
+      );
+    }
+
+    const value = runtime.read(key);
+
+    if (value === undefined) {
+
+      continue;
+    }
+
+    browserData[key] = value;
   }
 
   return browserData;

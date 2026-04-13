@@ -1,16 +1,25 @@
 import { CnosKeyNotFoundError } from '../errors.js';
 import type { InspectResult, LogicalKey, ResolvedGraph } from '../types/core.js';
 
-export function inspectValue(graph: ResolvedGraph, key: LogicalKey): InspectResult {
+export function inspectValue(
+  graph: ResolvedGraph,
+  key: LogicalKey,
+  helpers: {
+    read?: (key: string) => unknown;
+    describeDerived?: (key: string) => InspectResult['derived'] | undefined;
+  } = {},
+): InspectResult {
   const entry = graph.entries.get(key);
 
   if (!entry) {
     throw new CnosKeyNotFoundError(key);
   }
 
+  const derived = helpers.describeDerived?.(key);
+
   return {
     key: entry.key,
-    value: entry.value,
+    value: helpers.read ? helpers.read(entry.key) : entry.value,
     namespace: entry.namespace,
     profile: graph.profile,
     profileSource: graph.profileSource,
@@ -32,5 +41,10 @@ export function inspectValue(graph: ResolvedGraph, key: LogicalKey): InspectResu
       value: override.value,
       ...(override.origin ? { origin: override.origin } : {}),
     })),
+    ...(derived
+      ? {
+          derived,
+        }
+      : {}),
   };
 }

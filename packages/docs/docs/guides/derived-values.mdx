@@ -1,0 +1,130 @@
+---
+title: Derived Values
+description: Compute config from other CNOS keys and live runtime namespaces.
+---
+
+# Derived Values
+
+Derived values let you keep config composition inside CNOS instead of re-implementing it in app code.
+
+Template shorthand:
+
+```yaml
+app:
+  origin:
+    $derive: "${value.app.protocol}://${value.app.host}:${value.app.port}"
+```
+
+Expression form:
+
+```yaml
+app:
+  effective_port:
+    $derive:
+      expr: "coalesce(process.env.PORT, value.app.default_port, '3000')"
+```
+
+## Write from the CLI
+
+```bash
+cnos value set app.origin --derive '${value.app.protocol}://${value.app.host}'
+cnos value set app.effective_port --derive --expr "coalesce(process.env.PORT, value.app.default_port, '3000')"
+```
+
+## Built-ins
+
+Supported functions:
+
+- `concat(...)`
+- `coalesce(...)`
+- `when(condition, thenValue, elseValue)`
+- `exists(ref)`
+- `eq(a, b)`
+- `ne(a, b)`
+
+The language is intentionally small and safe. There is no arbitrary JavaScript execution.
+
+## Runtime Namespaces
+
+`process.*` is the built-in runtime namespace. It stays live between reads.
+
+```yaml
+app:
+  effective_port:
+    $derive:
+      expr: "coalesce(process.env.PORT, value.app.default_port, '3000')"
+```
+
+Custom runtime namespaces are declared in the manifest and populated by the host app:
+
+```yaml
+namespaces:
+  runtime:
+    request:
+      description: HTTP request context
+      server_only: true
+```
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+
+cnos.registerRuntimeProvider('request', (key) => {
+  if (key === 'headers.host') {
+    return currentRequest?.headers.host;
+  }
+
+  return undefined;
+});
+```
+
+## Caching Rules
+
+- config-only derivations are cached once per resolution pass
+- runtime-dependent derivations are never cached
+
+That means `value.app.origin` is stable until the next `createCnos()` or `cnos.ready()`, while `value.app.effective_port` can change between reads when `process.env.PORT` changes.
+
+## Browser and Server Behavior
+
+Browser/public outputs always need concrete values.
+
+- config-only derived values can be promoted and embedded normally
+- runtime-dependent derived values that rely on server-only namespaces are rejected for browser/public builds
+
+Server projections split the result:
+
+- `values` contains concrete non-secret values, including config-only derivations
+- `derived` contains live runtime-dependent formulas
+- `runtimeNamespaces` lists which runtime providers the server runtime needs
+
+## Use Cases
+
+Cross-app browser links:
+
+```yaml
+apps:
+  cnos:
+    origin:
+      $derive: "${value.platform.protocol}://${value.apps.cnos.host}"
+
+public:
+  promote:
+    - value.apps.cnos.origin
+```
+
+```ts
+import cnos from '@kitsy/cnos/browser';
+
+const cnosOrigin = cnos('public.apps.cnos.origin');
+```
+
+Server fallback port:
+
+```yaml
+server:
+  port:
+    $derive:
+      expr: "coalesce(process.env.PORT, value.server.default_port, '3000')"
+```

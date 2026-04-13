@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
@@ -57,17 +57,30 @@ export async function runNamespace(
       return printJson(entries);
     }
 
-    return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');
+    return entries.map((entry) => `${entry.key}=${printValue(entry.value)}${entry.derived ? '  (derived)' : ''}`).join('\n');
   }
 
   if (action === 'set') {
     const configPath = tail[0] ?? 'app.name';
-    const rawValue = tail[1] ?? '';
+    const derive = consumeFlag(cliArgs, '--derive');
+    const expr = consumeOption(cliArgs, '--expr');
+    const deriveArg =
+      derive && !expr && cliArgs[0] && !cliArgs[0].startsWith('--')
+        ? cliArgs.shift()
+        : undefined;
+    const rawValue = derive ? '' : tail[1] ?? '';
+    const deriveExpression = derive ? expr ?? tail[1] ?? deriveArg ?? '' : undefined;
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
     const result = await defineValue(namespace, configPath, rawValue, {
       ...options,
       cliArgs,
       target,
+      ...(deriveExpression !== undefined
+        ? {
+            deriveExpression,
+            deriveExprMode: Boolean(expr),
+          }
+        : {}),
     });
 
     if (options.json) {

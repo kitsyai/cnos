@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import {
   CnosManifestError,
+  isDerivedValue,
   parseYaml,
   readLocalSecret,
   resolveSecretPassphrase,
@@ -109,6 +110,7 @@ function flattenConfigObject(
       nestedValue &&
       typeof nestedValue === 'object' &&
       !Array.isArray(nestedValue) &&
+      !isDerivedValue(nestedValue) &&
       !options.stopAtLeaf?.(nestedValue)
     ) {
       Object.assign(

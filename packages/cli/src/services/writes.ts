@@ -3,7 +3,11 @@ import path from 'node:path';
 
 import {
   getNamespaceDefinition,
+  normalizeDerivedValue,
+  parseDerivation,
   createSecretVaultProvider,
+  validateDerivedTargetNamespace,
+  validateParsedDerivation,
   parseYaml,
   resolveConfigDocumentPath,
   resolveVaultAuth,
@@ -115,6 +119,8 @@ export async function defineValue(
     mode?: 'local' | 'remote' | 'ref';
     provider?: string;
     vault?: string;
+    deriveExpression?: string;
+    deriveExprMode?: boolean;
   } = {},
 ): Promise<{ filePath: string; value: unknown }> {
   if (namespace === 'secret') {
@@ -158,7 +164,17 @@ export async function defineValue(
   const filePath = resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile);
   const document = await readYamlDocument(filePath);
 
-  const parsedValue = parseScalarValue(rawValue);
+  let parsedValue: unknown;
+
+  if (options.deriveExpression !== undefined) {
+    validateDerivedTargetNamespace(runtime.manifest, namespace);
+    const derivedValue = normalizeDerivedValue(options.deriveExpression, options.deriveExprMode ?? false);
+    validateParsedDerivation(runtime.manifest, parseDerivation(derivedValue));
+    parsedValue = derivedValue;
+  } else {
+    parsedValue = parseScalarValue(rawValue);
+  }
+
   setNestedValue(document, configPath.split('.'), parsedValue);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, stringifyYaml(document), 'utf8');

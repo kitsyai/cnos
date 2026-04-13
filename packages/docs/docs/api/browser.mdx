@@ -43,3 +43,5 @@ This is intentionally simple:
 4. read them in browser code with `@kitsy/cnos/browser`
 
 You should not need a second app-specific browser config mechanism on top of CNOS.
+
+Derived public values are supported too, but only when CNOS can resolve them safely at build time. If a promoted key depends on a server-only runtime namespace such as `process.*` or `request.*`, the browser/public build fails instead of emitting unstable data.

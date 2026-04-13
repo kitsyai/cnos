@@ -12,6 +12,7 @@ Primary namespaces:
 - `meta.*`
 - `process.*` for server-only ambient runtime state
 - custom data namespaces such as `flags.*` or `config.*` when declared in `.cnos/cnos.yml`
+- custom runtime namespaces declared under `namespaces.runtime`
 
 Derived surfaces:
 
@@ -35,3 +36,36 @@ Custom data namespaces can be:
 - `process.env.PATH`
 
 `process.*` cannot be promoted or exported.
+
+## Runtime Namespaces
+
+Runtime namespaces are not populated from config files. They are declared in the manifest and populated by the host runtime.
+
+```yaml
+namespaces:
+  runtime:
+    request:
+      description: HTTP request context
+      server_only: true
+```
+
+Use them from derived values:
+
+```yaml
+app:
+  current_host:
+    $derive:
+      expr: "coalesce(request.headers.host, value.app.default_host)"
+```
+
+And register providers in server code:
+
+```ts
+cnos.registerRuntimeProvider('request', (key) => {
+  if (key === 'headers.host') {
+    return currentRequest?.headers.host;
+  }
+
+  return undefined;
+});
+```
