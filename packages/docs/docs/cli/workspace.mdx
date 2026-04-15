@@ -1,0 +1,70 @@
+---
+title: cnos workspace
+description: Add, list, remove, scaffold, attach, and detach workspaces.
+---
+
+# cnos workspace
+
+Use `cnos workspace` when a repo has more than one app or package consuming the same CNOS root.
+
+## Add a workspace
+
+```bash
+cnos workspace add travel --package-root apps/travel --extends base
+```
+
+This updates `cnos.yml`, creates `.cnos/workspaces/travel`, and writes:
+
+```yaml
+# apps/travel/.cnosrc.yml
+root: ../../.cnos
+workspace: travel
+```
+
+## Onboard an older single-root project into workspace mode
+
+If a repo already has a flat `.cnos/values`, `.cnos/secrets`, `.cnos/env`, and `.cnos/profiles` tree, migrate it like this:
+
+```bash
+cnos workspace add main --onboard-current
+```
+
+CNOS will:
+
+1. move the existing flat config folders into `.cnos/workspaces/main`
+2. rewrite the root anchor to `workspace: main`
+3. keep the repo in one authoritative `.cnos` root
+
+## List workspaces
+
+```bash
+cnos workspace list
+cnos workspace list --json
+```
+
+## Remove a workspace
+
+```bash
+cnos workspace remove gallery
+```
+
+CNOS removes the manifest entry and deletes `.cnos/workspaces/gallery`. It refuses to remove the current default workspace until you change `workspaces.default`.
+
+## Scaffold wording
+
+If your team prefers scaffold wording:
+
+```bash
+cnos workspace scaffold insights --package-root apps/insights --extends base
+```
+
+This follows the same creation path as `workspace add`.
+
+## Detach and attach
+
+```bash
+cnos workspace detach --package-root apps/travel
+cnos workspace attach --package-root apps/travel
+```
+
+Detach makes a child package independent. Attach imports it back into the parent workspace model.

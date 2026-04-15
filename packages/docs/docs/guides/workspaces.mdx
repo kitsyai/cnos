@@ -46,6 +46,43 @@ workspaces:
 
 This lets you keep shared values in `root` and override only what each app needs in `travel`, `food`, or other child workspaces.
 
+## Day-to-day workspace management
+
+Add a new app workspace:
+
+```bash
+cnos workspace add insights --package-root apps/insights --extends root
+cnos workspace add gallery --package-root apps/gallery --extends root
+```
+
+List what exists:
+
+```bash
+cnos workspace list
+```
+
+Remove one later:
+
+```bash
+cnos workspace remove gallery
+```
+
+## Migrating an older single-root repo into workspace mode
+
+If a repo was initialized earlier with:
+
+```bash
+cnos init
+```
+
+and the current config still lives directly under `.cnos/values`, `.cnos/secrets`, `.cnos/env`, and `.cnos/profiles`, move that existing config into a real workspace with:
+
+```bash
+cnos workspace add main --onboard-current
+```
+
+CNOS will move the physical folders into `.cnos/workspaces/main` and rewrite the local anchor so the repo now behaves as a workspace-aware project.
+
 Read from an app package without passing a root manually:
 
 ```ts

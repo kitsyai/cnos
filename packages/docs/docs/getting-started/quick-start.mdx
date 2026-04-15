@@ -34,6 +34,14 @@ console.log(runtime.value('app.name'));
 console.log(runtime.read<string[]>('value.api.default_query_params'));
 ```
 
+If your repo grows into multiple apps or packages, switch to workspace mode instead of duplicating `.cnos` trees:
+
+```bash
+cnos workspace add main --package-root apps/main --extends base
+cnos workspace add insights --package-root apps/insights --extends base
+cnos workspace list
+```
+
 If your repo still expects env files, keep `.cnos` as the source of truth and generate them:
 
 ```bash

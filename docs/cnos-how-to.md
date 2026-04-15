@@ -768,15 +768,22 @@ Single-project repos can stay simple.
 If you use multiple workspaces:
 
 ```powershell
-cnos init --workspace api
-cnos use --workspace api
-cnos list values
+cnos init
+cnos workspace add api --package-root apps/api --extends base
+cnos workspace add admin --package-root apps/admin --extends base
+cnos workspace list
 ```
 
 Override per command when needed:
 
 ```powershell
 cnos list values --workspace webapp
+```
+
+If you initialized CNOS earlier in single-root mode and want to convert that existing `.cnos` tree into a workspace:
+
+```powershell
+cnos workspace add main --onboard-current
 ```
 
 For package-level consumers inside a pnpm monorepo, add a `.cnosrc.yml` beside the package `package.json`:

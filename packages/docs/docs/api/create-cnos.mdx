@@ -54,3 +54,16 @@ runtime.registerRuntimeProvider('request', (key) => {
 
 const origin = runtime.value('app.origin');
 ```
+
+Workspace selection can come from three places:
+
+1. explicit `workspace` in `createCnos({ ... })`
+2. a package-local `.cnosrc.yml`
+3. the manifest default workspace
+
+Typical monorepo package anchor:
+
+```yaml
+root: ../../.cnos
+workspace: api
+```

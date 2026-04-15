@@ -41,6 +41,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--set',
   '--debounce',
   '--expr',
+  '--extends',
 ]);
 const COMMAND_FLAG_KEYS = new Set([
   '--flatten',
@@ -60,6 +61,7 @@ const COMMAND_FLAG_KEYS = new Set([
   '--rewrite',
   '--signal',
   '--derive',
+  '--onboard-current',
 ]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
 

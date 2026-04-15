@@ -777,11 +777,53 @@ const COMMANDS: HelpCommand[] = [
   },
   {
     id: 'workspace',
-    summary: 'Attach or detach package-local workspace config from a parent CNOS root.',
-    usage: 'cnos workspace <attach|detach> [options] [global-options]',
+    summary: 'Manage workspace creation, listing, migration, and attach/detach flows.',
+    usage: 'cnos workspace <add|list|remove|scaffold|attach|detach> [options] [global-options]',
     description:
-      'Detaches a child package into a standalone .cnos root or reattaches a detached package back into a parent workspace.',
-    examples: ['cnos workspace detach', 'cnos workspace attach --package-root apps/travel'],
+      'Adds and removes manifest workspaces, scaffolds package anchors, migrates single-root projects into workspace mode, and handles detach/attach flows for independent child packages.',
+    examples: [
+      'cnos workspace list',
+      'cnos workspace add travel --package-root apps/travel --extends base',
+      'cnos workspace add main --onboard-current',
+      'cnos workspace remove gallery',
+      'cnos workspace detach --package-root apps/travel',
+    ],
+  },
+  {
+    id: 'workspace add',
+    summary: 'Add a workspace to the manifest and scaffold its on-disk layout.',
+    usage: 'cnos workspace add <id> [--package-root <path>] [--extends <workspace>] [--onboard-current] [--force] [global-options]',
+    description:
+      'Creates .cnos/workspaces/<id>, updates cnos.yml, writes a .cnosrc.yml anchor at the selected package root, and optionally migrates an existing single-root .cnos tree into workspace mode with --onboard-current.',
+    examples: [
+      'cnos workspace add travel --package-root apps/travel --extends base',
+      'cnos workspace add insights --package-root apps/insights',
+      'cnos workspace add main --onboard-current',
+    ],
+  },
+  {
+    id: 'workspace scaffold',
+    summary: 'Scaffold a workspace and anchor without changing other runtime flows.',
+    usage: 'cnos workspace scaffold <id> [--package-root <path>] [--extends <workspace>] [--force] [global-options]',
+    description:
+      'Creates the workspace manifest entry, workspace folders, and package anchor for a new app or package. This is an alias-oriented workflow for teams that prefer scaffold wording over add.',
+    examples: ['cnos workspace scaffold gallery --package-root apps/gallery --extends base'],
+  },
+  {
+    id: 'workspace list',
+    summary: 'List declared workspaces and their inheritance.',
+    usage: 'cnos workspace list [global-options]',
+    description:
+      'Shows the declared workspace ids, default workspace, and extends relationships from cnos.yml.',
+    examples: ['cnos workspace list', 'cnos workspace list --json'],
+  },
+  {
+    id: 'workspace remove',
+    summary: 'Remove a workspace from the manifest and delete its local workspace tree.',
+    usage: 'cnos workspace remove <id> [global-options]',
+    description:
+      'Deletes .cnos/workspaces/<id> and removes the workspace entry from cnos.yml. CNOS refuses to remove the current default workspace until you change workspaces.default.',
+    examples: ['cnos workspace remove gallery', 'cnos workspace remove insights --json'],
   },
   {
     id: 'workspace detach',

@@ -276,6 +276,26 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
+  it('parses workspace add flows with package roots and migration flags', () => {
+    expect(parseArgs(['workspace', 'add', 'insights', '--package-root', 'apps/insights', '--extends', 'base'])).toEqual({
+      command: 'workspace',
+      args: ['add', 'insights'],
+      options: {
+        cliArgs: ['--package-root', 'apps/insights', '--extends', 'base'],
+      },
+      passthrough: [],
+    });
+
+    expect(parseArgs(['workspace', 'add', 'main', '--onboard-current'])).toEqual({
+      command: 'workspace',
+      args: ['add', 'main'],
+      options: {
+        cliArgs: ['--onboard-current'],
+      },
+      passthrough: [],
+    });
+  });
+
   it('normalizes verb-first aliases for value, secret, and profile flows', () => {
     expect(parseArgs(['set', 'value', 'app.name', 'demo'])).toEqual({
       command: 'value',
@@ -529,6 +549,9 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('drift')).toContain('Usage: cnos drift');
     expect(runHelp('migrate')).toContain('Usage: cnos migrate');
     expect(runHelp('watch')).toContain('Usage: cnos watch [--signal]');
+    expect(runHelp('workspace')).toContain('workspace add');
+    expect(runHelp('workspace add')).toContain('--onboard-current');
+    expect(runHelp('workspace list')).toContain('Usage: cnos workspace list');
   });
 
   it('prints machine-readable help for agents', () => {
@@ -546,6 +569,7 @@ describe('@kitsy/cnos-cli', () => {
       true,
     );
     expect(commandPayload.integrations.some((integration: { id: string }) => integration.id === 'vite')).toBe(true);
+    expect(JSON.parse(runHelpAi('workspace add', ['--format=json'])).command.id).toBe('workspace add');
   });
 
   it('onboards root env files into the workspace env tree without deleting originals by default', async () => {
@@ -1458,6 +1482,47 @@ describe('@kitsy/cnos-cli', () => {
     await expect(
       readFile(path.join(repoRoot, '.cnos', 'workspaces', 'travel', 'values', 'app.yml'), 'utf8'),
     ).resolves.toContain('Travel');
+  });
+
+  it('adds, lists, removes, and onboards workspaces through the workspace command family', async () => {
+    const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-workspace-add-'));
+    fixtureRoots.push(repoRoot);
+    await mkdir(path.join(repoRoot, 'apps', 'insights'), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, '.gitignore'),
+      'node_modules/\n',
+    );
+    await writeFile(
+      path.join(repoRoot, '.cnosrc.yml'),
+      'root: ./.cnos\n',
+    );
+    await mkdir(path.join(repoRoot, '.cnos'), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, '.cnos', 'cnos.yml'),
+      ['version: 1', 'project:', '  name: monorepo-fixture'].join('\n'),
+    );
+
+    await expect(
+      runWorkspace(['add', 'main'], {
+        root: repoRoot,
+        cliArgs: ['--onboard-current'],
+      }),
+    ).resolves.toContain('added workspace main');
+
+    await expect(
+      runWorkspace(['add', 'insights'], {
+        root: repoRoot,
+        cliArgs: ['--package-root', path.join(repoRoot, 'apps', 'insights'), '--extends', 'main'],
+      }),
+    ).resolves.toContain('added workspace insights');
+
+    await expect(readFile(path.join(repoRoot, 'apps', 'insights', '.cnosrc.yml'), 'utf8')).resolves.toContain(
+      'workspace: insights',
+    );
+    await expect(runWorkspace(['list'], { root: repoRoot })).resolves.toContain('insights');
+
+    await expect(runWorkspace(['remove', 'insights'], { root: repoRoot })).resolves.toContain('removed workspace insights');
+    await expect(readFile(path.join(repoRoot, '.cnos', 'cnos.yml'), 'utf8')).resolves.not.toContain('insights');
   });
 
   it('validates schema/public rules and reports doctor diagnostics', async () => {

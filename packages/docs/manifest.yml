@@ -53,6 +53,8 @@ sidebar:
         label: Overview
       - path: cli/init
         label: cnos init
+      - path: cli/workspace
+        label: cnos workspace
       - path: cli/value
         label: cnos value
       - path: cli/secret

@@ -7,7 +7,7 @@ export interface ScaffoldWorkspaceResult {
   created: string[];
 }
 
-function scaffoldManifest(projectName: string, workspace?: string): string {
+export function scaffoldManifest(projectName: string, workspace?: string): string {
   const lines = [
     'version: 1',
     'project:',
@@ -80,11 +80,10 @@ export async function ensureGitignore(root: string): Promise<boolean> {
   return true;
 }
 
-export async function scaffoldWorkspace(
-  root: string,
+export async function ensureWorkspaceLayout(
+  cnosRoot: string,
   workspace?: string,
-): Promise<ScaffoldWorkspaceResult> {
-  const cnosRoot = path.join(root, '.cnos');
+): Promise<string[]> {
   const workspaceRoot = workspace ? path.join(cnosRoot, 'workspaces', workspace) : cnosRoot;
   const createdPaths: string[] = [];
 
@@ -111,9 +110,31 @@ export async function scaffoldWorkspace(
     const filePath = path.join(cnosRoot, ...relativePath);
 
     if (await ensureFile(filePath, '')) {
-      createdPaths.push(path.relative(root, filePath).replace(/\\/g, '/'));
+      createdPaths.push(path.relative(path.dirname(cnosRoot), filePath).replace(/\\/g, '/'));
     }
   }
+
+  return createdPaths;
+}
+
+export async function ensureCnosrc(
+  root: string,
+  workspace?: string,
+): Promise<boolean> {
+  return ensureFile(
+    path.join(root, '.cnosrc.yml'),
+    workspace ? `root: ./.cnos\nworkspace: ${workspace}\n` : 'root: ./.cnos\n',
+  );
+}
+
+export async function scaffoldWorkspace(
+  root: string,
+  workspace?: string,
+): Promise<ScaffoldWorkspaceResult> {
+  const cnosRoot = path.join(root, '.cnos');
+  const createdPaths: string[] = (await ensureWorkspaceLayout(cnosRoot, workspace)).map((entry) =>
+    entry.replace(/^\.cnos\//, '.cnos/'),
+  );
 
   if (
     await ensureFile(path.join(cnosRoot, 'cnos.yml'), scaffoldManifest(path.basename(root), workspace))
@@ -121,12 +142,7 @@ export async function scaffoldWorkspace(
     createdPaths.push('.cnos/cnos.yml');
   }
 
-  if (
-    await ensureFile(
-      path.join(root, '.cnosrc.yml'),
-      workspace ? `root: ./.cnos\nworkspace: ${workspace}\n` : 'root: ./.cnos\n',
-    )
-  ) {
+  if (await ensureCnosrc(root, workspace)) {
     createdPaths.push('.cnosrc.yml');
   }
 
