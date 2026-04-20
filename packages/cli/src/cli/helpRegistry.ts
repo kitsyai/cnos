@@ -114,25 +114,67 @@ const COMMANDS: HelpCommand[] = [
   },
   {
     id: 'init',
-    summary: 'Scaffold a workspace-aware CNOS tree in the current project.',
-    usage: 'cnos init [--workspace <id>] [--root <path>] [--json]',
+    summary: 'Scaffold a CNOS project in regular mode or workspace mode.',
+    usage: 'cnos init [--mode <regular|workspace>] [--workspaces <csv>] [--root <path>] [--json]',
     description:
-      'Creates .cnos/cnos.yml, .cnosrc.yml, optional .cnos-workspace.yml, config folders, and .gitignore entries without overwriting existing files.',
-    examples: ['cnos init', 'cnos init --workspace api', 'cnos init --root ./apps/api --workspace api --json'],
+      'Creates .cnos/cnos.yml, .cnosrc.yml, config folders, and .gitignore entries without overwriting existing files. Regular mode is the default; workspace mode creates base plus optional child workspaces.',
+    examples: [
+      'cnos init',
+      'cnos init --mode workspace',
+      'cnos init --mode workspace --workspaces api,web,agents',
+      'cnos init --root ./apps/api --json',
+    ],
   },
   {
     id: 'onboard',
-    summary: 'Onboard an existing repo into CNOS and import root dotenv files.',
-    usage: 'cnos onboard [--workspace <id>] [--root <path>] [--move] [--json]',
+    summary: 'Import existing env or config sources into CNOS and propose value.* mappings.',
+    usage: 'cnos onboard [--workspace <id>] [--env <path>|--yaml <path>|--json <path>|--toml <path>|--config <path>] [--materialize|--source-only] [--prefix <path>] [--move] [--root <path>] [--json]',
     description:
-      'Scaffolds the CNOS workspace tree and imports root-level .env, .env.<profile>, and .env.*.example files into .cnos/workspaces/<workspace>/env.',
+      'Auto-discovers root .env* files by default, copies them into CNOS source storage, prints proposed value.* mappings, and can materialize those mappings into CNOS values. In workspace mode, imports land in the selected workspace; otherwise they land in the implicit base layer.',
     options: [
       {
+        flag: '--env <path>',
+        description: 'Import one dotenv file instead of auto-discovering root .env* files.',
+      },
+      {
+        flag: '--yaml <path>',
+        description: 'Import one YAML config file and flatten it into value.* keys.',
+      },
+      {
+        flag: '--json <path>',
+        description: 'Import one JSON config file and flatten it into value.* keys.',
+      },
+      {
+        flag: '--toml <path>',
+        description: 'Import one TOML config file and flatten it into value.* keys.',
+      },
+      {
+        flag: '--config <path>',
+        description: 'Import one config file using extension-based format detection.',
+      },
+      {
+        flag: '--materialize',
+        description: 'Write the proposed value.* mappings without prompting.',
+      },
+      {
+        flag: '--source-only',
+        description: 'Copy the source file(s) into CNOS storage but skip value materialization.',
+      },
+      {
+        flag: '--prefix <path>',
+        description: 'Scope imported keys under value.<prefix>.*.',
+      },
+      {
         flag: '--move',
-        description: 'Move the root env files into CNOS instead of leaving the originals in place.',
+        description: 'Move the source files into CNOS instead of leaving the originals in place.',
       },
     ],
-    examples: ['cnos onboard', 'cnos onboard --workspace webapp', 'cnos onboard --root ../my-app --workspace app --move'],
+    examples: [
+      'cnos onboard',
+      'cnos onboard --env .env.production --materialize',
+      'cnos onboard --yaml config/app.yml --prefix app',
+      'cnos onboard --workspace api --config config/api.toml',
+    ],
   },
   {
     id: 'codegen',
@@ -778,27 +820,35 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'workspace',
     summary: 'Manage workspace creation, listing, migration, and attach/detach flows.',
-    usage: 'cnos workspace <add|list|remove|scaffold|attach|detach> [options] [global-options]',
+    usage: 'cnos workspace <enable|add|list|remove|scaffold|attach|detach> [options] [global-options]',
     description:
-      'Adds and removes manifest workspaces, scaffolds package anchors, migrates single-root projects into workspace mode, and handles detach/attach flows for independent child packages.',
+      'Enables workspace mode for flat CNOS projects, adds and removes manifest workspaces, scaffolds package anchors, and handles detach/attach flows for independent child packages.',
     examples: [
       'cnos workspace list',
+      'cnos workspace enable',
       'cnos workspace add travel --package-root apps/travel --extends base',
-      'cnos workspace add main --onboard-current',
       'cnos workspace remove gallery',
       'cnos workspace detach --package-root apps/travel',
     ],
   },
   {
-    id: 'workspace add',
-    summary: 'Add a workspace to the manifest and scaffold its on-disk layout.',
-    usage: 'cnos workspace add <id> [--package-root <path>] [--extends <workspace>] [--onboard-current] [--force] [global-options]',
+    id: 'workspace enable',
+    summary: 'Convert a flat regular-mode CNOS root into workspace mode with base.',
+    usage: 'cnos workspace enable [global-options]',
     description:
-      'Creates .cnos/workspaces/<id>, updates cnos.yml, writes a .cnosrc.yml anchor at the selected package root, and optionally migrates an existing single-root .cnos tree into workspace mode with --onboard-current.',
+      'Moves .cnos/values, .cnos/secrets, .cnos/env, and .cnos/profiles into .cnos/workspaces/base, adds a workspaces block to cnos.yml, and updates the root anchor to workspace: base.',
+    examples: ['cnos workspace enable'],
+  },
+  {
+    id: 'workspace add',
+    summary: 'Add a child workspace to the manifest and scaffold its on-disk layout.',
+    usage: 'cnos workspace add <id> [--package-root <path>] [--extends <workspace|none>] [--force] [global-options]',
+    description:
+      'Creates .cnos/workspaces/<id>, updates cnos.yml, and writes a .cnosrc.yml anchor at the selected package root. When a base workspace exists, CNOS defaults new child workspaces to extends: [base] unless --extends or --extends none is provided.',
     examples: [
       'cnos workspace add travel --package-root apps/travel --extends base',
       'cnos workspace add insights --package-root apps/insights',
-      'cnos workspace add main --onboard-current',
+      'cnos workspace add api --extends none',
     ],
   },
   {

@@ -26,17 +26,18 @@ cnos profile create stage
 cnos use --profile stage
 ```
 
-If this later becomes a monorepo, do not create a second `.cnos`. Add workspaces instead:
-
-```bash
-cnos workspace add api --package-root apps/api --extends base
-cnos workspace add admin --package-root apps/admin --extends base
-```
-
 Create a local vault and authenticate it:
 
 ```bash
 cnos vault create default
 cnos vault auth default
 cnos secret set app.token super-secret --vault default
+```
+
+If the project later becomes a monorepo, do not create a second `.cnos`. Convert the existing repo and add children:
+
+```bash
+cnos workspace enable
+cnos workspace add api --package-root apps/api
+cnos workspace add admin --package-root apps/admin
 ```

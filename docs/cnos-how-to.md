@@ -780,10 +780,10 @@ Override per command when needed:
 cnos list values --workspace webapp
 ```
 
-If you initialized CNOS earlier in single-root mode and want to convert that existing `.cnos` tree into a workspace:
+If you initialized CNOS earlier in regular single-root mode and want to convert that existing `.cnos` tree into a workspace:
 
 ```powershell
-cnos workspace add main --onboard-current
+cnos workspace enable
 ```
 
 For package-level consumers inside a pnpm monorepo, add a `.cnosrc.yml` beside the package `package.json`:

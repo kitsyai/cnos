@@ -58,7 +58,7 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
     return normalizeHelpTopic([command, args[0]]);
   }
 
-  if (command === 'workspace' && args[0] && ['attach', 'detach', 'add', 'list', 'remove', 'delete', 'scaffold'].includes(args[0])) {
+  if (command === 'workspace' && args[0] && ['attach', 'detach', 'add', 'list', 'remove', 'delete', 'scaffold', 'enable'].includes(args[0])) {
     return normalizeHelpTopic([command, args[0] === 'delete' ? 'remove' : args[0]]);
   }
 

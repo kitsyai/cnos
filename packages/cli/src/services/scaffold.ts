@@ -3,37 +3,60 @@ import path from 'node:path';
 
 export interface ScaffoldWorkspaceResult {
   root: string;
+  mode: 'regular' | 'workspace';
   workspace?: string;
+  workspaces?: string[];
   created: string[];
 }
 
-export function scaffoldManifest(projectName: string, workspace?: string): string {
-  const lines = [
+export interface ScaffoldManifestOptions {
+  mode?: 'regular' | 'workspace';
+  workspace?: string;
+  workspaces?: string[];
+}
+
+export function scaffoldManifest(projectName: string, options: ScaffoldManifestOptions = {}): string {
+  const mode = options.mode ?? 'regular';
+  const baseWorkspace = options.workspace ?? 'base';
+  const workspaceIds =
+    mode === 'workspace'
+      ? [baseWorkspace, ...(options.workspaces ?? []).filter((id) => id !== baseWorkspace)]
+      : [];
+  const lines: string[] = [
     'version: 1',
     'project:',
     `  name: ${projectName}`,
+  ];
+
+  if (mode === 'workspace') {
+    lines.push(
+      'workspaces:',
+      `  default: ${baseWorkspace}`,
+      '  global:',
+      '    enabled: false',
+      '    allowWrite: false',
+      '  items:',
+      `    ${baseWorkspace}: {}`,
+    );
+
+    for (const workspaceId of workspaceIds) {
+      if (workspaceId === baseWorkspace) {
+        continue;
+      }
+
+      lines.push(`    ${workspaceId}:`, '      extends: [base]');
+    }
+  }
+
+  lines.push(
     'profiles:',
-    '  default: base',
+    '  default: local',
     'envMapping:',
     '  convention: SCREAMING_SNAKE',
     'public:',
     '  promote: []',
     '',
-  ];
-
-  if (workspace) {
-    lines.splice(
-      4,
-      0,
-      'workspaces:',
-      `  default: ${workspace}`,
-      '  global:',
-      '    enabled: false',
-      '    allowWrite: false',
-      '  items:',
-      `    ${workspace}: {}`,
-    );
-  }
+  );
 
   return lines.join('\n');
 }
@@ -127,28 +150,52 @@ export async function ensureCnosrc(
   );
 }
 
-export async function scaffoldWorkspace(
+export interface ScaffoldProjectOptions {
+  mode?: 'regular' | 'workspace';
+  workspace?: string;
+  workspaces?: string[];
+}
+
+export async function scaffoldProject(
   root: string,
-  workspace?: string,
+  options: ScaffoldProjectOptions = {},
 ): Promise<ScaffoldWorkspaceResult> {
+  const mode = options.mode ?? 'regular';
+  const baseWorkspace = options.workspace ?? 'base';
+  const childWorkspaces =
+    mode === 'workspace'
+      ? (options.workspaces ?? []).filter((workspaceId) => workspaceId !== baseWorkspace)
+      : [];
   const cnosRoot = path.join(root, '.cnos');
-  const createdPaths: string[] = (await ensureWorkspaceLayout(cnosRoot, workspace)).map((entry) =>
-    entry.replace(/^\.cnos\//, '.cnos/'),
-  );
+  const createdPaths: string[] = [];
+
+  if (mode === 'workspace') {
+    createdPaths.push(
+      ...(await ensureWorkspaceLayout(cnosRoot, baseWorkspace)).map((entry) => entry.replace(/^\.cnos\//, '.cnos/')),
+    );
+
+    for (const workspaceId of childWorkspaces) {
+      createdPaths.push(
+        ...(await ensureWorkspaceLayout(cnosRoot, workspaceId)).map((entry) => entry.replace(/^\.cnos\//, '.cnos/')),
+      );
+    }
+  } else {
+    createdPaths.push(...(await ensureWorkspaceLayout(cnosRoot)).map((entry) => entry.replace(/^\.cnos\//, '.cnos/')));
+  }
 
   if (
-    await ensureFile(path.join(cnosRoot, 'cnos.yml'), scaffoldManifest(path.basename(root), workspace))
+    await ensureFile(path.join(cnosRoot, 'cnos.yml'), scaffoldManifest(path.basename(root), options))
   ) {
     createdPaths.push('.cnos/cnos.yml');
   }
 
-  if (await ensureCnosrc(root, workspace)) {
+  if (await ensureCnosrc(root, mode === 'workspace' ? baseWorkspace : undefined)) {
     createdPaths.push('.cnosrc.yml');
   }
 
   if (
-    workspace &&
-    (await ensureFile(path.join(root, '.cnos-workspace.yml'), `workspace: ${workspace}\nglobalRoot: ~/.cnos\n`))
+    mode === 'workspace' &&
+    (await ensureFile(path.join(root, '.cnos-workspace.yml'), `workspace: ${baseWorkspace}\nglobalRoot: ~/.cnos\n`))
   ) {
     createdPaths.push('.cnos-workspace.yml');
   }
@@ -159,7 +206,8 @@ export async function scaffoldWorkspace(
 
   return {
     root,
-    ...(workspace ? { workspace } : {}),
+    mode,
+    ...(mode === 'workspace' ? { workspace: baseWorkspace, workspaces: [baseWorkspace, ...childWorkspaces] } : {}),
     created: createdPaths,
   };
 }

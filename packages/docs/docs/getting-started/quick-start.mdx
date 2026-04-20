@@ -5,15 +5,18 @@ description: Go from zero to a running CNOS-backed project in a few minutes.
 
 # Quick Start
 
+Start with regular mode:
+
 ```bash
 cnos init
 cnos value set app.name demo
 cnos value set server.port 3000
-cnos value set api.default_query_params '["ab", "bc"]'
 cnos read value.app.name
 cnos build env --profile local --to .env.local
 cnos run -- node server.js
 ```
+
+That gives you one flat `.cnos/` tree and `profiles.default: local`.
 
 In app code:
 
@@ -24,39 +27,18 @@ await cnos.ready();
 console.log(cnos('value.app.name'));
 ```
 
-For explicit creation:
-
-```ts
-import { createCnos } from '@kitsy/cnos/configure';
-
-const runtime = await createCnos();
-console.log(runtime.value('app.name'));
-console.log(runtime.read<string[]>('value.api.default_query_params'));
-```
-
-If your repo grows into multiple apps or packages, switch to workspace mode instead of duplicating `.cnos` trees:
+When the repo grows into multiple apps or packages, convert it instead of duplicating `.cnos`:
 
 ```bash
-cnos workspace add main --package-root apps/main --extends base
-cnos workspace add insights --package-root apps/insights --extends base
+cnos workspace enable
+cnos workspace add main --package-root apps/main
+cnos workspace add insights --package-root apps/insights
 cnos workspace list
 ```
 
-If your repo still expects env files, keep `.cnos` as the source of truth and generate them:
+If the repo still expects env files, keep CNOS as the source of truth and generate them:
 
 ```bash
 cnos build env --profile local --to .env.local
 cnos dev env --profile local --to .env.local -- pnpm dev
-```
-
-For frontend builds:
-- Vite: `@kitsy/cnos-vite`
-- Webpack/static bundles: `@kitsy/cnos-webpack`
-- Next.js: `@kitsy/cnos-next`
-
-For webpack/static bundles, build-time settings can come from CNOS too:
-
-```bash
-cnos set value dev.server.port 8800
-npm run dev
 ```

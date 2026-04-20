@@ -122,6 +122,7 @@ export async function defineValue(
     vault?: string;
     deriveExpression?: string;
     deriveExprMode?: boolean;
+    parsedValue?: unknown;
   } = {},
 ): Promise<{ filePath: string; value: unknown }> {
   await assertWritableConfigRoot(`write ${namespace}.${configPath}`, options);
@@ -174,6 +175,8 @@ export async function defineValue(
     const derivedValue = normalizeDerivedValue(options.deriveExpression, options.deriveExprMode ?? false);
     validateParsedDerivation(runtime.manifest, parseDerivation(derivedValue));
     parsedValue = derivedValue;
+  } else if (Object.hasOwn(options, 'parsedValue')) {
+    parsedValue = options.parsedValue;
   } else {
     parsedValue = parseScalarValue(rawValue);
   }

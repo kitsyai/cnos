@@ -29,6 +29,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--format',
   '--framework',
   '--prefix',
+  '--mode',
   '--scan',
   '--target',
   '--to',
@@ -42,6 +43,11 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--debounce',
   '--expr',
   '--extends',
+  '--workspaces',
+  '--env',
+  '--yaml',
+  '--toml',
+  '--config',
 ]);
 const COMMAND_FLAG_KEYS = new Set([
   '--flatten',
@@ -61,7 +67,8 @@ const COMMAND_FLAG_KEYS = new Set([
   '--rewrite',
   '--signal',
   '--derive',
-  '--onboard-current',
+  '--materialize',
+  '--source-only',
 ]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
 
@@ -229,6 +236,16 @@ export function parseArgs(argv: string[]): ParsedCommand {
     if (passthroughMode) {
       passthrough.push(token);
       continue;
+    }
+
+    if (command === 'onboard' && token === '--json') {
+      const nextValue = rest[index + 1];
+
+      if (nextValue && !nextValue.startsWith('--')) {
+        cliArgs.push(token, nextValue);
+        index += 1;
+        continue;
+      }
     }
 
     if (token === '--json') {

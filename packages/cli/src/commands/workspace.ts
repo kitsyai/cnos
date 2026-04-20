@@ -6,7 +6,7 @@ import { loadManifest, parseYaml, stringifyYaml } from '@kitsy/cnos/internal';
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
-import { ensureFile, ensureGitignore, ensureWorkspaceLayout } from '../services/scaffold.js';
+import { ensureGitignore, ensureWorkspaceLayout } from '../services/scaffold.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
 import { createRuntimeService } from '../services/runtime.js';
 
@@ -105,6 +105,10 @@ function splitExtends(value: string | undefined): string[] | undefined {
     return undefined;
   }
 
+  if (value.trim() === 'none') {
+    return [];
+  }
+
   const items = value
     .split(',')
     .map((entry) => entry.trim())
@@ -128,6 +132,39 @@ async function hasDirectConfigData(cnosRoot: string): Promise<boolean> {
   }
 
   return false;
+}
+
+async function updateRootAnchorToWorkspace(packageRoot: string, workspaceId: string): Promise<void> {
+  const anchorPath = path.join(packageRoot, '.cnosrc.yml');
+  const current = (await exists(anchorPath))
+    ? parseYaml<Record<string, unknown>>(await readFile(anchorPath, 'utf8'))
+    : undefined;
+
+  await writeFile(
+    anchorPath,
+    stringifyYaml({
+      root: typeof current?.root === 'string' ? current.root : './.cnos',
+      workspace: workspaceId,
+    }),
+    'utf8',
+  );
+}
+
+async function updateWorkspaceContext(packageRoot: string, workspaceId: string): Promise<void> {
+  const workspacePath = path.join(packageRoot, '.cnos-workspace.yml');
+  const current = (await exists(workspacePath))
+    ? parseYaml<Record<string, unknown>>(await readFile(workspacePath, 'utf8'))
+    : undefined;
+
+  await writeFile(
+    workspacePath,
+    stringifyYaml({
+      workspace: workspaceId,
+      ...(typeof current?.profile === 'string' ? { profile: current.profile } : {}),
+      ...(typeof current?.globalRoot === 'string' ? { globalRoot: current.globalRoot } : { globalRoot: '~/.cnos' }),
+    }),
+    'utf8',
+  );
 }
 
 async function runDetach(packageRoot: string, options: RuntimeServiceOptions = {}): Promise<string> {
@@ -296,6 +333,76 @@ async function runList(
     .join('\n');
 }
 
+async function runEnable(
+  manifestCwd: string,
+  packageRoot: string,
+  options: RuntimeServiceOptions = {},
+): Promise<string> {
+  const cliArgs = [...(options.cliArgs ?? [])];
+
+  if (cliArgs.length > 0) {
+    throw new Error(`Unsupported workspace arguments: ${cliArgs.join(' ')}`);
+  }
+
+  const loaded = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    cwd: manifestCwd,
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+  });
+
+  if (loaded.rootResolution.readOnly) {
+    throw new Error(
+      `Cannot enable workspace mode because the active CNOS root is remote and read-only (${loaded.rootResolution.rootUri}). Clone the config repo and edit it directly.`,
+    );
+  }
+
+  const rawManifest = structuredClone(loaded.rawManifest as Record<string, unknown>);
+  const rawWorkspaces = ((rawManifest.workspaces as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const rawItems = ((rawWorkspaces.items as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+
+  if (Object.keys(rawItems).length > 0) {
+    throw new Error('This CNOS root is already in workspace mode.');
+  }
+
+  const cnosRoot = loaded.manifestRoot;
+  const baseWorkspaceRoot = path.join(cnosRoot, 'workspaces', 'base');
+
+  if (await exists(baseWorkspaceRoot)) {
+    throw new Error('Cannot enable workspace mode because .cnos/workspaces/base already exists.');
+  }
+
+  const moved: string[] = [];
+
+  for (const folderName of ['values', 'secrets', 'env', 'profiles']) {
+    if (await moveIfExists(path.join(cnosRoot, folderName), path.join(baseWorkspaceRoot, folderName))) {
+      moved.push(folderName);
+    }
+  }
+
+  await ensureWorkspaceLayout(cnosRoot, 'base');
+  rawWorkspaces.default = 'base';
+  rawWorkspaces.items = {
+    base: {},
+  };
+  rawManifest.workspaces = rawWorkspaces;
+
+  await writeFile(path.join(cnosRoot, 'cnos.yml'), stringifyYaml(rawManifest), 'utf8');
+  await updateRootAnchorToWorkspace(packageRoot, 'base');
+  await updateWorkspaceContext(packageRoot, 'base');
+  await ensureGitignore(path.dirname(cnosRoot));
+
+  if (options.json) {
+    return printJson({
+      root: path.dirname(cnosRoot),
+      workspace: 'base',
+      moved,
+    });
+  }
+
+  const movedSummary = moved.length > 0 ? `; moved ${moved.join(', ')} into .cnos/workspaces/base` : '';
+  return `enabled workspace mode at ${displayPath(path.dirname(cnosRoot), packageRoot)} with base workspace${movedSummary}`;
+}
+
 async function runAddOrScaffold(
   action: 'add' | 'scaffold',
   workspaceId: string,
@@ -305,7 +412,6 @@ async function runAddOrScaffold(
 ): Promise<string> {
   const cliArgs = [...(options.cliArgs ?? [])];
   const extendsOption = splitExtends(consumeOption(cliArgs, '--extends'));
-  const onboardCurrent = consumeFlag(cliArgs, '--onboard-current');
   const force = consumeFlag(cliArgs, '--force');
 
   if (cliArgs.length > 0) {
@@ -332,9 +438,9 @@ async function runAddOrScaffold(
   const isWorkspaceMode = Object.keys(rawItems).length > 0;
   const directConfigPresent = await hasDirectConfigData(cnosRoot);
 
-  if (!isWorkspaceMode && directConfigPresent && !onboardCurrent) {
+  if (!isWorkspaceMode || directConfigPresent) {
     throw new Error(
-      'This CNOS root is in single-root mode and already has direct values/secrets/env/profiles data. Re-run with --onboard-current to migrate it into workspace mode.',
+      'This CNOS root is not ready for child workspaces yet. Run `cnos workspace enable` first to convert the flat project into workspace mode.',
     );
   }
 
@@ -354,28 +460,17 @@ async function runAddOrScaffold(
   rawManifest.workspaces = rawWorkspaces;
 
   const workspaceRoot = path.join(cnosRoot, 'workspaces', workspaceId);
-  if (onboardCurrent) {
-    if (isWorkspaceMode) {
-      throw new Error('--onboard-current can only be used when the manifest is not already in workspace mode.');
-    }
-
-    for (const folderName of ['values', 'secrets', 'env', 'profiles']) {
-      await moveIfExists(path.join(cnosRoot, folderName), path.join(workspaceRoot, folderName), force);
-    }
-  }
-
   const created = await ensureWorkspaceLayout(cnosRoot, workspaceId);
   await writeFile(path.join(cnosRoot, 'cnos.yml'), stringifyYaml(rawManifest), 'utf8');
   await ensureGitignore(path.dirname(cnosRoot));
 
   await writeAnchor(packageRoot, cnosRoot, workspaceId);
-  await ensureFile(path.join(packageRoot, '.cnos-workspace.yml'), `workspace: ${workspaceId}\nglobalRoot: ~/.cnos\n`);
+  await updateWorkspaceContext(packageRoot, workspaceId);
 
   const result = {
     workspace: workspaceId,
     root: path.dirname(cnosRoot),
     packageRoot,
-    onboarded: onboardCurrent,
     created,
   };
 
@@ -454,6 +549,8 @@ export async function runWorkspace(
       return runAttach(packageRoot, { ...options, cliArgs: baseCliArgs });
     case 'detach':
       return runDetach(packageRoot, { ...options, cliArgs: baseCliArgs });
+    case 'enable':
+      return runEnable(manifestCwd, packageRoot, { ...options, cliArgs: baseCliArgs });
     case 'list':
       return runList(manifestCwd, options);
     case 'add':

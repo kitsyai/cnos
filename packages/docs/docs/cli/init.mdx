@@ -1,11 +1,40 @@
 ---
 title: cnos init
-description: Scaffold a CNOS project structure in the current repo.
+description: Scaffold a CNOS project in regular mode or workspace mode.
 ---
 
 # cnos init
 
+Use regular mode first:
+
 ```bash
 cnos init
-cnos workspace add api --package-root apps/api --extends base
 ```
+
+That creates a flat `.cnos/` tree with `profiles.default: local`.
+
+Create workspace mode explicitly:
+
+```bash
+cnos init --mode workspace
+```
+
+That creates:
+
+- `.cnos/workspaces/base`
+- `.cnosrc.yml` pointing to `./.cnos`
+- `.cnos-workspace.yml` with `workspace: base`
+
+Create child workspaces during init:
+
+```bash
+cnos init --mode workspace --workspaces api,web,agents
+```
+
+This creates `base` plus `api`, `web`, and `agents`, with each child extending `base`.
+
+## Notes
+
+- `base` is the default shared workspace convention.
+- `local` is the default profile.
+- If you already started in regular mode and later need multiple apps, use `cnos workspace enable` instead of reinitializing the repo.

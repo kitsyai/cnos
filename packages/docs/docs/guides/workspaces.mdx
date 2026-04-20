@@ -5,132 +5,97 @@ description: Use CNOS workspaces to model multiple apps inside one repo.
 
 # Workspaces and Monorepos
 
-For monorepos, keep one authoritative `.cnos/` tree at the repo root and put a `.cnosrc.yml` anchor in each consuming app or package.
+CNOS has two repo shapes:
 
-Repo root as both author and consumer:
+- regular mode: one flat `.cnos/` tree
+- workspace mode: `.cnos/workspaces/<id>/...`
 
-```yaml
-# .cnosrc.yml
-root: ./.cnos
-```
-
-Child app:
-
-```yaml
-# apps/travel/.cnosrc.yml
-root: ../../.cnos
-workspace: travel
-```
-
-Child app from a remote config repo:
-
-```yaml
-root: git+https://github.com/org/config.git#v2.1.0
-workspace: travel
-```
-
-`.cnosrc.yml` is the only discovery anchor. CNOS does not walk upward looking for `.cnos` directories. It looks for `.cnosrc.yml` within a bounded package-root search window, then resolves the real `.cnos` root from there.
-
-Typical manifest shape:
-
-```yaml
-workspaces:
-  default: root
-  items:
-    root: {}
-    travel:
-      extends: [root]
-    food:
-      extends: [root]
-```
-
-This lets you keep shared values in `root` and override only what each app needs in `travel`, `food`, or other child workspaces.
-
-## Day-to-day workspace management
-
-Add a new app workspace:
-
-```bash
-cnos workspace add insights --package-root apps/insights --extends root
-cnos workspace add gallery --package-root apps/gallery --extends root
-```
-
-List what exists:
-
-```bash
-cnos workspace list
-```
-
-Remove one later:
-
-```bash
-cnos workspace remove gallery
-```
-
-## Migrating an older single-root repo into workspace mode
-
-If a repo was initialized earlier with:
+The intended progression is:
 
 ```bash
 cnos init
+cnos workspace enable
+cnos workspace add api --package-root apps/api
+cnos workspace add web --package-root apps/web
 ```
 
-and the current config still lives directly under `.cnos/values`, `.cnos/secrets`, `.cnos/env`, and `.cnos/profiles`, move that existing config into a real workspace with:
+## Regular mode first
+
+`cnos init` creates:
+
+```text
+.cnos/
+  values/
+  secrets/
+  env/
+  profiles/
+```
+
+This is effectively the shared base layer for a single-app repo.
+
+## Convert to workspace mode
+
+When the repo grows:
 
 ```bash
-cnos workspace add main --onboard-current
+cnos workspace enable
 ```
 
-CNOS will move the physical folders into `.cnos/workspaces/main` and rewrite the local anchor so the repo now behaves as a workspace-aware project.
+CNOS converts the flat tree into:
 
-Read from an app package without passing a root manually:
-
-```ts
-import cnos from '@kitsy/cnos';
-
-await cnos.ready();
-console.log(cnos('value.app.name'));
+```text
+.cnos/
+  workspaces/
+    base/
+      values/
+      secrets/
+      env/
+      profiles/
 ```
 
-Override per command when needed:
+`base` is the default shared workspace convention. It is not resolver magic; it is just the standard scaffolded root workspace.
+
+## Add child workspaces
 
 ```bash
-cnos list values --workspace travel
-cnos build server --workspace travel --profile prod --to apps/travel/.cnos-server.json
+cnos workspace add api --package-root apps/api
+cnos workspace add web --package-root apps/web
 ```
 
-## Runtime Projection
+If `base` exists, CNOS defaults those children to `extends: [base]`.
 
-The authoring tree stays at repo root. Runtime consumers do not need the full `.cnos/` layout.
+Resulting manifest shape:
 
-For server packaging:
+```yaml
+workspaces:
+  default: base
+  items:
+    base: {}
+    api:
+      extends: [base]
+    web:
+      extends: [base]
+```
+
+## Anchors
+
+Each consuming app or package should get a `.cnosrc.yml` anchor:
+
+```yaml
+# apps/api/.cnosrc.yml
+root: ../../.cnos
+workspace: api
+```
+
+CNOS resolves from `.cnosrc.yml`, not by walking upward for `.cnos/` directories.
+
+## Onboard existing config sources
+
+If the repo still has env or config files:
 
 ```bash
-cnos build server --workspace api-gateway --profile prod --to apps/api-gateway/.cnos-server.json
+cnos onboard
+cnos onboard --workspace api --env .env.api --materialize
 ```
 
-`@kitsy/cnos` then auto-loads in this order:
-
-1. `__CNOS_PROJECTION__`
-2. `.cnos-server.json`
-3. full authoring resolution through `.cnosrc.yml`
-
-Browser packages keep using public projection through Vite, Next, webpack, or `@kitsy/cnos/build`.
-
-## Detach and Reattach
-
-Detach a child package into a standalone CNOS root:
-
-```bash
-cnos workspace detach --package-root apps/travel
-```
-
-This materializes the effective config into `apps/travel/.cnos`, rewrites `apps/travel/.cnosrc.yml` to point to that local root, and stops inheriting from the parent repo.
-
-Reattach it later:
-
-```bash
-cnos workspace attach --package-root apps/travel
-```
-
-This imports the standalone child config back into the parent workspace model, archives the detached `.cnos`, and restores the package anchor.
+Use onboarding to pull source files into CNOS first, then move app code to direct CNOS reads later.

@@ -1,0 +1,64 @@
+---
+title: cnos onboard
+description: Import existing env or config files into CNOS source storage and value.*.
+---
+
+# cnos onboard
+
+`cnos onboard` helps migrate existing config sources into CNOS without forcing an immediate app-code rewrite.
+
+## Auto-discover dotenv files
+
+```bash
+cnos onboard
+```
+
+By default CNOS scans the repo root for `.env`, `.env.<profile>`, and `.env.*.example` files.
+
+It copies those files into CNOS source storage and prints the proposed `value.*` mappings.
+
+## Explicit source formats
+
+```bash
+cnos onboard --env .env.production
+cnos onboard --yaml config/app.yml
+cnos onboard --json config/settings.json
+cnos onboard --toml config/app.toml
+cnos onboard --config config/app.yml
+```
+
+## Materialize values
+
+Interactive mode prompts before writing values.
+
+For automation:
+
+```bash
+cnos onboard --env .env.production --materialize
+cnos onboard --yaml config/db.yml --source-only
+```
+
+Non-interactive shells default to `--source-only` unless `--materialize` is passed explicitly.
+
+## Prefix imports
+
+```bash
+cnos onboard --yaml config/db.yml --prefix db --materialize
+```
+
+This maps:
+
+- `host` -> `value.db.host`
+- `port` -> `value.db.port`
+
+## Workspace-aware behavior
+
+- Regular mode imports into the implicit `base` layer.
+- Workspace mode imports into the selected workspace.
+- If no workspace is specified in workspace mode, CNOS defaults to `base` when it exists.
+
+Example:
+
+```bash
+cnos onboard --workspace api --env .env.api --materialize
+```

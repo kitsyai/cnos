@@ -276,7 +276,7 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
-  it('parses workspace add flows with package roots and migration flags', () => {
+  it('parses workspace and onboard DX flows', () => {
     expect(parseArgs(['workspace', 'add', 'insights', '--package-root', 'apps/insights', '--extends', 'base'])).toEqual({
       command: 'workspace',
       args: ['add', 'insights'],
@@ -286,11 +286,29 @@ describe('@kitsy/cnos-cli', () => {
       passthrough: [],
     });
 
-    expect(parseArgs(['workspace', 'add', 'main', '--onboard-current'])).toEqual({
+    expect(parseArgs(['workspace', 'enable'])).toEqual({
       command: 'workspace',
-      args: ['add', 'main'],
+      args: ['enable'],
       options: {
-        cliArgs: ['--onboard-current'],
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+
+    expect(parseArgs(['init', '--mode', 'workspace', '--workspaces', 'api,web'])).toEqual({
+      command: 'init',
+      args: [],
+      options: {
+        cliArgs: ['--mode', 'workspace', '--workspaces', 'api,web'],
+      },
+      passthrough: [],
+    });
+
+    expect(parseArgs(['onboard', '--json', 'settings.json', '--prefix', 'app', '--materialize'])).toEqual({
+      command: 'onboard',
+      args: [],
+      options: {
+        cliArgs: ['--json', 'settings.json', '--prefix', 'app', '--materialize'],
       },
       passthrough: [],
     });
@@ -439,28 +457,37 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
-  it('scaffolds the workspace-aware starter tree and gitignore entries', async () => {
+  it('scaffolds regular mode by default and workspace mode when requested', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-init-'));
     fixtureRoots.push(root);
 
-    await runInit({
-      root,
-      workspace: 'api',
-    });
+    await runInit({ root });
 
-    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
-      'default: api',
-    );
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain('profiles:\n  default: local');
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.not.toContain('workspaces:');
     await expect(readFile(path.join(root, '.cnosrc.yml'), 'utf8')).resolves.toContain('root: ./.cnos');
-    await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).resolves.toContain(
-      'workspace: api',
-    );
+    await expect(readFile(path.join(root, '.cnos-workspace.yml'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     await expect(readFile(path.join(root, '.gitignore'), 'utf8')).resolves.toContain(
       '.cnos/workspaces/*/env/.env',
     );
     await expect(readFile(path.join(root, '.gitignore'), 'utf8')).resolves.toContain(
       '!.cnos/workspaces/*/env/.env.*.example',
     );
+
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-init-workspace-'));
+    fixtureRoots.push(workspaceRoot);
+
+    await runInit({
+      root: workspaceRoot,
+      cliArgs: ['--mode', 'workspace', '--workspaces', 'api,web'],
+    });
+
+    await expect(readFile(path.join(workspaceRoot, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain('default: base');
+    await expect(readFile(path.join(workspaceRoot, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain('profiles:\n  default: local');
+    await expect(readFile(path.join(workspaceRoot, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain('api:\n      extends: [base]');
+    await expect(readFile(path.join(workspaceRoot, '.cnos-workspace.yml'), 'utf8')).resolves.toContain('workspace: base');
   });
 
   it('formats json output', () => {
@@ -468,7 +495,7 @@ describe('@kitsy/cnos-cli', () => {
   });
 
   it('prints the CLI version', () => {
-    expect(runVersion()).toBe('1.8.0');
+    expect(runVersion()).toBe('1.8.1');
   });
 
   it('blocks remote-root writes and exposes cache listings', async () => {
@@ -549,8 +576,11 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('drift')).toContain('Usage: cnos drift');
     expect(runHelp('migrate')).toContain('Usage: cnos migrate');
     expect(runHelp('watch')).toContain('Usage: cnos watch [--signal]');
+    expect(runHelp('init')).toContain('--mode <regular|workspace>');
+    expect(runHelp('onboard')).toContain('--materialize');
     expect(runHelp('workspace')).toContain('workspace add');
-    expect(runHelp('workspace add')).toContain('--onboard-current');
+    expect(runHelp('workspace')).toContain('workspace enable');
+    expect(runHelp('workspace enable')).toContain('Usage: cnos workspace enable');
     expect(runHelp('workspace list')).toContain('Usage: cnos workspace list');
   });
 
@@ -570,23 +600,59 @@ describe('@kitsy/cnos-cli', () => {
     );
     expect(commandPayload.integrations.some((integration: { id: string }) => integration.id === 'vite')).toBe(true);
     expect(JSON.parse(runHelpAi('workspace add', ['--format=json'])).command.id).toBe('workspace add');
+    expect(JSON.parse(runHelpAi('workspace enable', ['--format=json'])).command.id).toBe('workspace enable');
   });
 
-  it('onboards root env files into the workspace env tree without deleting originals by default', async () => {
+  it('onboards env files into regular mode storage and materializes values only when requested', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-onboard-'));
     fixtureRoots.push(root);
     await writeFile(path.join(root, '.env'), 'VITE_DEPLOY_ENV=local\n');
     await writeFile(path.join(root, '.env.stage'), 'VITE_DEPLOY_ENV=stage\n');
     await writeFile(path.join(root, '.env.stage.example'), 'VITE_DEPLOY_ENV=stage\n');
 
-    await expect(runOnboard({ root, workspace: 'webapp' })).resolves.toContain('imported 3 root env files');
-    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'webapp', 'env', '.env'), 'utf8')).resolves.toContain(
+    await expect(runOnboard({ root, processEnv: { ...process.env, CI: '1' } })).resolves.toContain(
+      'Non-interactive mode detected; defaulted to source-only',
+    );
+    await expect(readFile(path.join(root, '.cnos', 'env', '.env'), 'utf8')).resolves.toContain(
       'VITE_DEPLOY_ENV=local',
     );
-    await expect(readFile(path.join(root, '.cnos', 'workspaces', 'webapp', 'env', '.env.stage'), 'utf8')).resolves.toContain(
+    await expect(readFile(path.join(root, '.cnos', 'env', '.env.stage'), 'utf8')).resolves.toContain(
       'VITE_DEPLOY_ENV=stage',
     );
     await expect(readFile(path.join(root, '.env'), 'utf8')).resolves.toContain('VITE_DEPLOY_ENV=local');
+    await expect(readFile(path.join(root, '.cnos', 'values', 'vite.yml'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
+    await expect(
+      runOnboard({
+        root,
+        processEnv: { ...process.env, CI: '1' },
+        cliArgs: ['--env', '.env', '--materialize'],
+      }),
+    ).resolves.toContain('Materialized 1 value key(s).');
+    await expect(runRead('value.vite.deploy.env', { root })).resolves.toBe('local');
+  });
+
+  it('onboards structured config sources with prefix scoping', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-onboard-structured-'));
+    fixtureRoots.push(root);
+    await writeFile(
+      path.join(root, 'config.yml'),
+      ['host: localhost', 'port: 5432', 'creds:', '  password: secret'].join('\n'),
+    );
+
+    await expect(
+      runOnboard({
+        root,
+        processEnv: { ...process.env, CI: '1' },
+        cliArgs: ['--yaml', 'config.yml', '--prefix', 'db', '--materialize'],
+      }),
+    ).resolves.toContain('Materialized 3 value key(s).');
+
+    await expect(runRead('value.db.host', { root })).resolves.toBe('localhost');
+    await expect(runRead('value.db.port', { root })).resolves.toBe('5432');
+    await expect(runRead('value.db.creds.password', { root })).resolves.toBe('secret');
   });
 
   it('generates typed config files from schema with default and custom outputs', async () => {
@@ -1484,10 +1550,11 @@ describe('@kitsy/cnos-cli', () => {
     ).resolves.toContain('Travel');
   });
 
-  it('adds, lists, removes, and onboards workspaces through the workspace command family', async () => {
+  it('enables workspace mode and manages child workspaces through the workspace command family', async () => {
     const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-workspace-add-'));
     fixtureRoots.push(repoRoot);
     await mkdir(path.join(repoRoot, 'apps', 'insights'), { recursive: true });
+    await mkdir(path.join(repoRoot, '.cnos', 'values'), { recursive: true });
     await writeFile(
       path.join(repoRoot, '.gitignore'),
       'node_modules/\n',
@@ -1499,25 +1566,31 @@ describe('@kitsy/cnos-cli', () => {
     await mkdir(path.join(repoRoot, '.cnos'), { recursive: true });
     await writeFile(
       path.join(repoRoot, '.cnos', 'cnos.yml'),
-      ['version: 1', 'project:', '  name: monorepo-fixture'].join('\n'),
+      ['version: 1', 'project:', '  name: monorepo-fixture', 'profiles:', '  default: local'].join('\n'),
     );
+    await writeFile(path.join(repoRoot, '.cnos', 'values', 'app.yml'), ['app:', '  name: monorepo'].join('\n'));
 
     await expect(
-      runWorkspace(['add', 'main'], {
+      runWorkspace(['enable'], {
         root: repoRoot,
-        cliArgs: ['--onboard-current'],
       }),
-    ).resolves.toContain('added workspace main');
+    ).resolves.toContain('enabled workspace mode');
+    await expect(readFile(path.join(repoRoot, '.cnos', 'workspaces', 'base', 'values', 'app.yml'), 'utf8')).resolves.toContain(
+      'monorepo',
+    );
 
     await expect(
       runWorkspace(['add', 'insights'], {
         root: repoRoot,
-        cliArgs: ['--package-root', path.join(repoRoot, 'apps', 'insights'), '--extends', 'main'],
+        cliArgs: ['--package-root', path.join(repoRoot, 'apps', 'insights')],
       }),
     ).resolves.toContain('added workspace insights');
 
     await expect(readFile(path.join(repoRoot, 'apps', 'insights', '.cnosrc.yml'), 'utf8')).resolves.toContain(
       'workspace: insights',
+    );
+    await expect(readFile(path.join(repoRoot, '.cnos', 'cnos.yml'), 'utf8')).resolves.toContain(
+      'insights:\n      extends:\n        - base',
     );
     await expect(runWorkspace(['list'], { root: repoRoot })).resolves.toContain('insights');
 

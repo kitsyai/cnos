@@ -1,54 +1,50 @@
 ---
 title: cnos workspace
-description: Add, list, remove, scaffold, attach, and detach workspaces.
+description: Enable workspace mode, add child workspaces, and manage attach or detach flows.
 ---
 
 # cnos workspace
 
-Use `cnos workspace` when a repo has more than one app or package consuming the same CNOS root.
+Use `cnos workspace` when one CNOS root needs to serve more than one app or package.
+
+## Enable workspace mode
+
+If the repo started with a flat `.cnos/` tree:
+
+```bash
+cnos workspace enable
+```
+
+CNOS moves:
+
+- `.cnos/values` -> `.cnos/workspaces/base/values`
+- `.cnos/secrets` -> `.cnos/workspaces/base/secrets`
+- `.cnos/env` -> `.cnos/workspaces/base/env`
+- `.cnos/profiles` -> `.cnos/workspaces/base/profiles`
+
+and updates the root anchor to `workspace: base`.
 
 ## Add a workspace
 
 ```bash
-cnos workspace add travel --package-root apps/travel --extends base
+cnos workspace add travel --package-root apps/travel
 ```
 
-This updates `cnos.yml`, creates `.cnos/workspaces/travel`, and writes:
+If `base` exists, the new workspace automatically gets `extends: [base]`.
 
-```yaml
-# apps/travel/.cnosrc.yml
-root: ../../.cnos
-workspace: travel
-```
-
-## Onboard an older single-root project into workspace mode
-
-If a repo already has a flat `.cnos/values`, `.cnos/secrets`, `.cnos/env`, and `.cnos/profiles` tree, migrate it like this:
+Override that when needed:
 
 ```bash
-cnos workspace add main --onboard-current
+cnos workspace add api --extends shared
+cnos workspace add sandbox --extends none
 ```
 
-CNOS will:
-
-1. move the existing flat config folders into `.cnos/workspaces/main`
-2. rewrite the root anchor to `workspace: main`
-3. keep the repo in one authoritative `.cnos` root
-
-## List workspaces
+## List and remove
 
 ```bash
 cnos workspace list
-cnos workspace list --json
-```
-
-## Remove a workspace
-
-```bash
 cnos workspace remove gallery
 ```
-
-CNOS removes the manifest entry and deletes `.cnos/workspaces/gallery`. It refuses to remove the current default workspace until you change `workspaces.default`.
 
 ## Scaffold wording
 
@@ -57,8 +53,6 @@ If your team prefers scaffold wording:
 ```bash
 cnos workspace scaffold insights --package-root apps/insights --extends base
 ```
-
-This follows the same creation path as `workspace add`.
 
 ## Detach and attach
 
