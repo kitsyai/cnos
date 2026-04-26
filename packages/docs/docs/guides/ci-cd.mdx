@@ -14,10 +14,10 @@ cnos run --profile stage -- pnpm build
 cnos build server --profile prod --to dist/.cnos-server.json
 ```
 
-For CI-backed vaults:
+For environment-backed vaults:
 
 ```bash
-cnos vault create github-ci --provider github-secrets --no-passphrase
+cnos vault create github-ci --provider environment --no-passphrase
 cnos secret set app.token APP_TOKEN --vault github-ci
 ```
 

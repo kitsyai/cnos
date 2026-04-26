@@ -31,7 +31,7 @@ export async function resolveVaultAuth(
     };
   }
 
-  if (definition.provider === 'github-secrets') {
+  if (definition.provider === 'github-secrets' || definition.provider === 'environment') {
     return {
       method: definition.auth?.method ?? 'environment',
       ...(definition.auth?.config ? { config: definition.auth.config } : {}),

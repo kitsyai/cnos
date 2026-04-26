@@ -6,7 +6,7 @@ import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from './workspace.j
 export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
 export type NamespaceKind = 'data' | 'projection' | 'system';
 export type NamespaceProjectionSource = 'promote' | 'envMapping';
-export type VaultProviderName = 'local' | 'github-secrets' | (string & {});
+export type VaultProviderName = 'local' | 'environment' | 'github-secrets' | (string & {});
 export type VaultAuthMethod = 'passphrase' | 'environment' | 'token' | 'iam' | 'keychain';
 
 export interface RuntimeNamespaceDefinition {

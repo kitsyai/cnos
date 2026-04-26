@@ -473,6 +473,47 @@ describe('@kitsy/cnos-core', () => {
     expect(runtime.value('app.currentHost')).toBe('live.kitsy.dev');
   });
 
+  it('does not freeze ambient process-env winners into server projections', async () => {
+    const root = await createFixtureRoot([
+      'version: 1',
+      'project:',
+      '  name: projection-filter',
+      'profiles:',
+      '  default: local',
+    ].join('\n'));
+    const loader: LoaderPlugin = createFixtureLoader('projection-filter-loader', [
+      {
+        key: 'value.app.name',
+        value: 'from-process-env',
+        namespace: 'value',
+        sourceId: 'process-env',
+        pluginId: '@kitsy/cnos/plugins/process-env',
+        workspaceId: 'default',
+        origin: { envVar: 'APP_NAME' },
+      },
+      {
+        key: 'value.server.port',
+        value: '8080',
+        namespace: 'value',
+        sourceId: 'filesystem-values',
+        pluginId: '@kitsy/cnos/plugins/filesystem-values',
+        workspaceId: 'default',
+      },
+    ]);
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+      processEnv: {
+        APP_NAME: 'from-process-env',
+      },
+    });
+
+    expect(runtime.read('value.app.name')).toBe('from-process-env');
+    expect(runtime.toServerProjection().values).toEqual({
+      'server.port': '8080',
+    });
+  });
+
   it('flattens nested records', () => {
     expect(flattenObject({ app: { port: 3000 } })).toEqual({
       'app.port': 3000,

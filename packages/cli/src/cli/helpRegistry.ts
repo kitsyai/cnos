@@ -329,7 +329,7 @@ const COMMANDS: HelpCommand[] = [
       'cnos vault create local-dev',
       'cnos vault auth local-dev',
       'cnos secret set app.token super-secret --vault local-dev',
-      'cnos vault create github-ci --provider github-secrets --no-passphrase',
+      'cnos vault create github-ci --provider environment --no-passphrase',
       'cnos secret set app.token APP_TOKEN --vault github-ci',
     ],
   },
@@ -338,21 +338,21 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Manage manifest-defined secret vaults.',
     usage: 'cnos vault [create <name> | list | remove <name>] [options] [global-options]',
     description:
-      'Creates, lists, and removes vault definitions in .cnos/cnos.yml. Local vaults use encrypted material under ~/.cnos/secrets, while github-secrets vaults resolve from process.env in CI.',
+      'Creates, lists, and removes vault definitions in .cnos/cnos.yml. Local vaults use encrypted material under ~/.cnos/secrets, while environment-backed vaults resolve from process.env in CI and cloud runtimes. github-secrets remains a compatibility alias.',
     options: [
       {
-        flag: '--provider <local|github-secrets>',
+        flag: '--provider <local|environment|github-secrets>',
         description: 'Vault provider. Defaults to local.',
       },
       {
         flag: '--no-passphrase',
-        description: 'Allowed for passwordless providers such as github-secrets.',
+        description: 'Allowed for passwordless providers such as environment-backed vaults.',
       },
     ],
     examples: [
       'cnos vault create local-dev',
       'cnos vault auth local-dev',
-      'cnos vault create github-ci --provider github-secrets --no-passphrase',
+      'cnos vault create github-ci --provider environment --no-passphrase',
       'cnos vault list',
       'cnos vault remove local-dev',
     ],
@@ -360,12 +360,12 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'vault create',
     summary: 'Create a manifest-defined vault.',
-    usage: 'cnos vault create <name> [--provider <local|github-secrets>] [--no-passphrase] [global-options]',
+    usage: 'cnos vault create <name> [--provider <local|environment|github-secrets>] [--no-passphrase] [global-options]',
     description:
       'Creates a vault definition in .cnos/cnos.yml and, for local vaults, initializes the encrypted store under ~/.cnos/secrets. CNOS prompts for a passphrase when one is not already available from env or keychain.',
     examples: [
       'cnos vault create local-dev',
-      'cnos vault create github-ci --provider github-secrets --no-passphrase',
+      'cnos vault create firebase-prod --provider environment --no-passphrase',
     ],
   },
   {
@@ -545,12 +545,12 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Write a secret securely.',
     usage: 'cnos secret set <path> <value> [--local|--remote|--ref] [--vault <name>] [--provider <name>] [global-options]',
     description:
-      'Writes a secret reference into the repo. When a local vault is selected, CNOS stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>; when a github-secrets vault is selected, CNOS writes a CI env-backed ref.',
+      'Writes a secret reference into the repo. When a local vault is selected, CNOS stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>; when an environment-backed vault is selected, CNOS writes an env-backed ref for CI or cloud runtimes.',
     examples: [
       'cnos vault create db',
       'cnos vault auth db',
       'cnos secret set app.token super-secret --vault db',
-      'cnos vault create github-ci --provider github-secrets --no-passphrase',
+      'cnos vault create github-ci --provider environment --no-passphrase',
       'cnos secret set app.token APP_TOKEN --vault github-ci',
     ],
   },

@@ -240,7 +240,7 @@ function normalizeVaultAuth(
     };
   }
 
-  if (provider === 'github-secrets') {
+  if (provider === 'github-secrets' || provider === 'environment') {
     return {
       method: auth?.method ?? 'environment',
       ...(auth?.config ? { config: auth.config } : {}),

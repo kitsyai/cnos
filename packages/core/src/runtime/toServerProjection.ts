@@ -17,6 +17,10 @@ function configHash(values: Record<string, unknown>): string {
   return createHash('sha256').update(serialized).digest('hex');
 }
 
+function shouldProjectResolvedValue(sourceId: string | undefined): boolean {
+  return sourceId !== 'process-env';
+}
+
 export function toServerProjection(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
@@ -48,6 +52,10 @@ export function toServerProjection(
     }
 
     if (entry.namespace === 'value') {
+      if (!shouldProjectResolvedValue(entry.winner.sourceId)) {
+        continue;
+      }
+
       if (helpers.isRuntimeDependent?.(key)) {
         const formula = helpers.toServerFormula?.(key);
 
@@ -73,6 +81,10 @@ export function toServerProjection(
       !namespaceDefinition.sensitive &&
       entry.namespace !== 'public'
     ) {
+      if (!shouldProjectResolvedValue(entry.winner.sourceId)) {
+        continue;
+      }
+
       if (helpers.isRuntimeDependent?.(key)) {
         const formula = helpers.toServerFormula?.(key);
 

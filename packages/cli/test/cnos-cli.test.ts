@@ -1412,11 +1412,16 @@ describe('@kitsy/cnos-cli', () => {
       runBuild('server', {
         root,
         workspace: 'api',
-        processEnv: {},
+        processEnv: {
+          APP_NAME: 'from-process-env',
+          PATH: 'C:/tools',
+        },
         cliArgs: ['--to', path.join(exportRoot, '.cnos-server.json')],
       }),
     ).resolves.toContain('.cnos-server.json');
     await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.toContain('"workspace": "api"');
+    await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.not.toContain('from-process-env');
+    await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.not.toContain('C:/tools');
     await expect(
       runBuild('public', {
         root,

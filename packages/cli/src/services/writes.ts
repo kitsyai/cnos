@@ -224,7 +224,7 @@ export async function setSecret(
     options.mode ??
     (vaultDefinition.provider === 'local'
       ? 'local'
-      : vaultDefinition.provider === 'github-secrets'
+      : vaultDefinition.provider === 'github-secrets' || vaultDefinition.provider === 'environment'
         ? 'ref'
         : 'remote');
   let reference: SecretReference;

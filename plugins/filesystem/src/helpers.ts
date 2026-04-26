@@ -180,7 +180,7 @@ export async function resolveSecretValue(
     );
   }
 
-  if (value.provider === 'env' || value.provider === 'github-secrets') {
+  if (value.provider === 'env' || value.provider === 'environment' || value.provider === 'github-secrets') {
     const resolved = processEnv?.[value.ref];
 
     if (resolved === undefined) {

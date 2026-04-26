@@ -367,7 +367,7 @@ export async function resolveVaultAccessKey(
   processEnv: Record<string, string | undefined> = process.env,
 ): Promise<VaultAuthConfig | undefined> {
   if (definition?.provider !== 'local') {
-    return definition?.provider === 'github-secrets'
+    return definition?.provider === 'github-secrets' || definition?.provider === 'environment'
       ? {
           method: definition.auth?.method ?? 'environment',
           ...(definition?.auth?.config ? { config: definition.auth.config } : {}),
