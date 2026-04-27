@@ -208,7 +208,10 @@ export async function setSecret(
     vault?: string;
   } = {},
 ): Promise<SecretWriteResult> {
-  const runtime = await createRuntimeService(options);
+  const runtime = await createRuntimeService({
+    ...options,
+    secretResolution: 'lazy',
+  });
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
   const filePath = resolveConfigDocumentPath(workspaceRoot, 'secret', configPath, profile);
@@ -264,7 +267,10 @@ export async function deleteSecret(
   options: RuntimeServiceOptions & { target?: 'local' | 'global' } = {},
 ): Promise<{ filePath: string; deleted: boolean }> {
   await assertWritableConfigRoot(`delete secret.${configPath}`, options);
-  const runtime = await createRuntimeService(options);
+  const runtime = await createRuntimeService({
+    ...options,
+    secretResolution: 'lazy',
+  });
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
   const filePath = resolveConfigDocumentPath(workspaceRoot, 'secret', configPath, profile);

@@ -66,7 +66,10 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   }
 
   if (action === 'list') {
-    const runtime = await createRuntimeService(options);
+    const runtime = await createRuntimeService({
+      ...options,
+      secretResolution: 'lazy',
+    });
     const prefix = consumeOption(cliArgs, '--prefix');
     const vault = consumeOption(cliArgs, '--vault');
     const provider = consumeOption(cliArgs, '--provider');
@@ -149,12 +152,17 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
       : `no secret.${secretPath} found in ${displayPath(result.filePath, root)}`;
   }
 
-  const runtime = await createRuntimeService(options);
+  const runtime = await createRuntimeService({
+    ...options,
+    secretResolution: 'lazy',
+  });
   const secretPath = tail[0] ?? 'app.token';
   const expectedVault = consumeOption(cliArgs, '--vault');
   const reveal = consumeFlag(cliArgs, '--reveal');
   const entry = runtime.graph.entries.get(`secret.${secretPath}`);
   const secretRef = entry?.winner.metadata?.secretRef as { provider?: string; ref?: string; vault?: string } | undefined;
+
+  await runtime.refreshSecret(`secret.${secretPath}`);
   const value = runtime.secret(secretPath);
 
   if (value === undefined) {

@@ -820,6 +820,93 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
+  it('allows vault auth to reuse an existing local session key', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-vault-session-'));
+    fixtureRoots.push(secretHome);
+
+    await runVault(['create', 'default'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+    });
+
+    await expect(
+      runVault(['auth', 'default'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+      }),
+    ).resolves.toContain('authenticated vault "default"');
+
+    await expect(
+      runVault(['auth', 'default'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+      }),
+    ).resolves.toContain('authenticated vault "default"');
+  });
+
+  it('sets and gets a local secret even when sibling refs in the same workspace are still missing', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-partial-local-secrets-'));
+    fixtureRoots.push(secretHome);
+
+    await runVault(['create', 'default'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+    });
+
+    await writeFile(
+      path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'subscriptions.yml'),
+      [
+        'subscriptions:',
+        '  razorpay:',
+        '    key_id:',
+        '      provider: local',
+        '      ref: subscriptions.razorpay.key_id',
+        '      vault: default',
+        '    key_secret:',
+        '      provider: local',
+        '      ref: subscriptions.razorpay.key_secret',
+        '      vault: default',
+      ].join('\n'),
+    );
+
+    await expect(
+      runSecret(['set', 'subscriptions.razorpay.key_id', 'rzp_test_123'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--local', '--vault', 'default'],
+      }),
+    ).resolves.toContain('set secret.subscriptions.razorpay.key_id');
+
+    await expect(
+      runSecret(['get', 'subscriptions.razorpay.key_id'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--vault', 'default', '--reveal'],
+      }),
+    ).resolves.toBe('rzp_test_123');
+  }, 15000);
+
   it('supports value CRUD and generic list flows without leaking ambient env into value listings', async () => {
     const root = await createRuntimeFixture();
 

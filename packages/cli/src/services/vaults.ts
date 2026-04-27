@@ -234,10 +234,6 @@ export async function authenticateVault(
   const storeRoot = resolveSecretStoreRoot(options.processEnv);
 
   if (definition.provider === 'local') {
-    if (!auth.passphrase) {
-      throw new Error(`Vault "${vault}" requires passphrase-based authentication.`);
-    }
-
     const metadata = await readVaultMetadata(storeRoot, vault);
 
     if (!metadata) {
@@ -245,13 +241,20 @@ export async function authenticateVault(
         `Vault "${vault}" has not been initialized yet. Run cnos vault create ${vault} first.`,
       );
     }
+    const derivedKey =
+      auth.derivedKey ?? (auth.passphrase
+        ? deriveVaultKey(auth.passphrase, Buffer.from(metadata.salt, 'base64'), metadata.iterations)
+        : undefined);
 
-    const derivedKey = deriveVaultKey(auth.passphrase, Buffer.from(metadata.salt, 'base64'), metadata.iterations);
+    if (!derivedKey) {
+      throw new Error(`Vault "${vault}" requires passphrase-based authentication.`);
+    }
+
     await listLocalSecrets(
       storeRoot,
       {
         derivedKey,
-        method: auth.method,
+        method: auth.derivedKey ? auth.method : 'passphrase',
         ...(definition.auth?.config ? { config: definition.auth.config } : {}),
       },
       vault,

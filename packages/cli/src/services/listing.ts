@@ -94,7 +94,10 @@ async function listStoredNamespace(
   namespace: StoredNamespace,
   options: RuntimeServiceOptions & SecretListFilter,
 ): Promise<ListEntry[]> {
-  const runtime = await createRuntimeService(options);
+  const runtime = await createRuntimeService({
+    ...options,
+    ...(namespace === 'secret' ? { secretResolution: 'lazy' as const } : {}),
+  });
 
   return Array.from(runtime.graph.entries.values())
     .filter((entry) => entry.namespace === namespace)
