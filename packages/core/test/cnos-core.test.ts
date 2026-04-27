@@ -418,7 +418,58 @@ describe('@kitsy/cnos-core', () => {
         runtimeRefs: ['process.env.PUBLIC_HOST'],
       },
     });
+    expect(projection.secretRefs).toEqual({});
     expect(projection.runtimeNamespaces).toEqual(['process']);
+  });
+
+  it('includes environment-backed env-var bindings in server projections', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: env-secret-projection',
+        'vaults:',
+        '  firebase-stage:',
+        '    provider: environment',
+        '    mapping:',
+        '      RAZORPAY_KEY_ID: subscriptions.razorpay.key_id',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('env-secret-loader', [
+      {
+        key: 'secret.subscriptions.razorpay.key_id',
+        value: {
+          provider: 'environment',
+          ref: 'subscriptions.razorpay.key_id',
+          vault: 'firebase-stage',
+        },
+        namespace: 'secret',
+        sourceId: 'filesystem-secrets',
+        pluginId: '@kitsy/cnos/plugins/filesystem-secrets',
+        workspaceId: 'default',
+        metadata: {
+          secretRef: {
+            provider: 'environment',
+            ref: 'subscriptions.razorpay.key_id',
+            vault: 'firebase-stage',
+          },
+        },
+      },
+    ]);
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+      processEnv: {},
+    });
+
+    expect(runtime.toServerProjection().secretRefs).toEqual({
+      'subscriptions.razorpay.key_id': {
+        provider: 'environment',
+        vault: 'firebase-stage',
+        ref: 'subscriptions.razorpay.key_id',
+        envVar: 'RAZORPAY_KEY_ID',
+      },
+    });
   });
 
   it('supports declared custom runtime namespaces through runtime providers', async () => {

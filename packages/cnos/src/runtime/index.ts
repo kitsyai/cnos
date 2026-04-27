@@ -576,7 +576,16 @@ function attachBootstrappedProjection(projection: ServerProjection, force = fals
       return undefined;
     }
 
-    const definition = { provider: ref.provider };
+    const definition = {
+      provider: ref.provider,
+      ...(ref.envVar
+        ? {
+            mapping: {
+              [ref.envVar]: ref.ref,
+            },
+          }
+        : {}),
+    };
     const provider = createSecretVaultProvider(ref.vault ?? 'default', definition, process.env);
     const auth = await resolveVaultAuth(ref.vault ?? 'default', definition, process.env);
     await provider.authenticate(auth);

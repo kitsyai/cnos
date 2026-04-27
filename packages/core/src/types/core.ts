@@ -192,7 +192,7 @@ export interface ServerProjection {
   configHash: string;
   values: Record<string, unknown>;
   derived: Record<string, DerivedFormula>;
-  secretRefs: Record<string, SecretReference>;
+  secretRefs: Record<string, SecretReference & { envVar?: string }>;
   publicKeys: string[];
   runtimeNamespaces: string[];
   meta: {

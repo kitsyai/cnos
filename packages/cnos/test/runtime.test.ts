@@ -53,10 +53,43 @@ async function createFixtureRoot(): Promise<string> {
   return root;
 }
 
+async function createEnvSecretFixtureRoot(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-projection-secret-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'secrets'), { recursive: true });
+  await writeFile(path.join(root, '.cnosrc.yml'), 'root: ./.cnos\n');
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: projection-secret-fixture',
+      'vaults:',
+      '  firebase-stage:',
+      '    provider: environment',
+      '    mapping:',
+      '      RAZORPAY_KEY_ID: subscriptions.razorpay.key_id',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'secrets', 'subscriptions.yml'),
+    [
+      'subscriptions:',
+      '  razorpay:',
+      '    key_id:',
+      '      provider: environment',
+      '      ref: subscriptions.razorpay.key_id',
+      '      vault: firebase-stage',
+    ].join('\n'),
+  );
+  return root;
+}
+
 beforeEach(() => {
   delete process.env[CNOS_GRAPH_ENV_VAR];
   delete process.env[CNOS_PROJECTION_ENV_VAR];
   delete process.env.PORT;
+  delete process.env.RAZORPAY_KEY_ID;
 });
 
 afterEach(async () => {
@@ -64,6 +97,7 @@ afterEach(async () => {
   delete process.env[CNOS_GRAPH_ENV_VAR];
   delete process.env[CNOS_PROJECTION_ENV_VAR];
   delete process.env.PORT;
+  delete process.env.RAZORPAY_KEY_ID;
   vi.resetModules();
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -182,5 +216,23 @@ describe('@kitsy/cnos root runtime entry', () => {
     expect(cnos.value('app.currentHost')).toBe('console.kitsy.local');
     host = 'cnos.kitsy.local';
     expect(cnos.value('app.currentHost')).toBe('cnos.kitsy.local');
+  });
+
+  it('hydrates environment-backed secrets from server projections using mapped env vars', async () => {
+    const root = await createEnvSecretFixtureRoot();
+    process.env.RAZORPAY_KEY_ID = 'rzp_stage_live_key';
+    const runtime = await createCnos({
+      root,
+      processEnv: process.env,
+    });
+
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(runtime.toServerProjection());
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await cnos.ready();
+    expect(cnos.secret('subscriptions.razorpay.key_id')).toBe('rzp_stage_live_key');
+    delete process.env.RAZORPAY_KEY_ID;
   });
 });

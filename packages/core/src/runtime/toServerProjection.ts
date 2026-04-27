@@ -12,6 +12,20 @@ function stripValuePrefix(key: string): string {
   return key.startsWith('value.') ? key.slice('value.'.length) : key;
 }
 
+function resolveProjectedEnvVar(
+  manifest: NormalizedManifest,
+  vaultId: string,
+  ref: string,
+): string | undefined {
+  const mapping = manifest.vaults[vaultId]?.mapping;
+
+  if (!mapping) {
+    return undefined;
+  }
+
+  return Object.entries(mapping).find(([, logicalRef]) => logicalRef === ref)?.[0];
+}
+
 function configHash(values: Record<string, unknown>): string {
   const serialized = JSON.stringify(stableSortObject(values));
   return createHash('sha256').update(serialized).digest('hex');
@@ -43,10 +57,17 @@ export function toServerProjection(
 
   for (const [key, entry] of graph.entries) {
     if (entry.namespace === 'secret' && isSecretReference(entry.value)) {
+      const vaultId = entry.value.vault ?? 'default';
+      const envVar = resolveProjectedEnvVar(manifest, vaultId, entry.value.ref);
       secretRefs[key.slice('secret.'.length)] = {
         provider: entry.value.provider,
-        vault: entry.value.vault ?? 'default',
+        vault: vaultId,
         ref: entry.value.ref,
+        ...(envVar
+          ? {
+              envVar,
+            }
+          : {}),
       };
       continue;
     }
