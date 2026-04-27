@@ -495,7 +495,7 @@ describe('@kitsy/cnos-cli', () => {
   });
 
   it('prints the CLI version', () => {
-    expect(runVersion()).toBe('1.8.2');
+    expect(runVersion()).toBe('1.8.3');
   });
 
   it('blocks remote-root writes and exposes cache listings', async () => {

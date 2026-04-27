@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "Batteries-included CNOS runtime package wired with the official plugins.",
   "type": "module",
   "main": "./dist/index.cjs",
