@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-webpack",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "Webpack integration for CNOS public config injection.",
   "type": "module",
   "main": "./dist/index.cjs",
