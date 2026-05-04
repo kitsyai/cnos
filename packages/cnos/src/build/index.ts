@@ -1,4 +1,11 @@
-import { type CnosCreateOptions, type ServerProjection } from '@kitsy/cnos-core';
+import {
+  CnosManifestError,
+  createSecretVaultProvider,
+  isSecretReference,
+  type CnosCreateOptions,
+  type CnosRuntime,
+  type ServerProjection,
+} from '@kitsy/cnos-core';
 
 import { createCnos } from '../createCnos.js';
 
@@ -129,9 +136,35 @@ export async function resolveFrameworkEnv(
 export async function resolveServerProjection(
   options: CnosCreateOptions = {},
 ): Promise<ServerProjection> {
+  const secretResolution = options.secretResolution ?? 'lazy';
   const runtime = await createCnos({
     ...options,
     cacheMode: options.cacheMode ?? 'build',
+    secretResolution,
   });
+  validateServerProjectionSecretRefs(runtime);
   return runtime.toServerProjection();
+}
+
+function validateServerProjectionSecretRefs(runtime: CnosRuntime): void {
+  for (const entry of runtime.graph.entries.values()) {
+    if (entry.namespace !== 'secret' || !isSecretReference(entry.value)) {
+      continue;
+    }
+
+    const vaultId = entry.value.vault ?? 'default';
+    const definition = runtime.manifest.vaults[vaultId];
+
+    if (!definition) {
+      throw new CnosManifestError(`Unknown vault "${vaultId}" for secret ref "${entry.key}"`);
+    }
+
+    if (entry.value.provider !== definition.provider) {
+      throw new CnosManifestError(
+        `Secret ref "${entry.key}" declares provider "${entry.value.provider}" but vault "${vaultId}" uses provider "${definition.provider}"`,
+      );
+    }
+
+    createSecretVaultProvider(vaultId, definition);
+  }
 }

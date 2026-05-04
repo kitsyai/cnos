@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import cnos from '../src/browser/index.js';
-import { resolveBrowserData, resolveFrameworkEnv, toFrameworkEnv } from '../src/build/index.js';
+import { resolveBrowserData, resolveFrameworkEnv, resolveServerProjection, toFrameworkEnv } from '../src/build/index.js';
 
 const fixtureRoots: string[] = [];
 
@@ -65,6 +65,61 @@ async function createRuntimeDependentFixtureRoot(): Promise<string> {
       '    $derive:',
       "      expr: \"concat('https://', coalesce(process.env.PUBLIC_HOST, value.app.host))\"",
     ].join('\n'),
+  );
+  return root;
+}
+
+async function createServerSecretRefFixtureRoot(vaultName = 'default'): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-server-build-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: server-build-fixture',
+      'vaults:',
+      `  ${vaultName}:`,
+      '    provider: local',
+      '    auth:',
+      '      passphrase:',
+      '        from:',
+      '          - env:CNOS_SECRET_PASSPHRASE_DEFAULT',
+      '          - env:CNOS_SECRET_PASSPHRASE',
+      '          - keychain:cnos/default',
+      '          - prompt',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'secrets', 'app.yml'),
+    ['app:', '  token:', '    provider: local', `    vault: ${vaultName}`, '    ref: app.token'].join('\n'),
+  );
+  return root;
+}
+
+async function createUnknownVaultSecretRefFixtureRoot(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-server-build-unknown-vault-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: server-build-unknown-vault-fixture',
+      'vaults:',
+      '  default:',
+      '    provider: local',
+      '    auth:',
+      '      passphrase:',
+      '        from:',
+      '          - env:CNOS_SECRET_PASSPHRASE',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'secrets', 'app.yml'),
+    ['app:', '  token:', '    provider: local', '    vault: typoed-vault', '    ref: app.token'].join('\n'),
   );
   return root;
 }
@@ -131,5 +186,39 @@ describe('@kitsy/cnos/build', () => {
     await expect(resolveFrameworkEnv({ root }, 'vite')).rejects.toThrow(
       'Cannot resolve value.app.origin for public output because it depends on runtime namespace process.',
     );
+  });
+
+  it('builds server projections with local-vault secret refs without authenticating the vault by default', async () => {
+    const root = await createServerSecretRefFixtureRoot();
+
+    await expect(resolveServerProjection({ root, processEnv: {} })).resolves.toMatchObject({
+      secretRefs: {
+        'app.token': {
+          provider: 'local',
+          vault: 'default',
+          ref: 'app.token',
+        },
+      },
+    });
+  });
+
+  it('rejects server projections when secret refs point at unknown vaults', async () => {
+    const root = await createUnknownVaultSecretRefFixtureRoot();
+
+    await expect(resolveServerProjection({ root, processEnv: {} })).rejects.toThrow(
+      'Unknown vault "typoed-vault" for secret ref "secret.app.token"',
+    );
+  });
+
+  it('allows callers to opt back into eager secret resolution for server projections', async () => {
+    const root = await createServerSecretRefFixtureRoot();
+
+    await expect(
+      resolveServerProjection({
+        root,
+        processEnv: {},
+        secretResolution: 'eager',
+      }),
+    ).rejects.toThrow('Cannot authenticate to vault "default"');
   });
 });

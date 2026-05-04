@@ -138,6 +138,50 @@ async function createRuntimeFixture(): Promise<string> {
   return root;
 }
 
+async function createLocalVaultRefFixture(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-vault-ref-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'values'), { recursive: true });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: vault-ref-fixture',
+      'workspaces:',
+      '  default: api',
+      '  items:',
+      '    api: {}',
+      'vaults:',
+      '  default:',
+      '    provider: local',
+      '    auth:',
+      '      passphrase:',
+      '        from:',
+      '          - env:CNOS_SECRET_PASSPHRASE_DEFAULT',
+      '          - env:CNOS_SECRET_PASSPHRASE',
+      '          - keychain:cnos/default',
+      '          - prompt',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+    ['app:', '  name: vault-ref-fixture', 'server:', '  port: 8080'].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'),
+    [
+      'app:',
+      '  token:',
+      '    provider: local',
+      '    ref: app.token',
+      '    vault: default',
+    ].join('\n'),
+  );
+  return root;
+}
+
 async function runGit(
   args: string[],
   cwd: string,
@@ -1530,6 +1574,31 @@ describe('@kitsy/cnos-cli', () => {
     ).resolves.toContain(dumpRoot);
     await expect(readFile(path.join(dumpRoot, 'values', 'base', 'app.yml'), 'utf8')).resolves.toContain(
       'baseUrl: https://api.local',
+    );
+  });
+
+  it('builds server projections with local-vault secret refs without authenticating the vault', async () => {
+    const root = await createLocalVaultRefFixture();
+    const exportRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-server-projection-'));
+    fixtureRoots.push(exportRoot);
+
+    await expect(
+      runBuild('server', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--to', path.join(exportRoot, '.cnos-server.json')],
+      }),
+    ).resolves.toContain('.cnos-server.json');
+
+    await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.toContain(
+      '"app.token"',
+    );
+    await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.toContain(
+      '"provider": "local"',
+    );
+    await expect(readFile(path.join(exportRoot, '.cnos-server.json'), 'utf8')).resolves.toContain(
+      '"vault": "default"',
     );
   });
 
