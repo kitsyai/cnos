@@ -8,4 +8,9 @@ description: Run diagnostics across workspaces, exports, and security rules.
 ```bash
 cnos doctor
 cnos doctor --json
+cnos doctor --fix-secret-env-mappings
 ```
+
+The security diagnostics now flag explicit `secret.*` env mappings as a risk because they enable plaintext secret emission into private env surfaces.
+
+If those mappings were added by mistake, `cnos doctor --fix-secret-env-mappings` removes them from `envMapping.explicit` in one shot and then reruns diagnostics.

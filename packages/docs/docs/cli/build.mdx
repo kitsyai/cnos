@@ -39,4 +39,4 @@ cnos build env --profile prod --reveal --to .env.production.local
 CNOS protects this path in two ways:
 
 - it verifies that the target file is gitignored before writing secrets
-- in interactive terminals it prints a warning prompt before continuing
+- it prints explicit risk warnings and, in interactive terminals, asks `Do you want to continue?` before continuing

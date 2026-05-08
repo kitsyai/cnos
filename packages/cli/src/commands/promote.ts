@@ -35,6 +35,7 @@ export async function runPromote(
   const cliArgs = [...(options.cliArgs ?? [])];
   const target = normalizeTarget(consumeOption(cliArgs, '--to'));
   const alias = consumeOption(cliArgs, '--as');
+  const allowSecret = cliArgs.includes('--allow-secret');
   const keys = args.filter(Boolean);
 
   if (keys.length === 0) {
@@ -49,6 +50,8 @@ export async function runPromote(
     if (!alias) {
       throw new Error('promote --to env requires --as <ENV_VAR>');
     }
+  } else if (allowSecret) {
+    throw new Error('--allow-secret is only supported with promote --to env');
   }
 
   const loadedManifest = await loadManifest({
@@ -62,7 +65,9 @@ export async function runPromote(
   await assertWritableConfigRoot(`promote ${keys.join(', ')}`, options);
 
   for (const key of keys) {
-    ensureProjectionAllowed(loadedManifest.manifest, key, target);
+    ensureProjectionAllowed(loadedManifest.manifest, key, target, {
+      allowSecretForEnv: allowSecret && target === 'env',
+    });
   }
 
   const rawManifest = {
@@ -99,5 +104,5 @@ export async function runPromote(
 
   return target === 'public'
     ? `promoted ${keys.join(', ')} to public in ${displayPath(loadedManifest.manifestPath, root)}`
-    : `promoted ${keys[0]} to env as ${alias} in ${displayPath(loadedManifest.manifestPath, root)}`;
+    : `promoted ${keys[0]} to env as ${alias}${allowSecret ? ' with secret override' : ''} in ${displayPath(loadedManifest.manifestPath, root)}`;
 }

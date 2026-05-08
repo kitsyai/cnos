@@ -1194,6 +1194,34 @@ describe('@kitsy/cnos-cli', () => {
     );
   });
 
+  it('requires --allow-secret for secret env mappings and still forbids secret public promotion', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runPromote(['secret.app.token'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'env', '--as', 'APP_TOKEN'],
+      }),
+    ).rejects.toThrow('Cannot promote secret.app.token to env because namespace "secret" is sensitive.');
+
+    await expect(
+      runPromote(['secret.app.token'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'env', '--as', 'APP_TOKEN', '--allow-secret'],
+      }),
+    ).resolves.toContain('promoted secret.app.token to env as APP_TOKEN with secret override');
+
+    await expect(
+      runPromote(['secret.app.token'], {
+        root,
+        processEnv: {},
+        cliArgs: ['--to', 'public', '--allow-secret'],
+      }),
+    ).rejects.toThrow('--allow-secret is only supported with promote --to env');
+  });
+
   it('supports custom data namespace CRUD, public promotion, and env export', async () => {
     const root = await createRuntimeFixture();
 
@@ -1982,6 +2010,33 @@ describe('@kitsy/cnos-cli', () => {
     );
     await expect(runDoctor({ root, workspace: 'api', processEnv: {}, json: true })).resolves.toContain(
       '"gitignore"',
+    );
+  });
+
+  it('flags secret env mappings in doctor and can remove them in one shot', async () => {
+    const root = await createRuntimeFixture();
+
+    await runPromote(['secret.app.token'], {
+      root,
+      processEnv: {},
+      cliArgs: ['--to', 'env', '--as', 'APP_TOKEN', '--allow-secret'],
+    });
+
+    await expect(runDoctor({ root, workspace: 'api', processEnv: {} })).resolves.toContain(
+      'secret env mapping: APP_TOKEN -> secret.app.token',
+    );
+
+    await expect(
+      runDoctor({
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--fix-secret-env-mappings'],
+      }),
+    ).resolves.toContain('REPAIRED secret-env-mappings: removed APP_TOKEN -> secret.app.token');
+
+    await expect(readFile(path.join(root, '.cnos', 'cnos.yml'), 'utf8')).resolves.not.toContain(
+      'APP_TOKEN: secret.app.token',
     );
   });
 

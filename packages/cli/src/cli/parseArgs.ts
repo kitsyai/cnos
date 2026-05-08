@@ -72,6 +72,8 @@ const COMMAND_FLAG_KEYS = new Set([
   '--derive',
   '--materialize',
   '--source-only',
+  '--allow-secret',
+  '--fix-secret-env-mappings',
 ]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
 

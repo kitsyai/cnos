@@ -8,4 +8,9 @@ description: Promote shareable values into public or env export surfaces.
 ```bash
 cnos promote value.flag.auth.upi_enabled --to public
 cnos promote value.server.port --to env --as PORT
+cnos promote secret.db.password --to env --as POSTGRES_PASSWORD --allow-secret
 ```
+
+`public` promotion never allows `secret.*`.
+
+`env` mapping can allow `secret.*`, but only when you opt in explicitly with `--allow-secret`. This is intentionally narrow: it declares that a private env surface may carry plaintext secrets for runtimes that do not use the CNOS client directly.

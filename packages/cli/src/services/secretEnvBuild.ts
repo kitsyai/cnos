@@ -14,6 +14,12 @@ function isInteractiveSession(): boolean {
   return process.stdin.isTTY && process.stdout.isTTY && !process.env.CI;
 }
 
+function printSecretEnvBuildWarnings(targetPath: string, mappings: SecretEnvMapping[]): void {
+  console.error(`!WARN CNOS detected explicit secret env mappings for ${targetPath}.`);
+  console.error(`!WARN Writing revealed env artifacts is a security risk and may leak plaintext secrets outside CNOS.`);
+  console.error(`!WARN Secret env vars: ${mappings.map((mapping) => mapping.envVar).join(', ')}`);
+}
+
 export function getSecretEnvMappings(runtime: CnosRuntime): SecretEnvMapping[] {
   return Object.entries(runtime.manifest.envMapping.explicit)
     .filter(([, logicalKey]) => runtime.graph.entries.get(logicalKey)?.namespace === 'secret')
@@ -83,14 +89,11 @@ export async function assertSecretEnvTargetIsGitIgnored(targetPath: string, cwd:
 }
 
 export async function confirmSecretEnvBuild(targetPath: string, mappings: SecretEnvMapping[]): Promise<void> {
+  printSecretEnvBuildWarnings(targetPath, mappings);
+
   if (!isInteractiveSession()) {
     return;
   }
-
-  console.error(`!WARN CNOS is about to write resolved secret values into ${targetPath}.`);
-  console.error(
-    `!WARN Secret env vars: ${mappings.map((mapping) => mapping.envVar).join(', ')}`,
-  );
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -98,7 +101,7 @@ export async function confirmSecretEnvBuild(targetPath: string, mappings: Secret
   });
 
   try {
-    const answer = (await rl.question('Continue writing secrets to this env artifact? [y/N] ')).trim().toLowerCase();
+    const answer = (await rl.question('Do you want to continue? [y/N] ')).trim().toLowerCase();
 
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Aborted secret env build.');

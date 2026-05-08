@@ -18,7 +18,7 @@ cnos ui --port 4400 --api-port 4401
 Use it when you want a faster adoption path than raw CLI output for:
 
 - value and meta browsing
-- secret listing with masking intact
+- secret listing, with optional reveal using a supplied vault passphrase
 - env mapping review
 - public promotion review
 - inspect/provenance tracing
@@ -38,5 +38,6 @@ Workspace and profile switching now happen inside the UI itself.
 ## Notes
 
 - The UI is read-only in this first cut.
-- Secret keys stay masked in the browser.
+- Secret keys stay masked by default in the browser.
+- Revealing secrets is local-only and uses the supplied passphrase or existing vault auth state.
 - Use `cnos inspect` or `cnos read --reveal` when you need terminal-first detail.

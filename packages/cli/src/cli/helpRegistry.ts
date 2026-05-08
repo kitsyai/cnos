@@ -521,9 +521,9 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'promote',
     summary: 'Promote shareable config into public or env projection surfaces.',
-    usage: 'cnos promote <key...> --to <public|env> [--as <ENV_VAR>] [global-options]',
+    usage: 'cnos promote <key...> --to <public|env> [--as <ENV_VAR>] [--allow-secret] [global-options]',
     description:
-      'Adds keys to public.promote or envMapping.explicit in .cnos/cnos.yml. Sensitive or non-shareable namespaces are rejected, but declared shareable data namespaces such as flags are allowed.',
+      'Adds keys to public.promote or envMapping.explicit in .cnos/cnos.yml. Sensitive or non-shareable namespaces are rejected by default, but secret.* may be mapped to env explicitly when you pass --allow-secret. public never allows secret promotion.',
     options: [
       {
         flag: '--to <public|env>',
@@ -533,11 +533,16 @@ const COMMANDS: HelpCommand[] = [
         flag: '--as <ENV_VAR>',
         description: 'Required for --to env. Sets the exported env var name for the promoted key.',
       },
+      {
+        flag: '--allow-secret',
+        description: 'Allow secret.* only for --to env. This does not permit secret promotion to public.',
+      },
     ],
     examples: [
       'cnos promote value.flag.auth.upi_enabled --to public',
       'cnos promote flags.upi_enabled --to public',
       'cnos promote value.server.port --to env --as PORT',
+      'cnos promote secret.db.password --to env --as POSTGRES_PASSWORD --allow-secret',
     ],
   },
   {
@@ -657,7 +662,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Build a flat env-file artifact from CNOS.',
     usage: 'cnos build env --to <path> [--format <dotenv|docker-env|json|shell|toml|yaml>] [--reveal] [global-options]',
     description:
-      'Builds a deterministic KEY=VALUE artifact for legacy build and runtime workflows. Secret env mappings stay masked by default; use --reveal only when the target env file is gitignored and you intentionally want concrete secret values.',
+      'Builds a deterministic KEY=VALUE artifact for legacy build and runtime workflows. Secret env mappings stay masked by default; use --reveal only when the target env file is gitignored and you intentionally want concrete secret values. CNOS prints explicit risk warnings before revealed secret writes.',
     options: [
       {
         flag: '--to <path>',
@@ -924,10 +929,10 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'doctor',
     summary: 'Run repository and workspace diagnostics.',
-    usage: 'cnos doctor [global-options]',
+    usage: 'cnos doctor [--fix-secret-env-mappings] [global-options]',
     description:
-      'Checks manifest/workspace setup, gitignore coverage, and related diagnostics for the selected workspace.',
-    examples: ['cnos doctor', 'cnos doctor --workspace api --json'],
+      'Checks manifest/workspace setup, gitignore coverage, and related diagnostics for the selected workspace. Secret env mappings are reported as a security risk; use --fix-secret-env-mappings to remove them from envMapping.explicit in one shot.',
+    examples: ['cnos doctor', 'cnos doctor --workspace api --json', 'cnos doctor --fix-secret-env-mappings'],
   },
   {
     id: 'drift',

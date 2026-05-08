@@ -104,6 +104,7 @@ export function App() {
   const [inspectPayload, setInspectPayload] = useState<InspectPayload | null>(null);
   const [selectedWorkspace, setSelectedWorkspace] = useState('');
   const [selectedProfile, setSelectedProfile] = useState('');
+  const [secretPassphrase, setSecretPassphrase] = useState('');
   const [namespace, setNamespace] = useState<NamespaceTab>('value');
   const [prefix, setPrefix] = useState('');
   const [inspectKey, setInspectKey] = useState('value.app.name');
@@ -111,6 +112,8 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingInspect, setLoadingInspect] = useState(false);
+  const [revealingList, setRevealingList] = useState(false);
+  const [revealingInspect, setRevealingInspect] = useState(false);
   const deferredPrefix = useDeferredValue(prefix);
 
   function buildSelectionQuery(): string {
@@ -233,6 +236,66 @@ export function App() {
     }
   }
 
+  async function revealSecretList(): Promise<void> {
+    setRevealingList(true);
+    setError(null);
+
+    try {
+      const payload = await fetch('/api/reveal/list', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace: selectedWorkspace,
+          profile: selectedProfile,
+          prefix: deferredPrefix,
+          passphrase: secretPassphrase,
+        }),
+      });
+
+      if (!payload.ok) {
+        throw new Error(await payload.text());
+      }
+
+      setListPayload((await payload.json()) as ListPayload);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRevealingList(false);
+    }
+  }
+
+  async function revealSecretInspect(): Promise<void> {
+    setRevealingInspect(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/reveal/inspect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: inspectKey.trim(),
+          workspace: selectedWorkspace,
+          profile: selectedProfile,
+          passphrase: secretPassphrase,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      setInspectPayload((await response.json()) as InspectPayload);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRevealingInspect(false);
+    }
+  }
+
   useEffect(() => {
     void inspectCurrentKey();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -293,7 +356,7 @@ export function App() {
                 <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Namespace Browser</div>
                 <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Effective Config Surface</h2>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-4">
                 <label className="block">
                   <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-slate-500">Workspace</span>
                   <select
@@ -331,10 +394,20 @@ export function App() {
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white sm:w-64"
                   />
                 </label>
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-slate-500">Vault Passphrase</span>
+                  <input
+                    type="password"
+                    value={secretPassphrase}
+                    onChange={(event) => setSecretPassphrase(event.target.value)}
+                    placeholder="Optional"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white sm:w-56"
+                  />
+                </label>
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
+            <div className="mt-5 flex flex-wrap items-center gap-2">
               {tabs.map((tab) => (
                 <button
                   key={tab}
@@ -353,6 +426,16 @@ export function App() {
                   {tab}
                 </button>
               ))}
+              {namespace === 'secret' ? (
+                <button
+                  type="button"
+                  onClick={() => void revealSecretList()}
+                  disabled={revealingList}
+                  className="ml-auto rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {revealingList ? 'Revealing…' : 'Reveal Secrets'}
+                </button>
+              ) : null}
             </div>
 
             <div className="mt-5 overflow-hidden rounded-[1.5rem] border border-slate-200">
@@ -410,6 +493,16 @@ export function App() {
                 >
                   Inspect
                 </button>
+                {inspectKey.trim().startsWith('secret.') ? (
+                  <button
+                    type="button"
+                    onClick={() => void revealSecretInspect()}
+                    disabled={revealingInspect}
+                    className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {revealingInspect ? 'Revealing…' : 'Reveal'}
+                  </button>
+                ) : null}
               </div>
 
               <div className="mt-5 rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4">

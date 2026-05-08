@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -8,6 +8,7 @@ import {
   parseYaml,
   readKeychain,
   resolveSecretStoreRoot,
+  stringifyYaml,
   type ValidationIssue,
 } from '@kitsy/cnos/internal';
 
@@ -19,6 +20,14 @@ export interface DoctorCheck {
   name: string;
   ok: boolean;
   details: string;
+}
+
+export interface SecretEnvMappingRepairResult {
+  manifestPath: string;
+  removed: Array<{
+    envVar: string;
+    logicalKey: string;
+  }>;
 }
 
 async function checkGitignore(root: string): Promise<DoctorCheck> {
@@ -138,6 +147,9 @@ async function checkSecretSecurity(
   const warnings = [
     ...legacyDetected.map((entry) => `legacy vault ${entry.vault}: ${entry.path}`),
     ...plaintextFiles.map((file) => `plaintext secret file: ${file}`),
+    ...Object.entries(runtime.manifest.envMapping.explicit)
+      .filter(([, logicalKey]) => logicalKey.startsWith('secret.'))
+      .map(([envVar, logicalKey]) => `secret env mapping: ${envVar} -> ${logicalKey}`),
     ...keychainWarnings
       .filter((entry) => !entry.value)
       .map((entry) => `no keychain entry for vault ${entry.vault} (${entry.source})`),
@@ -147,6 +159,48 @@ async function checkSecretSecurity(
     name: 'security',
     ok: warnings.length === 0,
     details: warnings.length === 0 ? 'no legacy vaults, plaintext secret files, or missing keychain entries' : warnings.join('; '),
+  };
+}
+
+export async function repairSecretEnvMappings(
+  options: RuntimeServiceOptions = {},
+): Promise<SecretEnvMappingRepairResult> {
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+    ...(options.cacheMode ? { cacheMode: options.cacheMode } : {}),
+    ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+  });
+  const explicit = loadedManifest.rawManifest.envMapping?.explicit ?? {};
+  const removed = Object.entries(explicit)
+    .filter(([, logicalKey]) => logicalKey.startsWith('secret.'))
+    .map(([envVar, logicalKey]) => ({ envVar, logicalKey }));
+
+  if (removed.length === 0) {
+    return {
+      manifestPath: loadedManifest.manifestPath,
+      removed,
+    };
+  }
+
+  const nextExplicit = Object.fromEntries(
+    Object.entries(explicit).filter(([, logicalKey]) => !logicalKey.startsWith('secret.')),
+  );
+  const nextRawManifest = {
+    ...loadedManifest.rawManifest,
+    envMapping: {
+      ...(loadedManifest.rawManifest.envMapping ?? {}),
+      explicit: nextExplicit,
+    },
+  };
+
+  await writeFile(loadedManifest.manifestPath, stringifyYaml(nextRawManifest), 'utf8');
+
+  return {
+    manifestPath: loadedManifest.manifestPath,
+    removed,
   };
 }
 

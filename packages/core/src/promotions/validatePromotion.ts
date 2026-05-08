@@ -4,6 +4,9 @@ import type { NamespaceDefinition, NormalizedManifest } from '../types/manifest.
 import type { ValidationIssue } from '../types/plugin.js';
 
 export type ProjectionTarget = 'public' | 'env';
+export interface ProjectionPolicyOptions {
+  allowSecretForEnv?: boolean;
+}
 
 const DEFAULT_DATA_NAMESPACE: NamespaceDefinition = {
   kind: 'data',
@@ -32,6 +35,7 @@ export function ensureProjectionAllowed(
   manifest: NormalizedManifest,
   key: LogicalKey,
   target: ProjectionTarget,
+  options: ProjectionPolicyOptions = {},
 ): void {
   const namespace = getNamespaceNameForKey(key);
   const definition = getNamespaceDefinition(manifest, namespace);
@@ -43,6 +47,10 @@ export function ensureProjectionAllowed(
   }
 
   if (definition.sensitive) {
+    if (target === 'env' && namespace === 'secret' && options.allowSecretForEnv) {
+      return;
+    }
+
     throw new CnosSecurityError(
       `Cannot promote ${key} to ${target} because namespace "${namespace}" is sensitive.`,
     );

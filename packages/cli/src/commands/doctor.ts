@@ -1,8 +1,11 @@
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
-import { evaluateDoctor } from '../services/doctor.js';
+import { evaluateDoctor, repairSecretEnvMappings } from '../services/doctor.js';
 
 export async function runDoctor(options: RuntimeServiceOptions = {}): Promise<string> {
+  const cliArgs = [...(options.cliArgs ?? [])];
+  const shouldFixSecretEnvMappings = cliArgs.includes('--fix-secret-env-mappings');
+  const repairResult = shouldFixSecretEnvMappings ? await repairSecretEnvMappings(options) : undefined;
   const checks = await evaluateDoctor(options);
   const hasFailures = checks.some((check) => !check.ok);
 
@@ -11,8 +14,20 @@ export async function runDoctor(options: RuntimeServiceOptions = {}): Promise<st
   }
 
   if (options.json) {
-    return printJson(checks);
+    return printJson({
+      ...(repairResult ? { repair: repairResult } : {}),
+      checks,
+    });
   }
 
-  return checks.map((check) => `${check.ok ? 'OK' : 'FAIL'} ${check.name}: ${check.details}`).join('\n');
+  const repairLine =
+    repairResult
+      ? repairResult.removed.length > 0
+        ? `REPAIRED secret-env-mappings: removed ${repairResult.removed.map((entry) => `${entry.envVar} -> ${entry.logicalKey}`).join(', ')}`
+        : 'REPAIRED secret-env-mappings: no secret env mappings found'
+      : undefined;
+
+  return [repairLine, ...checks.map((check) => `${check.ok ? 'OK' : 'FAIL'} ${check.name}: ${check.details}`)]
+    .filter((value): value is string => Boolean(value))
+    .join('\n');
 }
