@@ -91,6 +91,8 @@ sidebar:
         label: cnos dump
       - path: cli/doctor
         label: cnos doctor
+      - path: cli/ui
+        label: cnos ui
       - path: cli/promote
         label: cnos promote
       - path: cli/vault

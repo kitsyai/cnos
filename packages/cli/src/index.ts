@@ -25,6 +25,7 @@ import { runRead } from './commands/read.js';
 import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
 import { runUse } from './commands/use.js';
+import { runUi } from './commands/ui.js';
 import { runValidate } from './commands/validate.js';
 import { runVault } from './commands/vault.js';
 import { runVersion } from './commands/version.js';
@@ -163,6 +164,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'version':
       process.stdout.write(`${runVersion()}\n`);
+      return;
+    case 'ui':
+      await runUi(runtimeOptions);
       return;
     case 'init':
       process.stdout.write(`${await runInit(runtimeOptions)}\n`);

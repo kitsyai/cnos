@@ -655,9 +655,9 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'build env',
     summary: 'Build a flat env-file artifact from CNOS.',
-    usage: 'cnos build env --to <path> [--format <dotenv|docker-env|json|shell|toml|yaml>] [global-options]',
+    usage: 'cnos build env --to <path> [--format <dotenv|docker-env|json|shell|toml|yaml>] [--reveal] [global-options]',
     description:
-      'Builds a deterministic KEY=VALUE artifact for legacy build and runtime workflows. The target file is derived output, not the CNOS source of truth.',
+      'Builds a deterministic KEY=VALUE artifact for legacy build and runtime workflows. Secret env mappings stay masked by default; use --reveal only when the target env file is gitignored and you intentionally want concrete secret values.',
     options: [
       {
         flag: '--to <path>',
@@ -667,10 +667,15 @@ const COMMANDS: HelpCommand[] = [
         flag: '--format <dotenv|docker-env|json|shell|toml|yaml>',
         description: 'Select the output format. Defaults to dotenv.',
       },
+      {
+        flag: '--reveal',
+        description: 'Write concrete values for secret env mappings after gitignore verification and an interactive warning prompt.',
+      },
     ],
     examples: [
       'cnos build env --profile local --to .env.local',
       'cnos build env --profile stage --to .env.stage',
+      'cnos build env --profile prod --reveal --to .env.production.local',
       'cnos build env --profile prod --format yaml --to env.yaml',
     ],
   },
@@ -1008,6 +1013,28 @@ const COMMANDS: HelpCommand[] = [
       },
     ],
     examples: ['cnos help-ai --format json', 'cnos help-ai export env --format json'],
+  },
+  {
+    id: 'ui',
+    summary: 'Launch the CNOS local UI.',
+    usage: 'cnos ui [--host <host>] [--port <port>] [--api-port <port>] [global-options]',
+    description:
+      'Starts a local CNOS API server plus the Vite-powered React UI for browsing values, env mappings, public config, and inspect data.',
+    options: [
+      {
+        flag: '--host <host>',
+        description: 'Host for the UI dev server. Defaults to 127.0.0.1.',
+      },
+      {
+        flag: '--port <port>',
+        description: 'Port for the UI dev server. Defaults to 4310.',
+      },
+      {
+        flag: '--api-port <port>',
+        description: 'Port for the backing CNOS API server. Defaults to 4311.',
+      },
+    ],
+    examples: ['cnos ui', 'cnos ui --workspace api --profile stage', 'cnos ui --port 4400 --api-port 4401'],
   },
   {
     id: 'version',

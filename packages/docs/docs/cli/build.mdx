@@ -12,6 +12,7 @@ cnos build server --to .cnos-server.json
 cnos build browser --to .cnos-browser.json
 cnos build env --profile local --to .env.local
 cnos build env --profile stage --to .env.stage
+cnos build env --profile prod --reveal --to .env.production.local
 cnos build public --framework vite --to .env.production
 cnos build env --profile local-domain --format docker-env --to .env.local-domain
 ```
@@ -24,3 +25,18 @@ Targets:
 - `build public` writes promoted public env with optional framework prefixes like Vite and Next
 
 All build artifacts are derived output. `.cnos` remains the source of truth.
+
+## Writing secrets into env artifacts
+
+By default, `build env` masks secret env mappings as `****`.
+
+Use `--reveal` only when you intentionally want concrete secret values in the generated artifact:
+
+```bash
+cnos build env --profile prod --reveal --to .env.production.local
+```
+
+CNOS protects this path in two ways:
+
+- it verifies that the target file is gitignored before writing secrets
+- in interactive terminals it prints a warning prompt before continuing

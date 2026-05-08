@@ -28,7 +28,7 @@ export function toEnv(
     isRuntimeDependent?: (key: string) => boolean;
   } = {},
 ): Record<string, string> {
-  const includeSecrets = options.includeSecrets ?? true;
+  const includeSecrets = options.includeSecrets ?? false;
   const output: Record<string, string> = {};
   const mappedEntries = Object.entries(manifest.envMapping.explicit).sort(([left], [right]) =>
     left.localeCompare(right),
@@ -42,22 +42,27 @@ export function toEnv(
     }
 
     const namespaceDefinition = getNamespaceDefinition(manifest, entry.namespace);
+    const isSecretNamespace = entry.namespace === 'secret';
 
-    if (namespaceDefinition.kind !== 'data' || !namespaceDefinition.shareable || namespaceDefinition.sensitive) {
+    if (namespaceDefinition.kind !== 'data') {
       continue;
     }
 
-    if (entry.namespace === 'secret' && !includeSecrets) {
-      continue;
-    }
-
-    if (isSecretReference(entry.value)) {
+    if (isSecretNamespace) {
+      if (!includeSecrets) {
+        continue;
+      }
+    } else if (!namespaceDefinition.shareable || namespaceDefinition.sensitive) {
       continue;
     }
 
     const value = helpers.read ? helpers.read(logicalKey) : entry.value;
 
     if (value === undefined) {
+      continue;
+    }
+
+    if (isSecretReference(value) || (!isSecretNamespace && isSecretReference(entry.value))) {
       continue;
     }
 

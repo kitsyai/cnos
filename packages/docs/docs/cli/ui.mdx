@@ -1,0 +1,40 @@
+---
+title: cnos ui
+description: Launch the local CNOS UI for browsing config state and provenance.
+---
+
+# cnos ui
+
+```bash
+cnos ui
+cnos ui --workspace api --profile stage
+cnos ui --port 4400 --api-port 4401
+```
+
+`cnos ui` starts two local services:
+
+- a CNOS API server that reads the active workspace and profile
+- a Vite + React + Tailwind UI that renders those surfaces in the browser
+
+Use it when you want a faster adoption path than raw CLI output for:
+
+- value and meta browsing
+- env mapping review
+- public promotion review
+- inspect/provenance tracing
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--host` | Host for the Vite UI server. Defaults to `127.0.0.1`. |
+| `--port` | Port for the Vite UI server. Defaults to `4310`. |
+| `--api-port` | Port for the CNOS API server. Defaults to `4311`. |
+| `--workspace` | Override the active workspace. |
+| `--profile` | Override the active profile. |
+
+## Notes
+
+- The UI is read-only in this first cut.
+- Secret keys stay masked in the browser.
+- Use `cnos inspect` or `cnos read --reveal` when you need terminal-first detail.

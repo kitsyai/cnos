@@ -1,0 +1,43 @@
+{
+  "name": "@kitsy/cnos-ui",
+  "version": "1.8.4",
+  "description": "Vite-powered React UI for browsing CNOS configuration state.",
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kitsyai/cnos.git",
+    "directory": "packages/ui"
+  },
+  "homepage": "https://github.com/kitsyai/cnos/tree/main/packages/ui",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "index.html",
+    "postcss.config.mjs",
+    "tsconfig.json",
+    "vite.config.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.4",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5.8.2",
+    "vite": "^8.0.10"
+  }
+}

@@ -6,6 +6,11 @@ import { stringifyYaml } from '@kitsy/cnos/internal';
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 import { resolveFilesystemBasePath } from './paths.js';
+import {
+  assertSecretEnvTargetIsGitIgnored,
+  confirmSecretEnvBuild,
+  getSecretEnvMappings,
+} from './secretEnvBuild.js';
 
 export type ProjectionFormat = 'dotenv' | 'docker-env' | 'json' | 'shell' | 'toml' | 'yaml';
 
@@ -136,26 +141,34 @@ export async function buildEnvProjectionArtifact(
   options: RuntimeServiceOptions = {},
   format: ProjectionFormat = 'dotenv',
 ): Promise<{ targetPath: string; output: string; env: Record<string, string> }> {
+  const cliArgs = [...(options.cliArgs ?? [])];
+  const revealSecrets = cliArgs.includes('--reveal');
+  const basePath = resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd());
+  const targetPath = path.resolve(basePath, to);
   const runtime = await createRuntimeService({
     ...options,
     cacheMode: 'build',
-    cliArgs: [...(options.cliArgs ?? [])],
+    cliArgs,
+    secretResolution: 'lazy',
   });
-  const env = runtime.toEnv();
+  const secretMappings = getSecretEnvMappings(runtime);
 
-  for (const [envVar, logicalKey] of Object.entries(runtime.manifest.envMapping.explicit)) {
-    const entry = runtime.graph.entries.get(logicalKey);
+  if (revealSecrets && secretMappings.length > 0) {
+    await assertSecretEnvTargetIsGitIgnored(targetPath, basePath);
+    await confirmSecretEnvBuild(targetPath, secretMappings);
+  }
 
-    if (entry?.namespace === 'secret' && !(envVar in env)) {
+  const env = runtime.toEnv({
+    includeSecrets: revealSecrets,
+  });
+
+  for (const { envVar } of secretMappings) {
+    if (!revealSecrets && !(envVar in env)) {
       env[envVar] = '****';
     }
   }
 
   const output = formatKeyValueMap(env, format);
-  const targetPath = await writeProjectionFile(
-    to,
-    output,
-    resolveFilesystemBasePath(options.root, options.cwd ?? process.cwd()),
-  );
-  return { targetPath, output, env };
+  const writtenTargetPath = await writeProjectionFile(to, output, basePath);
+  return { targetPath: writtenTargetPath, output, env };
 }

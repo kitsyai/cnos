@@ -182,6 +182,49 @@ async function createLocalVaultRefFixture(): Promise<string> {
   return root;
 }
 
+async function createSecretEnvArtifactFixture(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-secret-env-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'values'), { recursive: true });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: secret-env-fixture',
+      'workspaces:',
+      '  default: api',
+      '  items:',
+      '    api: {}',
+      'vaults:',
+      '  ci-env:',
+      '    provider: environment',
+      '    mapping:',
+      '      APP_TOKEN: app.token',
+      'envMapping:',
+      '  explicit:',
+      '    SERVER_PORT: value.server.port',
+      '    APP_TOKEN: secret.app.token',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+    ['server:', '  port: 8080'].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'),
+    [
+      'app:',
+      '  token:',
+      '    provider: environment',
+      '    ref: app.token',
+      '    vault: ci-env',
+    ].join('\n'),
+  );
+  return root;
+}
+
 async function runGit(
   args: string[],
   cwd: string,
@@ -306,6 +349,16 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--to', '.env.local'],
       },
       passthrough: ['pnpm', 'dev'],
+    });
+
+    expect(parseArgs(['ui', '--workspace', 'api', '--port', '4400', '--api-port', '4401'])).toEqual({
+      command: 'ui',
+      args: [],
+      options: {
+        workspace: 'api',
+        cliArgs: ['--port', '4400', '--api-port', '4401'],
+      },
+      passthrough: [],
     });
   });
 
@@ -604,7 +657,10 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp()).toContain('dev');
     expect(runHelp('define')).toContain('Usage: cnos define <value|secret> <path> <rawValue>');
     expect(runHelp('build env')).toContain('Usage: cnos build env --to <path>');
+    expect(runHelp('build env')).toContain('--reveal');
     expect(runHelp('dev env')).toContain('Usage: cnos dev env --to <path>');
+    expect(runHelp('ui')).toContain('Usage: cnos ui');
+    expect(runHelp('ui')).toContain('--api-port <port>');
     expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
@@ -1575,6 +1631,60 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(dumpRoot, 'values', 'base', 'app.yml'), 'utf8')).resolves.toContain(
       'baseUrl: https://api.local',
     );
+  });
+
+  it('keeps secret env mappings masked by default and reveals them only for gitignored targets', async () => {
+    const root = await createSecretEnvArtifactFixture();
+    const maskedTarget = path.join(root, '.env.masked');
+    const revealedTarget = path.join(root, '.env.revealed');
+
+    await runGit(['init'], root);
+    await writeFile(path.join(root, '.gitignore'), ['.env.masked', '.env.revealed'].join('\n'));
+
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APP_TOKEN: 'ci-secret',
+        },
+        cliArgs: ['--to', maskedTarget],
+      }),
+    ).resolves.toContain('.env.masked');
+    await expect(readFile(maskedTarget, 'utf8')).resolves.toBe(['APP_TOKEN=****', 'SERVER_PORT=8080'].join('\n'));
+
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APP_TOKEN: 'ci-secret',
+        },
+        cliArgs: ['--to', revealedTarget, '--reveal'],
+      }),
+    ).resolves.toContain('.env.revealed');
+    await expect(readFile(revealedTarget, 'utf8')).resolves.toBe(
+      ['APP_TOKEN=ci-secret', 'SERVER_PORT=8080'].join('\n'),
+    );
+  });
+
+  it('refuses to write revealed secret env artifacts when the target is not gitignored', async () => {
+    const root = await createSecretEnvArtifactFixture();
+    const target = path.join(root, '.env.not-ignored');
+
+    await runGit(['init'], root);
+    await writeFile(path.join(root, '.gitignore'), '.env.safe-only\n');
+
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {
+          APP_TOKEN: 'ci-secret',
+        },
+        cliArgs: ['--to', target, '--reveal'],
+      }),
+    ).rejects.toThrow('is not gitignored');
   });
 
   it('builds server projections with local-vault secret refs without authenticating the vault', async () => {
