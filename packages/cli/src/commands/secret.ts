@@ -3,6 +3,7 @@ import path from 'node:path';
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
+import { printTable } from '../format/printTable.js';
 import { printValue } from '../format/printValue.js';
 import { maskSecretValue } from '../format/maskSecret.js';
 import { listConfigEntries } from '../services/listing.js';
@@ -82,7 +83,14 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
       return printJson(entries);
     }
 
-    return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');
+    return printTable(
+      entries.map((entry) => ({
+        key: entry.key,
+        value: printValue(entry.value),
+        vault: entry.vault ?? 'default',
+        provider: entry.provider ?? 'local',
+      })),
+    );
   }
 
   if (action === 'set') {

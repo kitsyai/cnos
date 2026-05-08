@@ -1,5 +1,6 @@
 import { consumeOption } from '../cli/commandOptions.js';
 import { printJson } from '../format/printJson.js';
+import { printTable } from '../format/printTable.js';
 import { printValue } from '../format/printValue.js';
 import { listConfigEntries, type ListNamespace } from '../services/listing.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
@@ -58,6 +59,17 @@ export async function runList(args: string[] = [], options: RuntimeServiceOption
 
   if (entries.length === 0) {
     return '';
+  }
+
+  if (namespace === 'secret') {
+    return printTable(
+      entries.map((entry) => ({
+        key: entry.key,
+        value: printValue(entry.value),
+        vault: entry.vault ?? 'default',
+        provider: entry.provider ?? 'local',
+      })),
+    );
   }
 
   return entries

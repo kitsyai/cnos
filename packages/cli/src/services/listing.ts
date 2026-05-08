@@ -11,6 +11,8 @@ export interface ListEntry {
   key: string;
   value: unknown;
   derived?: boolean;
+  vault?: string;
+  provider?: string;
 }
 
 interface StoredCandidate {
@@ -81,6 +83,12 @@ function toStoredEntry(
   return {
     key: entry.key,
     value: selectedCandidate.value,
+    ...(namespace === 'secret'
+      ? {
+          vault: (selectedCandidate.metadata?.secretRef as { vault?: string } | undefined)?.vault ?? 'default',
+          provider: (selectedCandidate.metadata?.secretRef as { provider?: string } | undefined)?.provider ?? 'local',
+        }
+      : {}),
     ...(typeof selectedCandidate.value === 'object' &&
     selectedCandidate.value !== null &&
     !Array.isArray(selectedCandidate.value) &&

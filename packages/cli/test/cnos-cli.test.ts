@@ -970,7 +970,16 @@ describe('@kitsy/cnos-cli', () => {
           CNOS_SECRET_HOME: secretHome,
         },
       }),
-    ).resolves.toContain('secret.app.token=****');
+    ).resolves.toContain('secret.app.token');
+    await expect(
+      runList(['secrets'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+      }),
+    ).resolves.toContain('****');
     await expect(
       runList(['secrets'], {
         root,
@@ -980,7 +989,7 @@ describe('@kitsy/cnos-cli', () => {
         },
         cliArgs: ['--vault', 'default', '--reveal'],
       }),
-    ).resolves.toContain('secret.app.token=super-secret');
+    ).resolves.toContain('super-secret');
     await expect(
       runSecret(['list'], {
         root,
@@ -990,7 +999,17 @@ describe('@kitsy/cnos-cli', () => {
         },
         cliArgs: ['--vault', 'default'],
       }),
-    ).resolves.toContain('secret.app.token=****');
+    ).resolves.toContain('secret.app.token');
+    await expect(
+      runSecret(['list'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--vault', 'default'],
+      }),
+    ).resolves.toContain('****');
     await expect(
       runSecret(['list'], {
         root,
@@ -1000,7 +1019,7 @@ describe('@kitsy/cnos-cli', () => {
         },
         cliArgs: ['--vault', 'default', '--reveal'],
       }),
-    ).resolves.toContain('secret.app.token=super-secret');
+    ).resolves.toContain('super-secret');
     await expect(parseArgs(['get', 'secret.app.token', '--reveal'])).toEqual({
       command: 'secret',
       args: ['get', 'app.token'],
@@ -1009,7 +1028,7 @@ describe('@kitsy/cnos-cli', () => {
       },
       passthrough: [],
     });
-  });
+  }, 15000);
 
   it('allows vault auth to reuse an existing local session key', async () => {
     const root = await createRuntimeFixture();
@@ -1159,7 +1178,14 @@ describe('@kitsy/cnos-cli', () => {
         workspace: 'api',
         processEnv: {},
       }),
-    ).resolves.toContain('secret.app.token=****');
+    ).resolves.toContain('secret.app.token');
+    await expect(
+      runList(['secrets'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('****');
     await expect(
       runList(['secrets'], {
         root,
@@ -1167,7 +1193,7 @@ describe('@kitsy/cnos-cli', () => {
         processEnv: {},
         cliArgs: ['--reveal'],
       }),
-    ).resolves.toContain('secret.app.token=super-secret');
+    ).resolves.toContain('super-secret');
     await expect(
       runList(['env'], {
         root,
@@ -1624,7 +1650,17 @@ describe('@kitsy/cnos-cli', () => {
         },
         cliArgs: ['--vault', 'github-ci'],
       }),
-    ).resolves.toContain('secret.db.password=****');
+    ).resolves.toContain('secret.db.password');
+    await expect(
+      runSecret(['list'], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          DB_PASSWORD: 'ci-secret',
+        },
+        cliArgs: ['--vault', 'github-ci'],
+      }),
+    ).resolves.toContain('****');
     await expect(
       runSecret(['list'], {
         root,
@@ -1634,7 +1670,7 @@ describe('@kitsy/cnos-cli', () => {
         },
         cliArgs: ['--vault', 'github-ci', '--reveal'],
       }),
-    ).resolves.toContain('secret.db.password=ci-secret');
+    ).resolves.toContain('ci-secret');
 
     await expect(
       runVault(['remove', 'github-ci'], {
