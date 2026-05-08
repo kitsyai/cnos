@@ -22,7 +22,7 @@ Derived surfaces:
 Custom data namespaces can be:
 
 - read at runtime with `cnos('flags.upi_enabled')`
-- written through the CLI with `cnos set flags.upi_enabled false`
+- written through the CLI with `cnos define value flags.upi_enabled false` or namespace-specific commands where supported
 - promoted to `public.*` when the namespace is `shareable: true`
 - exported through `envMapping.explicit`
 

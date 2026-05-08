@@ -4,75 +4,73 @@ You are implementing features in the CNOS codebase.
 
 ## Before Writing Code
 
-1. Read `.agents/AGENTS.md` for project overview.
-2. Read `.agents/ARCHITECTURE.md` for module layout and types.
-3. Read `.agents/CONVENTIONS.md` for code style.
-4. Check `.agents/context/` for the spec that covers your feature.
-5. Check the test suite spec for expected behavior and test IDs.
+1. Read `.agents/AGENTS.md` for repo overview and source-of-truth rules.
+2. Read `.agents/ARCHITECTURE.md` for package boundaries and module placement.
+3. Read `.agents/CONVENTIONS.md` for code style and testing rules.
+4. Read the relevant `.agents/context/*.md` file for the feature area.
+5. Check the test suite spec and existing tests for expected behavior and test IDs.
+
+## Placement Rules
+
+Choose the right package before you edit.
+
+- Core engine behavior: `packages/core/src/`
+- Batteries-included runtime wrappers: `packages/cnos/src/`
+- Official built-in plugin implementations: `plugins/<plugin-name>/src/`
+- Plugin re-exports and default wiring: `packages/cnos/src/plugin/`, `packages/cnos/src/defaultPlugins.ts`
+- CLI commands/help/services: `packages/cli/src/`
+- Published docs: `packages/docs/`
 
 ## Implementation Rules
 
 - Write types first, then implementation, then tests.
-- Follow the module layout in `ARCHITECTURE.md`. New code goes in the right module:
-  - New loader → `packages/cnos/src/loaders/`
-  - New validator → `packages/cnos/src/validators/`
-  - New CLI command → `packages/cli/src/commands/`
-  - Derived value changes → `packages/cnos/src/derive/`
-  - Secret/vault changes → `packages/cnos/src/secrets/`
-  - Projection changes → `packages/cnos/src/projection/`
-  - Discovery changes → `packages/cnos/src/discovery/`
-- Export public APIs from the package's `index.ts`. Do not expose internal modules.
-- Add JSDoc to all public functions and types.
-- Run `pnpm test` after every change.
-- If a test fails and you believe the test is wrong, do NOT fix the test. Report it for triage with your reasoning.
+- Export public APIs from the package entrypoints. Do not expose internals casually.
+- Add JSDoc to public functions and public types.
+- If CLI behavior changes, update `packages/cli/src/cli/helpRegistry.ts`.
+- If published docs need to change, update `packages/docs/docs/` and `packages/docs/manifest.yml`.
+- Run `pnpm test` after the change.
+- If a test appears wrong, do not patch around it. Report the failure and the reason.
 
 ## Common Implementation Patterns
 
 ### Adding a CLI command
 
-1. Create `packages/cli/src/commands/<name>.ts`.
-2. Export a function that handles args and calls into `@kitsy/cnos` core.
-3. Register in the command router.
-4. Add help text (shown by `cnos help <name>`).
-5. Add a docs page in `packages/cnos-docs/docs/cli/<name>.mdx`.
-6. Add tests.
+1. Create or update `packages/cli/src/commands/<name>.ts`.
+2. Register routing and help in `packages/cli/src/cli/helpRegistry.ts`.
+3. Add or update command tests in `packages/cli/test/`.
+4. Add a docs page in `packages/docs/docs/cli/<name>.mdx`.
+5. Add the page to `packages/docs/manifest.yml`.
 
-### Adding a loader plugin
+`helpRegistry.ts` and `cnos help-ai --format json` are the canonical CLI contracts. Do not hand-invent flags in docs or tests.
 
-1. Implement `LoaderPlugin` interface in `packages/cnos/src/loaders/<name>.ts`.
-2. The `load()` method receives `LoaderContext` and returns `ConfigEntry[]`.
-3. Every entry must include: `key`, `value`, `namespace`, `sourceId`, `pluginId`, `streamId`, `workspaceId`.
-4. Include `origin` with at least `file` path for filesystem loaders.
-5. Register in the default plugin set.
-6. Add tests.
+### Adding or changing official built-in plugins
 
-### Adding a vault provider
+1. Implement the plugin in `plugins/<plugin-name>/src/`.
+2. Export it from that plugin package's public entrypoint.
+3. Re-export it from `packages/cnos/src/plugin/` if the batteries-included package should expose it.
+4. Wire it into `packages/cnos/src/defaultPlugins.ts` if it belongs in the default runtime.
+5. Add tests.
 
-1. Implement `SecretVaultProvider` interface in `packages/cnos/src/secrets/providers/<name>.ts`.
-2. Must implement `batchGet()` for efficient startup hydration.
-3. `authenticate()` must throw `CnosAuthenticationError` on failure — never return false silently.
-4. Register in the provider registry.
-5. Add tests for: auth success, auth failure, batch get, single get, missing secret.
+### Modifying manifest schema
 
-### Adding a derived value built-in function
+1. Update `packages/core/src/types/manifest.ts`.
+2. Update `packages/core/src/manifest/normalizeManifest.ts`.
+3. Ensure omitted fields still normalize safely for backward compatibility.
+4. Update any affected validation/resolution code in `packages/core/src/`.
+5. Update `.agents/context/manifest.md` if the conceptual model changed.
+6. Update published docs in `packages/docs/docs/reference/manifest.mdx`.
 
-1. Add the function to `packages/cnos/src/derive/builtins.ts`.
-2. Register the function name in the parser's known-function list.
-3. The function must be pure: no side effects, no I/O, deterministic for same inputs.
-4. Add parser tests (syntax), evaluator tests (behavior), and edge case tests.
+### Working with runtime APIs
 
-### Modifying the manifest schema
+- Core runtime contract: `packages/core/src/types/core.ts`
+- Singleton wrapper extras: `packages/cnos/src/runtime/index.ts`
 
-1. Update types in `packages/cnos/src/types/manifest.ts`.
-2. Update normalization in `packages/cnos/src/manifest/normalizeManifest.ts` — add defaults for the new field.
-3. Ensure existing manifests without the new field continue to work (backward compat via defaults).
-4. Update `ARCHITECTURE.md` manifest example.
-5. Update docs: `packages/cnos-docs/docs/reference/manifest.mdx`.
+Do not mix them up in code or docs. `ready()`, `format()`, `log()`, and `loadProjection()` are singleton wrapper helpers, not core runtime methods.
 
 ### Working with projections
 
-- Server projection (`toServerProjection()`): values + secret refs + derived formulas. No plaintext secrets.
-- Browser projection (`resolveBrowserData()`): promoted `value.*` only. Concrete values, never formulas.
-- Config-only derived values → resolved to concrete in projection `values`.
-- Runtime-dependent derived values → kept as formulas in projection `derived`.
-- Always verify: no `secret.*` in browser data, no plaintext in server projection.
+- Server projection: values + derived formulas + secret refs, never plaintext secrets
+- Browser/public output: promoted concrete values only
+- `cnos run` bootstraps both `__CNOS_GRAPH__` and `__CNOS_PROJECTION__`
+- Config-only derived values resolve to concrete values in projection output
+- Runtime-dependent derived values stay live and must not be forced into browser/public output

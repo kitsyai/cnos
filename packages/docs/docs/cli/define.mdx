@@ -1,0 +1,21 @@
+---
+title: cnos define
+description: Write a value or secret through CNOS write policy.
+---
+
+# cnos define
+
+Use `cnos define` when you want CNOS to choose the correct target file for a `value.*` or `secret.*` write.
+
+## Usage
+
+```bash
+cnos define <value|secret> <path> <rawValue> [--target <local|global>] [--workspace <id>] [--profile <name>]
+```
+
+## Examples
+
+```bash
+cnos define value server.port 3000 --workspace api
+cnos define secret app.token super-secret --workspace api
+```

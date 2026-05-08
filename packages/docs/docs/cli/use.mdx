@@ -1,0 +1,22 @@
+---
+title: cnos use
+description: Persist repo-local CLI defaults such as workspace, profile, and global root.
+---
+
+# cnos use
+
+`cnos use` reads or writes the repo-local CLI context stored in `.cnos-workspace.yml`.
+
+## Usage
+
+```bash
+cnos use [show] [--workspace <id>] [--profile <name>] [--global-root <path>] [--root <path>] [--json]
+```
+
+## Examples
+
+```bash
+cnos use show
+cnos use --workspace api --profile stage
+cnos use --global-root ~/.cnos
+```

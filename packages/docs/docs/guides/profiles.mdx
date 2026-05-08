@@ -11,7 +11,7 @@ Profiles are explicit overlays, not implicit defaults.
 cnos profile create stage
 cnos use --profile stage
 cnos value set app.apiBaseUrl https://api.stage
-cnos diff base stage
+cnos diff local stage
 ```
 
 Profiles inherit values from `base` by default. For a clean profile with no base fallback:

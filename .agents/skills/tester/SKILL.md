@@ -123,10 +123,10 @@ it("DRV-V-10: runtime-dependent derivation NOT cached", () => {
 ## Testing Secret Security
 
 ```ts
-it("SEC-11: __CNOS_PROJECTION__ does not contain decrypted secrets", () => {
+it("SEC-11: bootstrap env payloads do not contain decrypted secrets", () => {
   // Setup: cnos run spawns child
-  // Assert: parse __CNOS_PROJECTION__ from child env
-  // secretRefs must contain { provider, vault, ref } objects
+  // Assert: parse __CNOS_PROJECTION__ and __CNOS_GRAPH__ from child env
+  // serialized secret data must remain refs/metadata, never plaintext values
   // No string values that match actual secret plaintext
 });
 ```

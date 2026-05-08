@@ -55,12 +55,20 @@ sidebar:
         label: cnos init
       - path: cli/onboard
         label: cnos onboard
+      - path: cli/use
+        label: cnos use
+      - path: cli/profile
+        label: cnos profile
       - path: cli/workspace
         label: cnos workspace
       - path: cli/value
         label: cnos value
       - path: cli/secret
         label: cnos secret
+      - path: cli/define
+        label: cnos define
+      - path: cli/list
+        label: cnos list
       - path: cli/read
         label: cnos read
       - path: cli/inspect
@@ -95,6 +103,12 @@ sidebar:
         label: cnos migrate
       - path: cli/drift
         label: cnos drift
+      - path: cli/help
+        label: cnos help
+      - path: cli/help-ai
+        label: cnos help-ai
+      - path: cli/version
+        label: cnos version
 
   - group: API Reference
     collapsed: true

@@ -1,0 +1,23 @@
+---
+title: cnos list
+description: List resolved config entries across one namespace or the full graph.
+---
+
+# cnos list
+
+`cnos list` gives you a resolved view of stored config, promoted output, and namespace-specific data.
+
+## Usage
+
+```bash
+cnos list [<namespace>|all] [--prefix <path>] [--framework <name>] [--workspace <id>] [--profile <name>]
+```
+
+## Examples
+
+```bash
+cnos list
+cnos list value --prefix app.
+cnos list flags
+cnos list public --framework vite
+```

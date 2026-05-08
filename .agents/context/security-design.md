@@ -32,6 +32,7 @@ Hydration policies: `eager` (startup, default), `lazy` (first read), `refreshing
 ## Projection Rules
 
 - `__CNOS_PROJECTION__` env var: secret refs only, never plaintext.
+- `__CNOS_GRAPH__` env var: resolved graph metadata and refs only, never plaintext secrets.
 - `cnos run --auth`: encrypts secrets with random session key, passes `__CNOS_SESSION_KEY__` to child.
 - `.cnos-server.json` file: secret refs only, safe to commit or bake into Docker image.
 - Browser data (`__CNOS_BROWSER_DATA__`): never contains `secret.*` in any form.

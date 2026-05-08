@@ -1,0 +1,23 @@
+---
+title: cnos profile
+description: Create, list, select, and delete explicit profile overlays.
+---
+
+# cnos profile
+
+Profiles model environment overlays such as `local`, `stage`, and `prod`.
+
+## Usage
+
+```bash
+cnos profile [create <name> | list | use <name> | delete <name>] [options] [--root <path>] [--json]
+```
+
+## Examples
+
+```bash
+cnos profile create stage
+cnos profile create isolated --no-inherit
+cnos profile list
+cnos profile use stage
+```

@@ -1,0 +1,21 @@
+---
+title: cnos help-ai
+description: Show machine-readable CLI help for agents and automation.
+---
+
+# cnos help-ai
+
+`cnos help-ai` is the canonical machine-readable CLI surface. JSON is the default output format.
+
+## Usage
+
+```bash
+cnos help-ai [command] [--format <json|text>]
+```
+
+## Examples
+
+```bash
+cnos help-ai --format json
+cnos help-ai export env --format json
+```

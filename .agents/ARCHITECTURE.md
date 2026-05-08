@@ -1,37 +1,93 @@
-# CNOS — Architecture
+# CNOS - Architecture
 
-## Pipeline
+## Package Boundaries
 
-CNOS resolves config in this order. Each stage completes before the next begins.
+The repo is split by responsibility. This matters when you decide where code belongs.
 
-```
-1. Discovery      → find .cnosrc.yml, resolve root path (local or remote)
-2. Manifest load  → parse .cnos/cnos.yml, normalize, apply defaults
-3. Workspace      → select workspace, expand inheritance chain, compute effective roots
-4. Profile        → select profile, expand inheritance chain
-5. Loading        → run loader plugins against effective roots for activated profile layers
-6. Resolution     → merge entries with precedence, deep merge objects, last-writer-wins scalars
-7. Promotion      → mirror promoted value.* keys into public.* namespace
-8. Derivation     → parse $derive expressions, topological sort, pre-evaluate config-only derivations
-9. Validation     → schema checks, public safety, namespace safety, cycle detection
-10. Projection    → generate server/browser/env projections as needed
-11. Secret hydration → batch-resolve secret refs from vault providers (eager/lazy/refreshing)
-12. Ready         → runtime available for reads
+### `packages/core`
+
+The core engine and contracts live here:
+
+- manifest loading and normalization
+- workspace and profile resolution
+- derived value parsing and evaluation
+- graph resolution and validation
+- secret providers and hydration
+- runtime conversion helpers such as `toEnv()`, `toPublicEnv()`, and `toServerProjection()`
+- shared public types in `packages/core/src/types/`
+
+### `packages/cnos`
+
+This is the batteries-included runtime package:
+
+- wraps `@kitsy/cnos-core`
+- provides `createCnos()` and the default singleton runtime
+- bootstraps from `__CNOS_GRAPH__`, `__CNOS_PROJECTION__`, or `.cnos-server.json`
+- exposes browser/build entrypoints
+- re-exports official plugin packages from `packages/cnos/src/plugin/`
+
+### `plugins/*`
+
+Official built-in plugins live in dedicated packages:
+
+- `plugins/filesystem`
+- `plugins/dotenv`
+- `plugins/process-env`
+- `plugins/cli-args`
+- `plugins/basic-schema`
+- `plugins/env-export`
+
+If you add or change an official built-in plugin, this is usually the write surface. `packages/cnos/src/defaultPlugins.ts` wires those packages into the default runtime.
+
+### `packages/cli`
+
+The CLI package owns:
+
+- command handlers in `src/commands/`
+- canonical help definitions in `src/cli/helpRegistry.ts`
+- argument parsing, output formatting, and repo workflow helpers in `src/services/`
+
+### `packages/docs`
+
+This package publishes the docs content consumed by the web docs site and other docs consumers:
+
+- docs pages in `packages/docs/docs/`
+- navigation in `packages/docs/manifest.yml`
+- validation in `packages/docs/scripts/validate-docs.mjs`
+
+## Resolution Pipeline
+
+CNOS resolves config in this order:
+
+```text
+1. Discovery       -> find .cnosrc.yml and resolve the root
+2. Manifest load   -> parse and normalize .cnos/cnos.yml
+3. Workspace       -> resolve active workspace and inheritance chain
+4. Profile         -> resolve active profile and inheritance chain
+5. Loading         -> run loader plugins for the effective roots/layers
+6. Resolution      -> merge entries by precedence
+7. Promotion       -> mirror promoted values into public.*
+8. Derivation      -> parse/evaluate config-only derivations, track runtime-dependent ones
+9. Validation      -> schema, namespace, promotion, and workspace safety checks
+10. Projection     -> build runtime/env/public/server outputs as needed
+11. Secret hydrate -> resolve secret refs according to the active policy
+12. Ready          -> runtime is available for reads
 ```
 
 ## Core Types
 
+These are the important stable contracts. The canonical definitions live in `packages/core/src/types/`.
+
 ```ts
-type LogicalKey = string;      // "value.server.port", "secret.db.password"
-type NamespaceName = string;   // validated against builtins + custom
+type LogicalKey = string;
+type NamespaceName = string;
 
 interface ConfigEntry {
   key: LogicalKey;
   value: unknown;
   namespace: NamespaceName;
-  sourceId: string;            // "filesystem-values", "dotenv", "cli-args"
+  sourceId: string;
   pluginId: string;
-  streamId: string;            // which stream produced this
   workspaceId: string;
   profile?: string;
   origin?: {
@@ -40,11 +96,12 @@ interface ConfigEntry {
     envVar?: string;
     cliArg?: string;
   };
+  metadata?: Record<string, unknown>;
 }
 
 interface ResolvedEntry {
   key: LogicalKey;
-  value: unknown;              // concrete value, DerivedValue, or SecretRef
+  value: unknown;
   namespace: NamespaceName;
   winner: ConfigEntry;
   overridden: ConfigEntry[];
@@ -52,20 +109,31 @@ interface ResolvedEntry {
 
 interface ResolvedGraph {
   entries: Map<LogicalKey, ResolvedEntry>;
-  workspace: WorkspaceContext;
   profile: string;
   resolvedAt: string;
-  profileSource: string;
-  activeStreams: string[];
+  profileSource: ProfileSource;
+  workspace: WorkspaceContext;
 }
 
-interface WorkspaceContext {
-  workspaceId: string;
-  workspaceSource: "cli" | "workspace-file" | "manifest-default" | "implicit";
-  globalRoot?: string;
-  globalEnabled: boolean;
-  workspaceChain: string[];
-  workspaceRoots: Array<{ scope: "global" | "local"; workspaceId: string; path: string }>;
+interface CnosRuntime {
+  manifest: NormalizedManifest;
+  plugins: CnosPlugin[];
+  readonly graph: ResolvedGraph;
+  read<T = unknown>(key: LogicalKey): T | undefined;
+  require<T = unknown>(key: LogicalKey): T;
+  readOr<T>(key: LogicalKey, fallback: T): T;
+  value<T = unknown>(path: string): T | undefined;
+  secret<T = unknown>(path: string): T | undefined;
+  meta<T = unknown>(path: string): T | undefined;
+  inspect(key: LogicalKey): InspectResult;
+  toObject(): Record<string, unknown>;
+  toNamespace(namespace: NamespaceName): Record<string, unknown>;
+  toEnv(options?: ToEnvOptions): Record<string, string>;
+  toPublicEnv(options?: ToPublicEnvOptions): Record<string, string>;
+  toServerProjection(): ServerProjection;
+  registerRuntimeProvider(namespace: string, provider: RuntimeProvider): void;
+  refreshSecrets(): Promise<void>;
+  refreshSecret(key: LogicalKey): Promise<void>;
 }
 
 interface ServerProjection {
@@ -76,326 +144,138 @@ interface ServerProjection {
   configHash: string;
   values: Record<string, unknown>;
   derived: Record<string, DerivedFormula>;
-  secretRefs: Record<string, SecretRef>;
+  secretRefs: Record<string, SecretReference & { envVar?: string }>;
   publicKeys: string[];
   runtimeNamespaces: string[];
-  meta: { workspace: string; profile: string; cnos_version: string };
-}
-
-interface SecretRef {
-  provider: string;
-  vault: string;
-  ref: string;
-}
-
-interface DerivedValue {
-  $derive: string | { expr: string };
-}
-
-interface DerivedFormula {
-  expr: string;
-  deps: string[];
-  runtimeRefs: string[];
+  meta: {
+    workspace: string;
+    profile: string;
+    cnos_version: string;
+    namespaces?: string[];
+  };
 }
 ```
 
-## Plugin Contracts
+## Runtime Surfaces
 
-```ts
-interface LoaderPlugin {
-  id: string;
-  kind: "loader";
-  load(context: LoaderContext): Promise<ConfigEntry[]>;
-}
+There are two runtime layers that agents often confuse.
 
-interface ResolverPlugin {
-  id: string;
-  kind: "resolver";
-  resolve(entries: ConfigEntry[], context: ResolverContext): Promise<ResolvedGraph>;
-}
+### Core runtime
 
-interface ValidatorPlugin {
-  id: string;
-  kind: "validator";
-  validate(graph: ResolvedGraph, context: ValidationContext): Promise<ValidationResult>;
-}
+`createCnos()` returns a `CnosRuntime` from `@kitsy/cnos-core`. This is the stable engine-level contract.
 
-interface SecretVaultProvider {
-  readonly id: string;
-  readonly providerType: string;
-  authenticate(authConfig: VaultAuthConfig): Promise<void>;
-  isAuthenticated(): boolean;
-  batchGet(refs: string[]): Promise<Map<string, string>>;
-  get(ref: string): Promise<string | undefined>;
-  set(ref: string, value: string): Promise<void>;
-  delete(ref: string): Promise<void>;
-  list(): Promise<string[]>;
-  clearCache(): void;
-}
-```
+### Singleton wrapper
 
-## Runtime API
+The default export from `@kitsy/cnos` adds singleton ergonomics on top of the core runtime:
 
-```ts
-interface CnosRuntime {
-  read<T = unknown>(key: LogicalKey): T | undefined;
-  require<T = unknown>(key: LogicalKey): T;       // throws CnosKeyNotFoundError
-  readOr<T>(key: LogicalKey, fallback: T): T;
-  value<T = unknown>(path: string): T | undefined; // shorthand: value("server.port") → read("value.server.port")
-  secret<T = unknown>(path: string): T | undefined;
-  meta<T = unknown>(path: string): T | undefined;
+- `cnos(key)` shorthand
+- `ready()`
+- `format(message)`
+- `log(message)`
+- `loadProjection(path)`
 
-  inspect(key: LogicalKey): InspectResult;
-  surface(name: string): SurfaceView;
-
-  toObject(): Record<string, unknown>;
-  toNamespace(namespace: NamespaceName): Record<string, unknown>;
-  toEnv(options?: ToEnvOptions): Record<string, string>;
-  toPublicEnv(options?: ToPublicEnvOptions): Record<string, string>;
-  toServerProjection(): ServerProjection;
-
-  refreshSecrets(): Promise<void>;
-  refreshSecret(key: string): Promise<void>;
-  clearSecretCache(): void;
-  registerRuntimeProvider(namespace: string, provider: RuntimeProvider): void;
-
-  readonly graph: ResolvedGraph;
-  readonly workspace: WorkspaceContext;
-  ready(): Promise<void>;
-}
-```
+Those helpers live in `packages/cnos/src/runtime/index.ts`. Do not document them as part of the core runtime contract.
 
 ## Module Layout
 
-```
-packages/cnos/src/
-  index.ts                         # createCnos, singleton, re-exports
-  browser/
-    index.ts                       # @kitsy/cnos/browser entry
-    embed.ts                       # reads build-time injected data
-  build/
-    index.ts                       # resolveBrowserData, toFrameworkEnv
-  discovery/
-    findCnosrc.ts                  # bounded .cnosrc.yml search (max 3 levels)
-    parseCnosrc.ts                 # parse and validate
-    resolveRoot.ts                 # protocol detection: local, git, cnos://
-    resolvers/
-      local.ts                     # local filesystem path resolution
-      git.ts                       # git clone/fetch/cache
-    cache/
-      cacheManager.ts              # freshness, TTL, immutability
-  derive/
-    types.ts                       # DerivedValue, ParsedDerivation, ExprNode
-    parser.ts                      # expression → AST
-    templateParser.ts              # template ${...} → AST
-    evaluator.ts                   # AST + graph + runtime providers → value
-    depGraph.ts                    # dependency extraction, topo sort, cycle detection
-    builtins.ts                    # concat, coalesce, when, exists, eq, ne
-    validate.ts                    # namespace checks, syntax validation
-  manifest/
-    loadManifest.ts                # read and parse .cnos/cnos.yml
-    normalizeManifest.ts           # validate, apply defaults
-    loadWorkspaceFile.ts           # .cnos-workspace.yml
-  workspaces/
-    resolveWorkspaceContext.ts     # selection, chain expansion, effective roots
-    expandWorkspaceChain.ts        # inheritance, cycle detection
-  profiles/
-    resolveActiveProfile.ts        # CLI > env > manifest default
-    expandProfileChain.ts          # inheritance, cycle detection
-  orchestrator/
-    createCnos.ts                  # main entry point
-    singleton.ts                   # default stream singleton
-    runtime.ts                     # CnosRuntime implementation
-    pipeline.ts                    # discovery → manifest → workspace → profile → load → resolve → validate → ready
-  loaders/
-    filesystemValues.ts            # YAML files → value.* entries
-    filesystemSecrets.ts           # YAML files → secret.* ref entries
-    dotenv.ts                      # .env files → mapped entries
-    processEnv.ts                  # process.env → mapped entries
-    cliArgs.ts                     # --value.x.y=z → entries
-  resolvers/
-    profileAwareResolver.ts        # single resolver: workspace roots × profile layers × precedence
-  validators/
-    basicSchema.ts                 # type, required, enum, pattern, default
-    publicSafety.ts                # secret.* never in public.promote
-    namespaceSafety.ts             # custom namespace rules
-  promotions/
-    promoteToPublic.ts             # create public.* mirror entries
-    validatePromotion.ts           # transitive security checks
-  exporters/
-    toEnv.ts                       # flat KEY=VALUE export
-    toPublicEnv.ts                 # promoted keys with framework prefix
-    dump.ts                        # filesystem materialization
-  projection/
-    serverProjection.ts            # toServerProjection()
-    projectionHash.ts              # SHA-256 config hash
-    formats/
-      dotenv.ts, json.ts, shell.ts, yaml.ts, dockerEnv.ts, toml.ts
-  inspectors/
-    provenance.ts                  # winner, overrides, workspace, profile context
-  secrets/
-    types.ts                       # SecretRef, VaultAuthConfig
-    resolveAuth.ts                 # auth chain: env → keychain → prompt
-    secretCache.ts                 # per-runtime in-memory cache
-    batchResolve.ts                # batch-fetch grouped by vault
-    auditLog.ts                    # JSON lines access log
-    mask.ts                        # **** masking for CLI/TTY
-    providers/
-      local.ts                     # AES-256-GCM encrypted vault
-      github.ts                    # process.env reader with mapping
-      registry.ts                  # provider registry
-    crypto/
-      encrypt.ts                   # AES-256-GCM
-      kdf.ts                       # PBKDF2-SHA512, 600K iterations
-      sessionKey.ts                # cnos run --auth one-time key
-  runtime/
-    runtimeProviders.ts            # provider registry, process.* default
-    loadProjection.ts              # parse from env var or .cnos-server.json
-    autoDiscover.ts                # __CNOS_PROJECTION__ → file → full resolution
-    secretHydration.ts             # eager/lazy/refreshing policies
-  codegen/
-    generateTypes.ts               # schema → TypeScript interfaces
-  migrate/
-    scanEnvUsage.ts                # regex scanner for process.env patterns
-    proposeMapping.ts              # env var → logical key proposal
-  drift/
-    compareSchemaToGraph.ts        # schema vs resolved graph diff
-  watch/
-    watchFiles.ts                  # determine watchable file set
-    diffGraphs.ts                  # compare two ResolvedGraphs
-  utils/
-    path.ts, flatten.ts, deepMerge.ts, yaml.ts, envNaming.ts
+Use these directories as the stable map of the codebase.
+
+### `packages/core/src/`
+
+```text
+derive/         parser, template parser, evaluator, dep graph, runtime support
+discovery/      .cnosrc search, git URI parsing, root resolution, cache manager
+inspectors/     provenance / inspect support
+manifest/       manifest and workspace-file loading / normalization
+orchestrator/   createCnos pipeline and runtime assembly
+profiles/       profile activation and inheritance
+promotions/     public promotion and promotion validation
+resolvers/      graph merge / precedence resolver
+runtime/        read helpers, env/public/server projection, dump helpers
+secrets/        auth resolution, providers, cache, audit log, batch resolve
+types/          core public contracts
+utils/          shared helpers
+validation/     schema, env mapping, public safety, workspace safety
+workspaces/     workspace selection and inheritance
 ```
 
-## Manifest Shape (`.cnos/cnos.yml`)
+### `packages/cnos/src/`
 
-```yaml
-version: 1
+```text
+browser/        browser runtime entrypoint
+build/          framework/build helpers
+configure/      explicit runtime creation entrypoint
+plugin/         plugin package re-exports
+runtime/        singleton runtime bootstrap and helpers
+createCnos.ts   batteries-included runtime creation
+defaultPlugins.ts
+index.ts
+internal.ts
+```
 
-project:
-  name: my-service
+### `plugins/<name>/src/`
 
-workspaces:
-  default: base
-  global:
-    enabled: false
-    root: ~/.cnos
-    allowWrite: false
-  items:
-    base: {}
-    api:
-      extends: [base]
-      globalId: api
+Each official plugin package owns its own implementation. Add new built-in plugin behavior there, not in `packages/cnos/src/`.
 
-profiles:
-  default: local
-  resolveFrom: [cli.profile, env.CNOS_PROFILE, default]
+### `packages/cli/src/`
 
-config:
-  precedence: [local, env]       # stream IDs, lowest to highest
-  arrayPolicy: replace
-  write:
-    defaultProfile: local
-    targets:
-      value: ./values/{profile}/app.yml
-      secret: ./secrets/{profile}/app.yml
-
-namespaces:
-  custom:
-    flag:
-      source: firebase
-      promotable: true
-      sensitive: false
-  runtime:
-    request:
-      server_only: true
-    session:
-      server_only: true
-
-env:
-  convention: SCREAMING_SNAKE
-  export:
-    DATABASE_HOST: value.db.host
-    PORT: value.server.port
-
-public:
-  promote:
-    - value.api.baseUrl
-    - value.app.name
-  frameworks:
-    next: NEXT_PUBLIC_
-    vite: VITE_
-
-vaults:
-  local-dev:
-    provider: local
-    auth:
-      passphrase:
-        from: [env:CNOS_SECRET_PASSPHRASE_LOCAL_DEV, env:CNOS_SECRET_PASSPHRASE, prompt]
-  github-ci:
-    provider: github-secrets
-    auth:
-      method: environment
-    mapping:
-      DB_PASSWORD: db.password
-
-schema:
-  value.server.port: { type: number, required: true }
-  value.api.baseUrl: { type: string, required: true }
-  secret.db.password: { type: string, required: true }
+```text
+cli/            args parsing and help registry
+commands/       user-facing commands
+format/         output shaping
+services/       shared command logic
 ```
 
 ## CLI Surface
 
-| Command | What it does |
-|---------|-------------|
-| `cnos init` | Scaffold .cnos/ structure |
-| `cnos init --mode workspace` | Scaffold with base workspace |
-| `cnos read <key>` | Read a resolved value |
-| `cnos value get/set <path>` | Read/write value.* keys |
-| `cnos secret get/set <ref>` | Read/write secrets via vault |
-| `cnos define <ns> <path> <val>` | Write to correct file via write policy |
-| `cnos promote <key> --to public/env` | Add to promotion/env mapping |
-| `cnos inspect <key>` | Show provenance, winner, overrides |
-| `cnos validate` | Run schema + safety checks |
-| `cnos export env` | Flat KEY=VALUE output |
-| `cnos build server/browser/env/public` | Generate projection files |
-| `cnos run [--auth] -- <cmd>` | Inject config, spawn child |
-| `cnos dump` | Materialize config tree to disk |
-| `cnos diff --from <p> --to <p>` | Compare profiles |
-| `cnos drift` | Schema vs actual config comparison |
-| `cnos doctor` | System health + security checks |
-| `cnos codegen` | Generate TypeScript types from schema |
-| `cnos watch -- <cmd>` | Re-resolve on file change, restart child |
-| `cnos migrate` | Scan process.env usage, propose mappings |
-| `cnos onboard` | Import existing .env/yaml/json/toml into CNOS |
-| `cnos workspace enable` | Convert regular → workspace mode |
-| `cnos workspace add <id>` | Add workspace |
-| `cnos workspace detach/attach` | Standalone ↔ workspace conversion |
-| `cnos vault create/list/remove` | Vault management |
-| `cnos vault auth/logout` | Session authentication |
-| `cnos cache list/clear/refresh` | Remote root cache management |
+Do not treat this file as the canonical CLI registry. The authoritative sources are:
 
-## Precedence Order (Lowest to Highest)
+- `packages/cli/src/cli/helpRegistry.ts`
+- `cnos help-ai --format json`
 
-1. Global parent workspace filesystem values/secrets
-2. Global active workspace filesystem values/secrets
-3. Local parent workspace filesystem values/secrets
-4. Local active workspace filesystem values/secrets
-5. Dotenv files (from effective workspace roots)
-6. Process env
-7. CLI args (`--value.server.port=8080`)
+At a high level, the top-level CLI surface currently includes:
 
-Local always wins over global. Child workspace always wins over parent. Higher-precedence loader always wins over filesystem.
+- setup and context: `init`, `onboard`, `use`, `profile`
+- data operations: `read`, `value`, `secret`, `define`, `list`, `promote`, `inspect`, `validate`
+- workflows: `export`, `build`, `dev`, `run`, `dump`, `diff`, `doctor`, `drift`, `watch`, `migrate`
+- workspace and secrets: `workspace`, `vault`, `cache`
+- meta/help: `help`, `help-ai`, `version`
+
+When CLI behavior changes, update `helpRegistry.ts` first, then the published docs under `packages/docs/docs/cli/`.
+
+## Docs Surface
+
+Published docs live in `packages/docs`. The package name is still `@kitsy/cnos-docs`.
+
+The docs validation script should catch:
+
+- missing frontmatter
+- manifest entries that point to missing pages
+- orphan docs pages
+- broken internal links
+- missing top-level CLI reference pages for commands exposed through `helpRegistry.ts`
+
+## Common Write Surfaces
+
+Use this map before editing:
+
+- manifest or profile/workspace behavior: `packages/core/src/manifest`, `packages/core/src/profiles`, `packages/core/src/workspaces`
+- derived values: `packages/core/src/derive`
+- resolution or validation: `packages/core/src/resolvers`, `packages/core/src/validation`, `packages/core/src/promotions`
+- secret behavior: `packages/core/src/secrets`
+- singleton/runtime bootstrap: `packages/cnos/src/runtime`
+- official plugin logic: `plugins/*/src`
+- CLI commands/help: `packages/cli/src/commands`, `packages/cli/src/cli/helpRegistry.ts`
+- published docs: `packages/docs/docs`, `packages/docs/manifest.yml`
 
 ## Error Types
 
-| Error | When |
-|-------|------|
-| `CnosDiscoveryError` | No .cnosrc.yml found, root path invalid |
-| `CnosKeyNotFoundError` | `require()` on missing key |
-| `CnosSecurityError` | secret.* in public.promote, sensitive namespace promoted |
-| `CnosAuthenticationError` | Vault auth failed, all auth sources exhausted |
-| `CnosDerivedCycleError` | Circular dependency in derived values |
-| `CnosDerivedResolutionError` | Missing ref inside a derivation |
-| `CnosValidationError` | Schema validation failures |
+Look for typed CNOS errors before inventing a new generic one. The common families include:
+
+- discovery errors
+- validation errors
+- security errors
+- authentication errors
+- derived-value cycle / resolution errors
+
+If you add a new user-facing failure mode, make the message actionable: say what failed, which key/file/root was involved, and what the user should do next.

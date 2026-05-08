@@ -34,11 +34,11 @@ interface ServerProjection {
 
 ## Delivery Modes
 
-1. `cnos run` → injects `__CNOS_PROJECTION__` env var into child
+1. `cnos run` -> injects both `__CNOS_GRAPH__` and `__CNOS_PROJECTION__` into the child
 2. `cnos build server --to .cnos-server.json` → writes projection file
 3. Full resolution from `.cnos/` directory → fallback when neither above exists
 
-Runtime auto-discovery priority: env var → `.cnos-server.json` file → full resolution.
+Runtime auto-discovery priority: `__CNOS_GRAPH__` -> `__CNOS_PROJECTION__` -> `.cnos-server.json` -> full resolution.
 
 ## Build Command
 

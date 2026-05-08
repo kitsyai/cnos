@@ -22,7 +22,7 @@ When reviewing a proposed change, assess:
 
 5. **Manifest complexity?** Fewer top-level sections is better. Sensible defaults over required config. A solo developer with one service should need only `version` and `project.name` in their manifest.
 
-6. **Caching correctness?** Config-only derived values: cached per resolution pass. Runtime-dependent derived values: never cached. Secret cache: per-runtime instance, cleared on `clearSecretCache()`. Confusing these causes stale-data bugs.
+6. **Caching correctness?** Config-only derived values: cached per resolution pass. Runtime-dependent derived values: never cached. Secret cache: per-runtime instance, refreshed through the runtime secret-refresh flow. Confusing these causes stale-data bugs.
 
 7. **Determinism?** Same inputs must produce same outputs. Only runtime namespaces (`process.*`, `request.*`, etc.) are allowed to be non-deterministic. Everything else must be reproducible.
 

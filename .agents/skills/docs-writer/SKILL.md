@@ -1,48 +1,39 @@
 # Docs Writer Skill
 
-You are writing documentation for `@kitsy/cnos-docs`.
+You are writing documentation for the published docs package `@kitsy/cnos-docs`.
 
 ## Where Docs Live
 
-Content: `packages/cnos-docs/docs/`
-Navigation: `packages/cnos-docs/manifest.yml`
-Images: `packages/cnos-docs/assets/images/`
+- Content: `packages/docs/docs/`
+- Navigation: `packages/docs/manifest.yml`
+- Images: `packages/docs/assets/images/`
+- Validation: `packages/docs/scripts/validate-docs.mjs`
 
-The docs are rendered by Astro + Starlight in `apps/cnos-docs-site/` and served at `cnos.kitsy.ai/docs/`.
+The package directory is `packages/docs/`. The published package name remains `@kitsy/cnos-docs`.
+
+## Source Of Truth
+
+Before documenting behavior, check the canonical source for that surface:
+
+- CLI commands, usage, flags, and examples: `packages/cli/src/cli/helpRegistry.ts`
+- Machine-readable CLI output: `cnos help-ai --format json`
+- Runtime and manifest contracts: `packages/core/src/types/*.ts`
+- Higher-level repo guidance: `.agents/*.md`
+
+Do not invent CLI flags, subcommands, or runtime methods from memory.
 
 ## Doc Structure
 
-```
-docs/
-  index.mdx                         # docs landing
-  getting-started/
-    installation.mdx
-    quick-start.mdx
-    your-first-project.mdx
-  guides/
-    backend.mdx
-    frontend-vite.mdx
-    frontend-next.mdx
-    ssr.mdx
-    ci-cd.mdx
-    workspaces.mdx
-    profiles.mdx
-    secrets.mdx
-    migration.mdx
-    derived-values.mdx
-  cli/
-    init.mdx, read.mdx, value.mdx, secret.mdx, define.mdx,
-    inspect.mdx, validate.mdx, export.mdx, run.mdx, diff.mdx,
-    dump.mdx, doctor.mdx, promote.mdx, vault.mdx, codegen.mdx,
-    watch.mdx, migrate.mdx, drift.mdx, onboard.mdx, workspace.mdx,
-    build.mdx, cache.mdx
-  api/
-    create-cnos.mdx, runtime.mdx, singleton.mdx, browser.mdx, types.mdx
-  reference/
-    manifest.mdx, namespaces.mdx, resolution.mdx, security.mdx
-  concepts/
-    how-it-works.mdx, config-spectrum.mdx
-```
+Use `packages/docs/manifest.yml` as the live table of contents. Do not trust a copied file list over the manifest.
+
+Current high-level areas:
+
+- `getting-started/`
+- `guides/`
+- `cli/`
+- `api/`
+- `reference/`
+- `concepts/`
 
 ## Frontmatter
 
@@ -55,93 +46,49 @@ description: Install CNOS and get started in under 5 minutes.
 ---
 ```
 
-Required: `title`, `description`. Optional: `sidebar_label`, `sidebar_position`, `draft`.
+Required: `title`, `description`
 
 ## Writing Rules
 
-- Every code example must be copy-pasteable and working. No pseudocode.
-- CLI examples use `bash` code fence language.
-- One topic per file.
-- Internal links use relative paths: `[installation](./installation.mdx)`.
-- Admonitions: `:::note`, `:::tip`, `:::caution`, `:::danger`.
-- Keep language direct and concise. No filler words.
+- Every code example must be copy-pasteable and runnable.
+- CLI examples use `bash` fences.
+- Keep one topic per file.
+- Use relative internal links.
+- Keep language direct and concise.
 - Show the simplest example first, then the advanced version.
+- If a command page exists, keep its usage/options/examples aligned with `helpRegistry.ts`.
 
 ## Consistent Examples
 
-All examples must show:
-- `profiles.default: local` (never `base` as a profile name)
-- `base` as workspace root when showing workspace mode
-- Child workspaces `extends: [base]`
-- `cnos run` as the hero command for getting started
-- `cnos.value("server.port")` for runtime code examples
+Examples should follow repo conventions:
+
+- `profiles.default: local`
+- `base` as the conventional shared workspace in workspace-mode examples
+- child workspaces usually `extends: [base]`
+- `cnos run` as the lowest-friction runtime adoption path
+- `cnos.value("server.port")` for runtime examples
+- `cnos diff local stage`, not `cnos diff base stage`
 
 ## CLI Command Pages
 
-Each CLI command page should have:
+Each CLI page should include:
 
-1. **Usage line:** `cnos <command> [options]`
-2. **Description:** one paragraph explaining what it does.
-3. **Flags table:** flag, type, default, description.
-4. **Examples:** at least 2 — one simple, one with flags.
-5. **Related commands:** links to related CLI pages.
+1. usage
+2. concise description
+3. relevant flags/options
+4. examples
+5. related commands when helpful
 
-Example structure:
+When documenting a CLI command:
 
-```mdx
----
-title: cnos run
-description: Inject resolved config into a child process as environment variables.
----
+1. mirror the command name and usage from `helpRegistry.ts`
+2. mirror the supported flags from `helpRegistry.ts`
+3. avoid documenting hidden implementation aliases unless they are intentionally public
+4. run docs validation after the edit
 
-# cnos run
+## When Adding Or Updating A Page
 
-Resolves the config graph and spawns a child process with the resolved values
-injected as environment variables. The child reads `process.env` as usual — no
-CNOS-specific code required.
-
-## Usage
-
-\`\`\`bash
-cnos run [--profile <name>] [--workspace <id>] [--auth] [--set <key>=<value>] -- <command>
-\`\`\`
-
-## Flags
-
-| Flag | Description |
-|------|-------------|
-| `--profile` | Override active profile |
-| `--workspace` | Override active workspace |
-| `--auth` | Pre-authenticate vaults, pass secrets to child securely |
-| `--set` | Inline value override (repeatable) |
-| `--public` | Inject only promoted public keys |
-| `--framework` | Apply framework prefix (vite, next) with --public |
-
-## Examples
-
-\`\`\`bash
-# Basic: inject all env mappings
-cnos run -- node server.js
-
-# With profile override
-cnos run --profile stage -- node server.js
-
-# With inline override
-cnos run --set value.server.port=9999 -- node server.js
-
-# For frontend builds: only public values
-cnos run --public --framework vite -- pnpm build
-\`\`\`
-
-## Related
-
-- [cnos export env](./export.mdx) — export without spawning a process
-- [cnos build server](./build.mdx) — generate projection file
-```
-
-## When Adding a New Page
-
-1. Create the `.mdx` file in the appropriate directory.
-2. Add the page to `packages/cnos-docs/manifest.yml` sidebar.
-3. Run validation: `pnpm --filter @kitsy/cnos-docs validate`.
-4. Verify internal links resolve.
+1. Create or edit the page in `packages/docs/docs/`.
+2. Add or update the corresponding manifest entry in `packages/docs/manifest.yml`.
+3. Run `pnpm --filter @kitsy/cnos-docs validate`.
+4. If the page is for a top-level CLI command, make sure it matches `helpRegistry.ts`.

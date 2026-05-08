@@ -5,6 +5,7 @@ import process from 'node:process';
 const root = process.cwd();
 const docsRoot = path.join(root, 'docs');
 const manifestPath = path.join(root, 'manifest.yml');
+const helpRegistryPath = path.join(root, '..', 'cli', 'src', 'cli', 'helpRegistry.ts');
 
 function normalizeSlashes(value) {
   return value.replace(/\\/g, '/');
@@ -65,9 +66,17 @@ function extractRelativeLinks(source) {
   );
 }
 
+function extractTopLevelCliCommandIds(source) {
+  const ids = Array.from(source.matchAll(/id:\s*'([^']+)'/g), (match) => match[1]);
+  const excluded = new Set(['vite', 'next']);
+
+  return ids.filter((id) => !id.includes(' ') && !excluded.has(id));
+}
+
 async function main() {
-  const [manifestSource, mdxFiles] = await Promise.all([
+  const [manifestSource, helpRegistrySource, mdxFiles] = await Promise.all([
     fs.readFile(manifestPath, 'utf8'),
+    fs.readFile(helpRegistryPath, 'utf8'),
     walkMdxFiles(docsRoot),
   ]);
 
@@ -79,6 +88,14 @@ async function main() {
     const target = path.join(docsRoot, `${manifestDocPath}.mdx`);
     await fs.access(target).catch(() => {
       throw new Error(`Manifest path "${manifestDocPath}" is missing file ${target}`);
+    });
+  }
+
+  const topLevelCliCommandIds = extractTopLevelCliCommandIds(helpRegistrySource);
+  for (const commandId of topLevelCliCommandIds) {
+    const cliDocPath = normalizeSlashes(path.join(docsRoot, 'cli', `${commandId}.mdx`));
+    await fs.access(cliDocPath).catch(() => {
+      throw new Error(`Missing CLI docs page for top-level command "${commandId}": ${cliDocPath}`);
     });
   }
 
