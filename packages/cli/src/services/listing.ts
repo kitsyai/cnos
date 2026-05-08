@@ -1,5 +1,7 @@
 import { flattenObject } from '@kitsy/cnos/internal';
 
+import { maskSecretValue } from '../format/maskSecret.js';
+import { applyMaskedSecretEnvMappings, getSecretEnvMappings, hydrateSecretEnvMappings } from './secretEnvBuild.js';
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 
 export type ListNamespace = 'all' | 'value' | 'secret' | 'meta' | 'env' | 'public' | 'process';
@@ -98,37 +100,61 @@ async function listStoredNamespace(
     ...options,
     ...(namespace === 'secret' ? { secretResolution: 'lazy' as const } : {}),
   });
+  const revealSecrets = namespace === 'secret' && (options.cliArgs?.includes('--reveal') ?? false);
 
-  return Array.from(runtime.graph.entries.values())
-    .filter((entry) => entry.namespace === namespace)
-    .map((entry) => {
-      const stored = toStoredEntry(namespace, entry, options);
+  const results: ListEntry[] = [];
 
-      if (!stored) {
-        return undefined;
-      }
+  for (const entry of Array.from(runtime.graph.entries.values()).filter((candidate) => candidate.namespace === namespace)) {
+    const stored = toStoredEntry(namespace, entry, options);
 
-      return {
-        ...stored,
-        value: stored.derived ? runtime.read(entry.key) : stored.value,
-      };
-    })
-    .filter((entry): entry is ListEntry => Boolean(entry))
-    .filter((entry) => entry.value !== undefined)
-    .filter((entry) => matchesPrefix(entry.key, options.prefix))
-    .sort((left, right) => left.key.localeCompare(right.key));
+    if (!stored) {
+      continue;
+    }
+
+    const value =
+      namespace === 'secret'
+        ? revealSecrets
+          ? (await runtime.refreshSecret(entry.key), runtime.secret(entry.key.slice('secret.'.length)))
+          : maskSecretValue(stored.value)
+        : stored.derived
+          ? runtime.read(entry.key)
+          : stored.value;
+
+    if (value === undefined || !matchesPrefix(stored.key, options.prefix)) {
+      continue;
+    }
+
+    results.push({
+      ...stored,
+      value,
+    });
+  }
+
+  return results.sort((left, right) => left.key.localeCompare(right.key));
 }
 
 function listProjectedNamespace(
   namespace: 'meta' | 'env' | 'public' | 'process',
-  options: RuntimeServiceOptions & { prefix?: string; framework?: string },
+  options: RuntimeServiceOptions & { prefix?: string; framework?: string; vault?: string; provider?: string },
 ): Promise<ListEntry[]> {
-  return createRuntimeService(options).then((runtime) => {
+  return createRuntimeService({
+    ...options,
+    ...(namespace === 'env' ? { secretResolution: 'lazy' as const } : {}),
+  }).then(async (runtime) => {
+    const revealSecrets = options.cliArgs?.includes('--reveal') ?? false;
+    const secretMappings = namespace === 'env' ? getSecretEnvMappings(runtime) : [];
+
+    if (namespace === 'env' && revealSecrets && secretMappings.length > 0) {
+      await hydrateSecretEnvMappings(runtime, secretMappings);
+    }
+
     const projected =
       namespace === 'meta'
         ? flattenObject(runtime.toNamespace('meta'))
         : namespace === 'env'
-          ? runtime.toEnv()
+          ? revealSecrets
+            ? runtime.toEnv({ includeSecrets: true })
+            : applyMaskedSecretEnvMappings(runtime.toEnv(), secretMappings)
           : namespace === 'public'
             ? runtime.toPublicEnv({
                 ...(options.framework
@@ -159,7 +185,7 @@ function listProjectedNamespace(
 
 export async function listConfigEntries(
   namespace: ListNamespace | string,
-  options: RuntimeServiceOptions & { prefix?: string; framework?: string } = {},
+  options: RuntimeServiceOptions & { prefix?: string; framework?: string; vault?: string; provider?: string } = {},
 ): Promise<ListEntry[]> {
   if (namespace === 'value' || namespace === 'secret') {
     return listStoredNamespace(namespace, options);

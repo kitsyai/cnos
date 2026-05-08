@@ -7,9 +7,11 @@ import { stringifyYaml } from '@kitsy/cnos/internal';
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 import { resolveFilesystemBasePath } from './paths.js';
 import {
+  applyMaskedSecretEnvMappings,
   assertSecretEnvTargetIsGitIgnored,
   confirmSecretEnvBuild,
   getSecretEnvMappings,
+  hydrateSecretEnvMappings,
 } from './secretEnvBuild.js';
 
 export type ProjectionFormat = 'dotenv' | 'docker-env' | 'json' | 'shell' | 'toml' | 'yaml';
@@ -156,16 +158,15 @@ export async function buildEnvProjectionArtifact(
   if (revealSecrets && secretMappings.length > 0) {
     await assertSecretEnvTargetIsGitIgnored(targetPath, basePath);
     await confirmSecretEnvBuild(targetPath, secretMappings);
+    await hydrateSecretEnvMappings(runtime, secretMappings);
   }
 
-  const env = runtime.toEnv({
+  let env = runtime.toEnv({
     includeSecrets: revealSecrets,
   });
 
-  for (const { envVar } of secretMappings) {
-    if (!revealSecrets && !(envVar in env)) {
-      env[envVar] = '****';
-    }
+  if (!revealSecrets) {
+    env = applyMaskedSecretEnvMappings(env, secretMappings);
   }
 
   const output = formatKeyValueMap(env, format);

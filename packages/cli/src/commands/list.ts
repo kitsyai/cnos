@@ -41,11 +41,15 @@ export async function runList(args: string[] = [], options: RuntimeServiceOption
   const namespace = normalizeNamespace(args[0] ?? consumeOption(cliArgs, '--namespace'));
   const prefix = consumeOption(cliArgs, '--prefix');
   const framework = consumeOption(cliArgs, '--framework');
+  const vault = consumeOption(cliArgs, '--vault');
+  const provider = consumeOption(cliArgs, '--provider');
   const entries = await listConfigEntries(namespace, {
     ...options,
     cliArgs,
     ...(prefix ? { prefix } : {}),
     ...(framework ? { framework } : {}),
+    ...(vault ? { vault } : {}),
+    ...(provider ? { provider } : {}),
   });
 
   if (options.json) {

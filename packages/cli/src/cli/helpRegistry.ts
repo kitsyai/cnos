@@ -569,9 +569,14 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'secret list',
     summary: 'List resolved secrets.',
-    usage: 'cnos secret list [--vault <name>] [--provider <name>] [global-options]',
-    description: 'Lists stored secret entries for the selected workspace and profile, optionally filtered by vault or provider.',
-    examples: ['cnos secret list --workspace api', 'cnos secret list --vault github-ci'],
+    usage: 'cnos secret list [--vault <name>] [--provider <name>] [--reveal] [global-options]',
+    description:
+      'Lists secret keys for the selected workspace and profile as masked values by default, or as resolved values when --reveal is supplied. Supports optional vault and provider filtering.',
+    examples: [
+      'cnos secret list --workspace api',
+      'cnos secret list --vault github-ci',
+      'cnos secret list --workspace api --reveal',
+    ],
   },
   {
     id: 'secret delete',

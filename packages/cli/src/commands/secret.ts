@@ -5,6 +5,7 @@ import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
 import { maskSecretValue } from '../format/maskSecret.js';
+import { listConfigEntries } from '../services/listing.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
 import { deleteSecret, setSecret } from '../services/writes.js';
 import { runVault } from './vault.js';
@@ -66,43 +67,22 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   }
 
   if (action === 'list') {
-    const runtime = await createRuntimeService({
-      ...options,
-      secretResolution: 'lazy',
-    });
     const prefix = consumeOption(cliArgs, '--prefix');
     const vault = consumeOption(cliArgs, '--vault');
     const provider = consumeOption(cliArgs, '--provider');
-    const entries = Array.from(runtime.graph.entries.values())
-      .filter((entry) => entry.namespace === 'secret')
-      .filter((entry) => !prefix || entry.key.startsWith(`secret.${prefix}`) || entry.key.startsWith(prefix))
-      .filter((entry) => {
-        const secretRef = entry.winner.metadata?.secretRef as { provider?: string; vault?: string } | undefined;
-        if (vault && secretRef?.vault !== vault) {
-          return false;
-        }
-
-        if (provider && secretRef?.provider !== provider) {
-          return false;
-        }
-
-        return true;
-      })
-      .map((entry) => {
-        const secretRef = entry.winner.metadata?.secretRef as { provider?: string; vault?: string } | undefined;
-        return {
-          key: entry.key,
-          vault: secretRef?.vault ?? 'default',
-          provider: secretRef?.provider ?? 'local',
-        };
-      })
-      .sort((left, right) => left.key.localeCompare(right.key));
+    const entries = await listConfigEntries('secret', {
+      ...options,
+      cliArgs,
+      ...(prefix ? { prefix } : {}),
+      ...(vault ? { vault } : {}),
+      ...(provider ? { provider } : {}),
+    });
 
     if (options.json) {
       return printJson(entries);
     }
 
-    return entries.map((entry) => `${entry.key} (vault: ${entry.vault}, provider: ${entry.provider})`).join('\n');
+    return entries.map((entry) => `${entry.key}=${printValue(entry.value)}`).join('\n');
   }
 
   if (action === 'set') {

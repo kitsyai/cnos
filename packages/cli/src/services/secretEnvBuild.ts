@@ -30,6 +30,27 @@ export function getSecretEnvMappings(runtime: CnosRuntime): SecretEnvMapping[] {
     .sort((left, right) => left.envVar.localeCompare(right.envVar));
 }
 
+export async function hydrateSecretEnvMappings(runtime: CnosRuntime, mappings: SecretEnvMapping[]): Promise<void> {
+  for (const mapping of mappings) {
+    await runtime.refreshSecret(mapping.logicalKey);
+  }
+}
+
+export function applyMaskedSecretEnvMappings(
+  env: Record<string, string>,
+  mappings: SecretEnvMapping[],
+): Record<string, string> {
+  const nextEnv = { ...env };
+
+  for (const { envVar } of mappings) {
+    if (!(envVar in nextEnv)) {
+      nextEnv[envVar] = '****';
+    }
+  }
+
+  return nextEnv;
+}
+
 function resolveGitRoot(cwd: string): string | undefined {
   const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
     cwd,
