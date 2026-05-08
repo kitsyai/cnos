@@ -11,4 +11,5 @@ CNOS secret rules:
 - local vault material is encrypted outside the repo
 - reads are masked by default
 - browser and public outputs never expose `secret.*`
-- `vault auth` manages session-based access to local vaults
+- `vault auth` caches a reusable derived session key under `~/.cnos/secrets/sessions` until `cnos vault logout`
+- `--store-keychain` adds an OS keychain auth source that works across shells

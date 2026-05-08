@@ -59,7 +59,7 @@ async function buildRunEnvironment(
             ...(framework ? { framework } : {}),
             ...(prefix ? { prefix } : {}),
           })
-        : runtime.toEnv()),
+        : runtime.toEnv({ includeSecrets: true })),
       [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph),
       ...(secretPayload
         ? {

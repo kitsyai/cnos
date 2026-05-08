@@ -229,6 +229,54 @@ async function createSecretEnvArtifactFixture(): Promise<string> {
   return root;
 }
 
+async function createRunWithLocalVaultEnvFixture(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-run-vault-env-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'values'), { recursive: true });
+  await mkdir(path.join(root, '.cnos', 'workspaces', 'api', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: run-vault-env-fixture',
+      'workspaces:',
+      '  default: api',
+      '  items:',
+      '    api: {}',
+      'vaults:',
+      '  default:',
+      '    provider: local',
+      '    auth:',
+      '      passphrase:',
+      '        from:',
+      '          - env:CNOS_SECRET_PASSPHRASE_DEFAULT',
+      '          - env:CNOS_SECRET_PASSPHRASE',
+      '          - keychain:cnos/default',
+      '          - prompt',
+      'envMapping:',
+      '  explicit:',
+      '    SERVER_PORT: value.server.port',
+      '    APP_TOKEN: secret.app.token',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+    ['server:', '  port: 8080'].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'app.yml'),
+    [
+      'app:',
+      '  token:',
+      '    provider: local',
+      '    ref: app.token',
+      '    vault: default',
+    ].join('\n'),
+  );
+  return root;
+}
+
 async function runGit(
   args: string[],
   cwd: string,
@@ -1772,6 +1820,59 @@ describe('@kitsy/cnos-cli', () => {
     await expect(runDiff('base', 'stage', { root, workspace: 'api', processEnv: {} })).resolves.toContain(
       'value.server.port: 8080 -> 9090',
     );
+  });
+
+  it('runs bare node commands on Windows-safe quoting and injects secret env mappings into private child envs', async () => {
+    const root = await createRunWithLocalVaultEnvFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-run-vault-session-'));
+    fixtureRoots.push(secretHome);
+
+    await runVault(['create', 'default'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+    });
+
+    await runSecret(['set', 'app.token', 'super-secret'], {
+      root,
+      workspace: 'api',
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+      cliArgs: ['--local', '--vault', 'default'],
+    });
+
+    await expect(
+      runVault(['auth', 'default'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+      }),
+    ).resolves.toContain('authenticated vault "default"');
+
+    const result = await runCommand(
+      [
+        'node',
+        '-e',
+        "process.stdout.write(Object.keys(process.env).filter((key) => /^(APP_TOKEN|SERVER_PORT)$/.test(key)).sort().map((key) => `${key}=${process.env[key]}`).join('\\n'))",
+      ],
+      {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        stdio: 'pipe',
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('APP_TOKEN=super-secret\nSERVER_PORT=8080');
   });
 
   it('detaches and reattaches a workspace through .cnosrc.yml anchors', async () => {

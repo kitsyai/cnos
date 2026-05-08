@@ -12,3 +12,7 @@ cnos run -- node server.js
 cnos run --profile stage -- pnpm build
 cnos run --auth -- node server.js
 ```
+
+Private runs inject explicit `envMapping` entries into the child process, including mapped `secret.*` keys when CNOS can authenticate them. `--public` strips that down to promoted public values only.
+
+Use `--auth` when the child process also bootstraps the CNOS runtime from `__CNOS_GRAPH__` and should receive an encrypted pre-resolved secret payload instead of re-authenticating on first secret read.

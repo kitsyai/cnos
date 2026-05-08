@@ -370,21 +370,21 @@ const COMMANDS: HelpCommand[] = [
   },
   {
     id: 'vault auth',
-    summary: 'Authenticate a vault for the current shell session.',
+    summary: 'Authenticate a vault and cache reusable local auth state.',
     usage: 'cnos vault auth <name> [--store-keychain] [global-options]',
     description:
-      'Authenticates an existing local vault using env, keychain, or prompt-based auth and stores a derived session key for later CNOS commands in the same shell. Wrong passphrases fail authentication.',
+      'Authenticates an existing local vault using env, keychain, or prompt-based auth and stores a derived session key under ~/.cnos/secrets/sessions for later CNOS commands until logout. With --store-keychain, CNOS also writes the derived key to the OS keychain.',
     examples: ['cnos vault auth local-dev', 'cnos vault auth local-dev --store-keychain'],
   },
   {
     id: 'vault logout',
-    summary: 'Clear vault auth state for the current shell session.',
+    summary: 'Clear cached vault auth state.',
     usage: 'cnos vault logout <name> [global-options]',
-    description: 'Removes active vault session auth for the selected vault or all vaults when used with --all.',
+    description: 'Removes cached vault session auth for the selected vault or all vaults when used with --all. This does not remove any stored OS keychain entry.',
     options: [
       {
         flag: '--all',
-        description: 'Clear all active vault auth sessions for the current shell context.',
+        description: 'Clear all cached vault auth sessions from ~/.cnos/secrets/sessions.',
       },
     ],
     examples: ['cnos vault logout local-dev', 'cnos vault logout --all'],
@@ -794,13 +794,17 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'run',
     summary: 'Run a child process with CNOS env injected.',
-    usage: 'cnos run [--public] [--framework <name>] [--set <logical-key=value>] [global-options] -- <command...>',
+    usage: 'cnos run [--public] [--auth] [--framework <name>] [--set <logical-key=value>] [global-options] -- <command...>',
     description:
-      'Resolves the active workspace and profile, injects runtime env variables, bootstraps __CNOS_GRAPH__ for singleton runtime reads, and executes the command after --.',
+      'Resolves the active workspace and profile, injects runtime env variables, includes explicit secret env mappings for private runs, bootstraps __CNOS_GRAPH__ for singleton runtime reads, and executes the command after --.',
     options: [
       {
         flag: '--set <logical-key=value>',
         description: 'Apply inline logical-key overrides for this run without touching repo config files.',
+      },
+      {
+        flag: '--auth',
+        description: 'Resolve secrets eagerly and pass an encrypted secret payload to bootstrapped CNOS runtimes in the child process.',
       },
       {
         flag: '--public',
@@ -818,6 +822,7 @@ const COMMANDS: HelpCommand[] = [
     examples: [
       'cnos run -- node server.js',
       'cnos run --profile stage -- node server.js',
+      'cnos run --auth -- node server.js',
       'cnos run --set value.server.port=9999 -- node server.js',
       'cnos run --public --framework vite -- pnpm build',
     ],
