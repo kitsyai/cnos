@@ -7,7 +7,6 @@ description: Launch the local CNOS UI for browsing config state and provenance.
 
 ```bash
 cnos ui
-cnos ui --workspace api --profile stage
 cnos ui --port 4400 --api-port 4401
 ```
 
@@ -19,9 +18,12 @@ cnos ui --port 4400 --api-port 4401
 Use it when you want a faster adoption path than raw CLI output for:
 
 - value and meta browsing
+- secret listing with masking intact
 - env mapping review
 - public promotion review
 - inspect/provenance tracing
+
+Workspace and profile switching now happen inside the UI itself.
 
 ## Flags
 

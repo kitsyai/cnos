@@ -4,11 +4,13 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 import type { InspectResult } from '@kitsy/cnos';
+import { loadManifest } from '@kitsy/cnos/internal';
 
 import { consumeOption } from '../cli/commandOptions.js';
 import { maskSecretValue } from '../format/maskSecret.js';
 import { printJson } from '../format/printJson.js';
 import { listConfigEntries, type ListNamespace } from '../services/listing.js';
+import { listProfiles } from '../services/profiles.js';
 import { createRuntimeService, type RuntimeServiceOptions } from '../services/runtime.js';
 import { spawnCommand } from '../services/spawn.js';
 
@@ -69,11 +71,37 @@ function maskListEntry(entry: { key: string; value: unknown; derived?: boolean }
   };
 }
 
-async function handleSummary(options: RuntimeServiceOptions): Promise<Record<string, unknown>> {
+function toRuntimeOptionsFromQuery(
+  baseOptions: RuntimeServiceOptions,
+  searchParams: URLSearchParams,
+): RuntimeServiceOptions {
+  const workspace = searchParams.get('workspace')?.trim();
+  const profile = searchParams.get('profile')?.trim();
+
+  return {
+    ...baseOptions,
+    ...(workspace ? { workspace } : {}),
+    ...(profile ? { profile } : {}),
+  };
+}
+
+async function handleSummary(options: RuntimeServiceOptions, searchParams: URLSearchParams): Promise<Record<string, unknown>> {
+  const runtimeOptions = toRuntimeOptionsFromQuery(options, searchParams);
   const runtime = await createRuntimeService({
-    ...options,
+    ...runtimeOptions,
     secretResolution: 'lazy',
   });
+  const loadedManifest = await loadManifest({
+    ...(options.root ? { root: options.root } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.processEnv ? { processEnv: options.processEnv } : {}),
+  });
+  const declaredWorkspaces = Object.keys(loadedManifest.manifest.workspaces.items);
+  const workspaces =
+    declaredWorkspaces.length > 0
+      ? declaredWorkspaces.sort((left, right) => left.localeCompare(right))
+      : ['base'];
+  const profiles = await listProfiles(loadedManifest.consumerRoot);
   const envEntries = runtime.toEnv();
   const publicEntries = runtime.toPublicEnv();
   const counts = Array.from(runtime.graph.entries.values()).reduce<Record<string, number>>((acc, entry) => {
@@ -100,7 +128,8 @@ async function handleSummary(options: RuntimeServiceOptions): Promise<Record<str
       secret: runtime.graph.entries.get(logicalKey)?.namespace === 'secret',
     })),
     promoted: runtime.manifest.public.promote,
-    workspaces: Object.keys(runtime.manifest.workspaces.items),
+    workspaces,
+    profiles,
     runtimeNamespaces: Object.keys(runtime.manifest.runtimeNamespaces),
     vaults: Object.keys(runtime.manifest.vaults),
   };
@@ -124,15 +153,16 @@ async function handleRequest(
   }
 
   if (url.pathname === '/api/summary') {
-    writeJson(response, 200, await handleSummary(options));
+    writeJson(response, 200, await handleSummary(options, url.searchParams));
     return;
   }
 
   if (url.pathname === '/api/list') {
     const namespace = (url.searchParams.get('namespace') ?? 'value') as ListNamespace;
     const prefix = url.searchParams.get('prefix') ?? undefined;
+    const runtimeOptions = toRuntimeOptionsFromQuery(options, url.searchParams);
     const entries = await listConfigEntries(namespace, {
-      ...options,
+      ...runtimeOptions,
       ...(prefix ? { prefix } : {}),
       ...(namespace === 'secret' ? { secretResolution: 'lazy' as const } : {}),
     });
@@ -151,8 +181,9 @@ async function handleRequest(
       return;
     }
 
+    const runtimeOptions = toRuntimeOptionsFromQuery(options, url.searchParams);
     const runtime = await createRuntimeService({
-      ...options,
+      ...runtimeOptions,
       ...(key.startsWith('secret.') ? { secretResolution: 'lazy' as const } : {}),
     });
     writeJson(response, 200, maskInspectResult(key, runtime.inspect(key)));

@@ -17,6 +17,7 @@ interface SummaryPayload {
   }>;
   promoted: string[];
   workspaces: string[];
+  profiles: string[];
   runtimeNamespaces: string[];
   vaults: string[];
 }
@@ -101,6 +102,8 @@ export function App() {
   const [summary, setSummary] = useState<SummaryPayload | null>(null);
   const [listPayload, setListPayload] = useState<ListPayload | null>(null);
   const [inspectPayload, setInspectPayload] = useState<InspectPayload | null>(null);
+  const [selectedWorkspace, setSelectedWorkspace] = useState('');
+  const [selectedProfile, setSelectedProfile] = useState('');
   const [namespace, setNamespace] = useState<NamespaceTab>('value');
   const [prefix, setPrefix] = useState('');
   const [inspectKey, setInspectKey] = useState('value.app.name');
@@ -110,16 +113,38 @@ export function App() {
   const [loadingInspect, setLoadingInspect] = useState(false);
   const deferredPrefix = useDeferredValue(prefix);
 
+  function buildSelectionQuery(): string {
+    const query = new URLSearchParams();
+
+    if (selectedWorkspace.trim()) {
+      query.set('workspace', selectedWorkspace.trim());
+    }
+
+    if (selectedProfile.trim()) {
+      query.set('profile', selectedProfile.trim());
+    }
+
+    return query.toString();
+  }
+
   useEffect(() => {
     let cancelled = false;
 
     setLoading(true);
     setError(null);
 
-    void requestJson<SummaryPayload>('/api/summary')
+    const query = buildSelectionQuery();
+
+    void requestJson<SummaryPayload>(`/api/summary${query ? `?${query}` : ''}`)
       .then((payload) => {
         if (!cancelled) {
           setSummary(payload);
+          if (!selectedWorkspace) {
+            setSelectedWorkspace(payload.workspace);
+          }
+          if (!selectedProfile) {
+            setSelectedProfile(payload.profile);
+          }
         }
       })
       .catch((err: unknown) => {
@@ -136,7 +161,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedWorkspace, selectedProfile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +170,14 @@ export function App() {
     const query = new URLSearchParams({
       namespace,
     });
+
+    if (selectedWorkspace.trim()) {
+      query.set('workspace', selectedWorkspace.trim());
+    }
+
+    if (selectedProfile.trim()) {
+      query.set('profile', selectedProfile.trim());
+    }
 
     if (deferredPrefix.trim()) {
       query.set('prefix', deferredPrefix.trim());
@@ -170,15 +203,27 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [namespace, deferredPrefix]);
+  }, [namespace, deferredPrefix, selectedWorkspace, selectedProfile]);
 
   async function inspectCurrentKey(nextKey = inspectKey): Promise<void> {
     setLoadingInspect(true);
     setError(null);
 
     try {
+      const query = new URLSearchParams({
+        key: nextKey.trim(),
+      });
+
+      if (selectedWorkspace.trim()) {
+        query.set('workspace', selectedWorkspace.trim());
+      }
+
+      if (selectedProfile.trim()) {
+        query.set('profile', selectedProfile.trim());
+      }
+
       const payload = await requestJson<InspectPayload>(
-        `/api/inspect?key=${encodeURIComponent(nextKey.trim())}`,
+        `/api/inspect?${query.toString()}`,
       );
       setInspectPayload(payload);
     } catch (err: unknown) {
@@ -191,7 +236,7 @@ export function App() {
   useEffect(() => {
     void inspectCurrentKey();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedWorkspace, selectedProfile]);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(253,224,71,0.24),_transparent_26%),radial-gradient(circle_at_top_right,_rgba(56,189,248,0.22),_transparent_24%),linear-gradient(180deg,_#f8fafc_0%,_#fff7ed_100%)] px-4 py-6 text-slate-900 sm:px-6 lg:px-10">
@@ -248,15 +293,45 @@ export function App() {
                 <div className="text-xs uppercase tracking-[0.26em] text-slate-500">Namespace Browser</div>
                 <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Effective Config Surface</h2>
               </div>
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-slate-500">Prefix Filter</span>
-                <input
-                  value={prefix}
-                  onChange={(event) => setPrefix(event.target.value)}
-                  placeholder="app. or API_"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white sm:w-64"
-                />
-              </label>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-slate-500">Workspace</span>
+                  <select
+                    value={selectedWorkspace}
+                    onChange={(event) => setSelectedWorkspace(event.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white sm:w-44"
+                  >
+                    {summary?.workspaces.map((workspace) => (
+                      <option key={workspace} value={workspace}>
+                        {workspace}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-slate-500">Profile</span>
+                  <select
+                    value={selectedProfile}
+                    onChange={(event) => setSelectedProfile(event.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white sm:w-44"
+                  >
+                    {summary?.profiles.map((profile) => (
+                      <option key={profile} value={profile}>
+                        {profile}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-[0.22em] text-slate-500">Prefix Filter</span>
+                  <input
+                    value={prefix}
+                    onChange={(event) => setPrefix(event.target.value)}
+                    placeholder="app. or API_"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white sm:w-64"
+                  />
+                </label>
+              </div>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-2">

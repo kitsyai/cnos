@@ -1034,7 +1034,7 @@ const COMMANDS: HelpCommand[] = [
         description: 'Port for the backing CNOS API server. Defaults to 4311.',
       },
     ],
-    examples: ['cnos ui', 'cnos ui --workspace api --profile stage', 'cnos ui --port 4400 --api-port 4401'],
+    examples: ['cnos ui', 'cnos ui --port 4400 --api-port 4401'],
   },
   {
     id: 'version',
