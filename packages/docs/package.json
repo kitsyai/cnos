@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-docs",
-  "version": "1.8.4",
+  "version": "1.9.0",
   "description": "Source-of-truth CNOS documentation content for Astro Starlight and other static docs consumers.",
   "type": "module",
   "exports": {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -40,6 +41,9 @@ import { runWorkspace } from '../src/commands/workspace.js';
 import { printJson } from '../src/format/printJson.js';
 
 const fixtureRoots: string[] = [];
+const cliPackageVersion = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
 
 afterEach(async () => {
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -592,7 +596,7 @@ describe('@kitsy/cnos-cli', () => {
   });
 
   it('prints the CLI version', () => {
-    expect(runVersion()).toBe('1.8.4');
+    expect(runVersion()).toBe(cliPackageVersion.version);
   });
 
   it('blocks remote-root writes and exposes cache listings', async () => {
