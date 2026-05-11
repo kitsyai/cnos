@@ -31,8 +31,10 @@ Create a local vault and authenticate it:
 ```bash
 cnos vault create default
 cnos vault auth default
-cnos secret set app.token super-secret --vault default
+cnos secret set app.token --vault default
 ```
+
+CNOS prompts for the secret with masked input when you omit the value, which keeps it out of shell history. For non-interactive scripts, pass the secret over `--stdin`.
 
 If the project later becomes a monorepo, do not create a second `.cnos`. Convert the existing repo and add children:
 

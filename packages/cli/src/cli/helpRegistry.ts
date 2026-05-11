@@ -548,13 +548,15 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'secret set',
     summary: 'Write a secret securely.',
-    usage: 'cnos secret set <path> <value> [--local|--remote|--ref] [--vault <name>] [--provider <name>] [global-options]',
+    usage: 'cnos secret set <path> [value] [--local|--remote|--ref] [--vault <name>] [--provider <name>] [--stdin] [global-options]',
     description:
-      'Writes a secret reference into the repo. When a local vault is selected, CNOS stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>; when an environment-backed vault is selected, CNOS writes an env-backed ref for CI or cloud runtimes.',
+      'Writes a secret reference into the repo. When a local vault is selected, CNOS stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>; when an environment-backed vault is selected, CNOS writes an env-backed ref for CI or cloud runtimes. If [value] is omitted, CNOS prompts for a masked value interactively; use --stdin for pipelines.',
     examples: [
       'cnos vault create db',
       'cnos vault auth db',
       'cnos secret set app.token super-secret --vault db',
+      'cnos secret set app.token --vault db',
+      'printf "super-secret" | cnos secret set app.token --vault db --stdin',
       'cnos vault create github-ci --provider environment --no-passphrase',
       'cnos secret set app.token APP_TOKEN --vault github-ci',
     ],

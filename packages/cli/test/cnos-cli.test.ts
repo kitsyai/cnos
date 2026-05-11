@@ -715,6 +715,9 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('ui')).toContain('--api-port <port>');
     expect(runHelp('promote')).toContain('Usage: cnos promote <key...> --to <public|env>');
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
+    expect(runHelp('secret set')).toContain('Usage: cnos secret set <path> [value]');
+    expect(runHelp('secret set')).toContain('--stdin');
+    expect(runHelp('secret set')).toContain('masked value interactively');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('value set')).toContain('--derive');
     expect(runHelp('value set')).toContain('--expr');
@@ -746,6 +749,10 @@ describe('@kitsy/cnos-cli', () => {
     expect(rootPayload.integrations.some((integration: { id: string }) => integration.id === 'next')).toBe(true);
     expect(commandPayload.command.id).toBe('export env');
     expect(buildPayload.command.id).toBe('build env');
+    const secretSetPayload = JSON.parse(runHelpAi('secret set', ['--format=json']));
+    expect(secretSetPayload.command.id).toBe('secret set');
+    expect(secretSetPayload.command.usage).toContain('cnos secret set <path> [value]');
+    expect(secretSetPayload.command.description).toContain('masked value interactively');
     expect(JSON.parse(runHelpAi('value set', ['--format=json'])).command.options.some((option: { flag: string }) => option.flag === '--derive')).toBe(true);
     expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
       true,
@@ -1029,6 +1036,53 @@ describe('@kitsy/cnos-cli', () => {
       passthrough: [],
     });
   }, 15000);
+
+  it('rejects secret set without a value in non-interactive mode instead of writing an empty secret', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-secret-missing-value-'));
+    const secretPath = 'email.smtp_password';
+    fixtureRoots.push(secretHome);
+
+    await runVault(['create', 'default'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+    });
+
+    await runVault(['auth', 'default'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+    });
+
+    await expect(
+      runSecret(['set', secretPath], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--local', '--vault', 'default'],
+      }),
+    ).rejects.toThrow(
+      'Cannot prompt for a secret value in non-interactive mode. Pass <value> explicitly or use --stdin.',
+    );
+
+    await expect(
+      runSecret(['get', secretPath], {
+        root,
+        workspace: 'api',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+        cliArgs: ['--vault', 'default', '--reveal'],
+      }),
+    ).rejects.toThrow(`Missing CNOS secret path: ${secretPath}`);
+  });
 
   it('allows vault auth to reuse an existing local session key', async () => {
     const root = await createRuntimeFixture();

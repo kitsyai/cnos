@@ -1,4 +1,6 @@
 import path from 'node:path';
+import readline from 'node:readline';
+import { Writable } from 'node:stream';
 
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
@@ -53,6 +55,58 @@ async function readStdinValue(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8').trimEnd();
 }
 
+async function promptHiddenValue(message: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error('Cannot prompt for a secret value in non-interactive mode. Pass <value> explicitly or use --stdin.');
+  }
+
+  const mutableStdout = new WritableMask();
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: mutableStdout,
+    terminal: true,
+  });
+
+  try {
+    mutableStdout.muted = true;
+    const value = await new Promise<string>((resolve) => {
+      rl.question(message, resolve);
+    });
+    process.stdout.write('\n');
+    return value;
+  } finally {
+    rl.close();
+  }
+}
+
+async function resolveSecretSetValue(secretPath: string, providedValue: string | undefined, stdin: boolean): Promise<string> {
+  if (stdin) {
+    return readStdinValue();
+  }
+
+  if (providedValue !== undefined) {
+    return providedValue;
+  }
+
+  return promptHiddenValue(`Enter value for secret "${secretPath}": `);
+}
+
+class WritableMask extends Writable {
+  muted = false;
+
+  override _write(
+    chunk: string | Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    if (!this.muted) {
+      process.stdout.write(chunk);
+    }
+
+    callback();
+  }
+}
+
 export async function runSecret(argsOrPath: string | string[], options: RuntimeServiceOptions = {}): Promise<string> {
   const args = Array.isArray(argsOrPath) ? argsOrPath : [argsOrPath];
   const { action, tail } = normalizeSecretCommand(args);
@@ -103,8 +157,9 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const provider = consumeOption(cliArgs, '--provider');
     const vault = consumeOption(cliArgs, '--vault') ?? 'default';
     const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : undefined;
-    const rawValue = stdin ? await readStdinValue() : tail[1] ?? '';
-    const result = await setSecret(secretPath ?? 'app.token', rawValue, {
+    const resolvedSecretPath = secretPath ?? 'app.token';
+    const rawValue = await resolveSecretSetValue(resolvedSecretPath, tail[1], stdin);
+    const result = await setSecret(resolvedSecretPath, rawValue, {
       ...options,
       cliArgs,
       target,

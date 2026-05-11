@@ -16,3 +16,5 @@ cnos vault remove default
 For local vaults, `cnos vault create <name>` initializes the encrypted keystore immediately. CNOS prompts for a passphrase if one is not already available through `CNOS_SECRET_PASSPHRASE_<VAULT>`, `CNOS_SECRET_PASSPHRASE`, or the OS keychain.
 
 `cnos vault auth <name>` re-authenticates an existing vault and fails on wrong credentials. Successful auth writes a derived session key under `~/.cnos/secrets/sessions`, so later CNOS commands can reuse it across shells until you run `cnos vault logout <name>` or `cnos vault logout --all`. With `--store-keychain`, CNOS also stores the derived key in the OS keychain.
+
+After local vault auth, `cnos secret set <path> --vault <name>` can prompt for a masked secret value interactively when you omit `[value]`.
