@@ -62,6 +62,19 @@ Recommended direction:
 
 This keeps backward compatibility with the existing runtime validation, codegen, drift, and manifest loading paths.
 
+Naming decision for this draft:
+
+- `schema` remains the manifest field name in the first implementation wave
+- `spec` is the user-facing product name for the config-definition experience
+- CLI and docs must state this explicitly: CNOS spec is stored under `schema:` in the manifest
+
+Rationale:
+
+- lowest migration cost
+- no dual-authority `schema` and `spec` blocks
+- no compatibility cliff for existing manifests, codegen, or drift
+- implementation planning can proceed without waiting on a broader manifest rename
+
 ### 2. Separate spec authoring from value authoring
 
 `cnos define` should remain the command that writes actual config values or secret refs.
@@ -178,6 +191,11 @@ Rationale:
 - current codegen and drift can be extended instead of replaced
 - the CLI can still present this user-facing concept as "spec"
 
+Required docs/help wording:
+
+- `cnos spec` help text and docs must say that spec definitions are stored under `schema:` in `.cnos/cnos.yml`
+- generated examples should show both the command and the resulting YAML location
+
 ### CLI surface recommendation
 
 Recommended command family:
@@ -192,7 +210,7 @@ cnos spec doctor
 
 Recommended behavior:
 
-- `spec list` shows declared spec entries
+- `spec list` shows declared manifest-global spec entries; in v1 spec visibility is not workspace-scoped
 - `spec show` shows one key's definition with human-readable fields
 - `spec set` writes or updates the manifest spec entry
 - `spec delete` removes a spec entry
@@ -203,7 +221,7 @@ Recommended behavior:
 Two authoring modes should exist:
 
 1. explicit flags for non-interactive use
-2. interactive prompt mode when required fields are omitted and stdout is a TTY
+2. interactive prompt mode when invoked without any field flags and stdout is a TTY
 
 Example:
 
@@ -236,6 +254,12 @@ Prompt flow:
 8. examples
 9. used by
 
+Trigger rule:
+
+- if `cnos spec set` is called with no field flags and stdout is a TTY, enter interactive mode
+- if any field flag is provided, use non-interactive flag-driven mode
+- if no field flags are provided and stdout is not a TTY, fail with a clear usage error instead of guessing
+
 ### `cnos spec doctor` draft UX
 
 This is the second half of the feature and the more valuable user flow.
@@ -263,6 +287,7 @@ Behavior:
 - plain `doctor` reports the gap set
 - `--fill-missing` prompts only for missing required values
 - `--review-all` walks every declared spec entry one by one, showing current value and allowing keep/update/skip
+- spec is manifest-global in v1, but doctor evaluates that global spec against the selected workspace/profile context
 
 Prompting rules:
 
@@ -270,6 +295,7 @@ Prompting rules:
 - secret keys must route through the existing secure secret-writing path
 - secret prompts must never echo plaintext
 - remote roots must remain read-only; doctor can report but not write
+- each accepted value is committed immediately after validation; doctor sessions are per-key atomic, not all-or-nothing
 
 Prompt flow for a missing key:
 
@@ -292,6 +318,10 @@ Recommended rules:
 - `cnos spec doctor` works normally in read-only mode
 - `cnos spec doctor --fill-missing` in non-TTY mode should fail with a clear message unless explicit `--set` or input-file support is added in a later phase
 - secret values should never be accepted as plain CLI args in strict mode, consistent with current repo rules
+
+Discoverability rule:
+
+- when spec issues are present, existing `cnos doctor` should include a pointer such as `Run cnos spec doctor to review config spec coverage.`
 
 ---
 
@@ -373,6 +403,13 @@ This should answer:
 
 This is valuable for monorepo users trying to understand what an app-specific workspace changed.
 
+Complexity note:
+
+- this is materially harder than `diff profiles` and `diff workspaces`
+- it is not just "compare two runtimes"; it needs workspace-layer-aware provenance and override grouping
+- implementation planning should treat this as the hardest diff mode
+- if scope pressure appears, `diff base` can move behind `diff spec` and `diff workspaces` as a Phase 4.5 item
+
 #### `cnos diff spec`
 
 Compare the declared spec against the effective resolved graph.
@@ -389,6 +426,11 @@ Report:
 - deprecated keys still in use
 - defaults applied
 - spec-only informational context such as summary and allowed values
+
+Important note:
+
+- enum and pattern comparison are new comparison work, not just formatting of existing drift output
+- current runtime validation already enforces enum and pattern, but current drift comparison does not report them
 
 ### Relationship between `diff spec` and `drift`
 
@@ -445,7 +487,7 @@ Draft compatibility approach:
 
 ### Recommendation
 
-For the first implementation, preserve the manifest field name and probably preserve the internal type name too. The user-facing language can still be "spec". The main objective is behavior, not a broad repo-wide rename.
+For the first implementation, preserve the manifest field name and preserve the internal type name unless a refactor is already justified for adjacent work. The user-facing language remains "spec", but docs and help must explicitly say that CNOS spec is stored under `schema:` in the manifest. The main objective is behavior, not a broad repo-wide rename.
 
 ## 2. Add structured comparison payloads
 
@@ -456,24 +498,31 @@ Draft shape:
 ```ts
 type DiffMode = 'profiles' | 'workspaces' | 'base' | 'spec';
 
-interface DiffRow {
+type GraphDiffStatus = 'changed' | 'added' | 'removed';
+type SpecDiffStatus = 'missing' | 'undeclared' | 'mismatch' | 'defaulted' | 'deprecated';
+
+interface GraphDiffRow {
   key: string;
-  status:
-    | 'changed'
-    | 'added'
-    | 'removed'
-    | 'missing'
-    | 'undeclared'
-    | 'mismatch'
-    | 'defaulted'
-    | 'deprecated';
+  status: GraphDiffStatus;
   leftValue?: unknown;
   rightValue?: unknown;
+  leftMasked?: boolean;
+  rightMasked?: boolean;
+  sourceFile?: string;
+}
+
+interface SpecDiffRow {
+  key: string;
+  status: SpecDiffStatus;
+  value?: unknown;
+  masked?: boolean;
   expectedType?: string;
   actualType?: string;
   summary?: string;
   sourceFile?: string;
 }
+
+type DiffRow = GraphDiffRow | SpecDiffRow;
 
 interface DiffReport {
   mode: DiffMode;
@@ -488,6 +537,12 @@ This same payload can feed:
 - CLI text rendering
 - CLI JSON output
 - UI comparison views
+
+Placement recommendation:
+
+- define `DiffMode`, `DiffRow`, and `DiffReport` in `packages/core/src/types/diff.ts`
+- re-export them from higher layers as needed
+- keep command renderers and formatters in CLI/runtime packages, but keep the serializable comparison contracts in core
 
 ---
 
@@ -611,6 +666,7 @@ Likely write surfaces:
 
 - `packages/core/src/types/schema.ts`
 - `packages/core/src/types/manifest.ts`
+- `packages/core/src/types/diff.ts`
 - `packages/core/src/validation/basicSchema.ts`
 
 Possible additions:
@@ -678,6 +734,7 @@ These features must preserve existing CNOS rules.
 
 - JSON and text diff output must still respect masking rules for secrets by default
 - if a future `--reveal` mode is added to diff, it should follow the same safety rules as current secret listing and env export
+- the existing unmasked `secret.*` behavior in `packages/cli/src/commands/diff.ts` must be fixed as part of the shared diff-engine rollout, not carried forward
 
 ---
 
@@ -733,12 +790,30 @@ Build:
 - shared comparison service
 - `cnos diff spec`
 - `cnos diff workspaces`
-- `cnos diff base`
 - make `cnos drift` call the shared service
+- secret masking by default for all diff text and JSON output
+- enum and pattern comparison for spec diff
+
+Optional if design and time allow:
+
+- `cnos diff base`
 
 Why:
 
 - after spec exists, comparison should widen cleanly
+- `diff profiles`, `diff workspaces`, and `diff spec` share a simpler two-context comparison model
+- `diff base` is a provenance-aware inheritance comparison and may need a follow-up design slice
+
+## Phase 4.5 - Base inheritance diff
+
+Build:
+
+- `cnos diff base`
+- workspace-layer-aware provenance reporting
+
+Why:
+
+- this mode is the most architecture-specific and should not block the simpler diff modes
 
 ## Phase 5 - UI integration
 
@@ -789,6 +864,7 @@ This is the review-phase test outline, not the final implementation matrix.
 - workspace vs workspace diff reports added/removed/changed keys
 - base diff shows overrides vs inherited values
 - spec diff matches current drift semantics plus richer metadata
+- spec diff reports enum and pattern violations as new comparison behavior
 - secret values are masked by default in output
 
 ### UI integration
@@ -804,13 +880,12 @@ This is the review-phase test outline, not the final implementation matrix.
 
 These should be resolved before converting this into an implementation plan.
 
-1. Should the manifest field remain `schema` for now, or do we want an explicit `spec` alias in the first rollout?
-2. Should `usedBy` stay lightweight text, or do we want structured surface identifiers in v1?
-3. Do we want `cnos spec doctor` as a new command, or should we extend the existing `cnos doctor` command with a spec mode?
-4. Should `cnos diff spec` become the primary surface and `cnos drift` become a compatibility alias, or should drift remain first-class indefinitely?
-5. Do we want secret-aware diff reveal in the first rollout, or keep diff masked-only?
-6. Should `spec set` support a fully non-interactive JSON payload mode in phase 1, or can that wait?
-7. How much of the UI should ship in the same implementation wave as CLI/core, versus a later review after the backend stabilizes?
+1. Should `usedBy` stay lightweight text, or do we want structured surface identifiers in v1?
+2. Do we want `cnos spec doctor` as a new command, or should we extend the existing `cnos doctor` command with a spec mode beyond the proposed pointer?
+3. Should `cnos diff spec` become the primary surface and `cnos drift` become a compatibility alias, or should drift remain first-class indefinitely?
+4. Do we want secret-aware diff reveal in the first rollout, or keep diff masked-only?
+5. Should `spec set` support a fully non-interactive JSON payload mode in phase 1, or can that wait?
+6. How much of the UI should ship in the same implementation wave as CLI/core, versus a later review after the backend stabilizes?
 
 ---
 
@@ -830,5 +905,7 @@ My recommendation is to approve the direction with these key decisions:
 - keep manifest authority unified
 - present the feature publicly as `cnos spec`
 - preserve `schema` as the stored field in the first rollout
+- state explicitly that CNOS spec is stored under `schema:` in the manifest
 - treat `spec doctor` as a new command family, not as a silent expansion of current `doctor`
 - expand `diff` with subcommands and move `drift` onto the same engine later
+- ship secret masking and simpler diff modes before taking on `diff base`
