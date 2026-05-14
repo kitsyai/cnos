@@ -1,3 +1,8 @@
+---
+name: docs-writer
+description: Writing documentation for the published CNOS docs package.
+---
+
 # Docs Writer Skill
 
 You are writing documentation for the published docs package `@kitsy/cnos-docs`.

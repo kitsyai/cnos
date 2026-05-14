@@ -1,3 +1,8 @@
+---
+name: reviewer
+description: Reviewing code changes for CNOS.
+---
+
 # Reviewer Skill
 
 You are reviewing code changes for CNOS.

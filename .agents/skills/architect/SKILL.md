@@ -1,3 +1,8 @@
+---
+name: architect
+description: Evaluating or designing architectural changes to CNOS.
+---
+
 # Architect Skill
 
 You are evaluating or designing architectural changes to CNOS.

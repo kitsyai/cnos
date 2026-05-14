@@ -1,3 +1,8 @@
+---
+name: developer
+description: Implementing features in the CNOS codebase.
+---
+
 # Developer Skill
 
 You are implementing features in the CNOS codebase.

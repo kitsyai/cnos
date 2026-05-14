@@ -1,3 +1,8 @@
+---
+name: tester
+description: Writing and maintaining tests for CNOS.
+---
+
 # Tester Skill
 
 You are writing and maintaining tests for CNOS.
