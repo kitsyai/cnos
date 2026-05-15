@@ -40,7 +40,7 @@ Plan date: 2026-05-15
 - Expanded `cnos diff` command family (`profiles/workspaces/base/spec` subcommands).
 - Shared multi-mode diff engine beyond what `spec doctor` minimally needs.
 - UI authoring/doctor flows (`packages/ui`).
-- Published docs package updates (`packages/docs`) beyond CLI help registry parity required during implementation.
+- Published docs package feature expansion beyond CLI command-page parity required during implementation.
 
 ## 3. File-by-File Implementation Map
 
@@ -150,6 +150,16 @@ Type ownership:
 - `basicSchema` continues to enforce semantic rule behavior.
 - Informational fields are ignored by runtime validation.
 - Optional manifest-parse validation for malformed metadata types (e.g., non-string `summary`, non-array `examples`).
+- For `secret.*` spec entries, manifest validation must reject plaintext-bearing spec fields:
+  - `default`
+  - `examples`
+  - `enum`
+
+Rationale:
+
+- the approved design says spec definitions never contain secret values
+- repo rules forbid plaintext secrets in committed files
+- allowing those fields on `secret.*` spec entries would create a committed-secret path through `schema:`
 
 ### CLI JSON Contracts to Define Now
 
@@ -224,6 +234,12 @@ Type ownership:
 
 For write modes, include an additional `actions` array with per-key result (`applied|skipped|failed`).
 
+Interactive-mode JSON rule:
+
+- `cnos spec doctor --json` is valid for report mode only
+- `cnos spec doctor --fill-missing --json` and `cnos spec doctor --review-all --json` are rejected in Phases 1-3
+- this avoids mixing interactive prompts with machine-readable stdout contracts
+
 ## 5. Command Design (Implementation-Level)
 
 ### Phase 2 command set
@@ -272,7 +288,9 @@ For write modes, include an additional `actions` array with per-key result (`app
 
 ### Secret-handling rules
 
-- Spec metadata itself must not contain secret plaintext examples/defaults for `secret.*` keys in generated output logs.
+- Spec definitions must never contain plaintext secret-bearing metadata for `secret.*` keys.
+- `spec set` must reject `--default`, `--example`, and `--enum` for `secret.*` logical keys.
+- Manifest validation/normalization must reject those fields if they already exist on `secret.*` entries.
 - `spec doctor` secret input uses masked prompt and routes writes through existing secret write path (`setSecret`/vault flow).
 - No secret plaintext emitted in text/JSON unless future explicit reveal mode (not in scope).
 
@@ -285,6 +303,7 @@ For write modes, include an additional `actions` array with per-key result (`app
 
 - Text output: concise sectioned results with deterministic ordering by logical key.
 - JSON output: stable top-level keys and machine-consumable per-key result status.
+- Interactive doctor modes do not support `--json` in Phases 1-3; reject clearly instead of attempting mixed-mode output.
 - Exit codes:
   - `0` no blocking issues.
   - `1` report found failures or write mode had failed/unresolved required issues.
@@ -322,7 +341,7 @@ For write modes, include an additional `actions` array with per-key result (`app
 
 3. Implement non-interactive `spec set` parsing/validation.  
    Depends on: step 2.  
-   Tests: enum/default/examples parsing and validation failures.
+   Tests: enum/default/examples parsing, validation failures, and `secret.*` rejection for secret-bearing spec fields.
 
 4. Implement interactive `spec set` flow + non-TTY refusal path.  
    Depends on: step 3.  
@@ -348,7 +367,7 @@ For write modes, include an additional `actions` array with per-key result (`app
 
 4. Wire remote-root write refusal and non-TTY refusal for write modes.  
    Depends on: step 2/3.  
-   Tests: remote root refusal and non-interactive refusal.
+   Tests: remote root refusal, non-interactive refusal, and `--json` rejection for interactive doctor modes.
 
 5. Update `cnos doctor` to point to `cnos spec doctor` when relevant.  
    Depends on: step 1.  
@@ -369,6 +388,7 @@ Mandatory cases:
 - New fields normalize correctly.
 - Semantic enforcement unchanged (`required`, `type`, `enum`, `pattern`, `default`).
 - Informational fields do not alter runtime resolution/projection.
+- `secret.*` spec entries reject `default`, `examples`, and `enum`.
 
 #### `packages/cnos`
 
@@ -393,9 +413,11 @@ Mandatory cases before approval:
 - `spec set` create/update/delete behavior.
 - Interactive trigger behavior (`TTY + no field flags` => prompt).
 - Non-TTY behavior (`spec set` no flags, `spec doctor --fill-missing`, `--review-all` => fail clearly).
+- `--json` rejection for interactive doctor modes.
 - `spec doctor` report coverage (missing/undeclared/type/enum/pattern/default/deprecated).
 - `fill-missing` behavior (only missing required keys).
 - Secret-safe handling (masked prompt, secret write path, no plaintext output).
+- `secret.*` spec authoring rejects plaintext-bearing metadata fields.
 - Remote-root refusal for write modes.
 - `cnos doctor` pointer message without replacement.
 
@@ -427,6 +449,9 @@ Mandatory cases before approval:
 7. **Parser trap**: missing command-option registrations in `parseArgs.ts` can mis-route values into positional args.  
    Mitigation: add explicit parser coverage for every new spec option.
 
+8. **CLI docs drift risk**: new top-level CLI surfaces can land without corresponding published command docs.  
+   Mitigation: implementation signoff requires command help updates plus matching published CLI docs for the new `spec` command family.
+
 ## 9. Open Decisions Requiring Signoff
 
 ### Blocking for implementation details
@@ -443,3 +468,14 @@ Mandatory cases before approval:
 - Full diff expansion (`cnos diff spec/workspaces/base/...`) and shared diff payloads.
 - UI spec/doctor surfaces.
 
+## 10. Implementation Completion Notes
+
+Before feature signoff, the implementation PR must include:
+
+1. `helpRegistry.ts` updates for the full `cnos spec` command family and any `doctor` wording changes.
+2. Matching published CLI command docs under `packages/docs/docs/cli/` for:
+   - `cnos spec`
+   - any subcommand pages introduced for the `spec` family
+3. Tests covering the mandatory approval cases listed above.
+
+This does not expand product scope beyond Phases 1-3. It is a completion requirement so the checked-in CLI surface and published docs do not drift.
