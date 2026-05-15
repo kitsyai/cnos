@@ -275,16 +275,44 @@ Interactive-mode JSON rule:
 - `spec set` with no field flags and TTY (`stdin` + `stdout`) enters interactive mode.
 - `spec set` with any field flag uses non-interactive mode.
 - `spec set` with no field flags and non-TTY fails with clear usage error.
+- `spec set --json` is valid for non-interactive mode only; `spec set <key> --json` with no field flags is rejected in Phases 1-3 instead of mixing prompts with JSON stdout.
 - `spec doctor --fill-missing` and `--review-all` require TTY; non-TTY fails clearly.
 - Plain `spec doctor` report mode is always non-interactive.
 
 ### Error handling rules
 
 - `--required` and `--optional` are mutually exclusive.
-- `--deprecation-message` without `--deprecated` is rejected (or auto-sets deprecated=true; see open decision).
+- `--deprecation-message` auto-sets `deprecated: true`.
 - `--enum` must parse to array.
-- `--default` and `--example` parse as YAML scalar/JSON value with deterministic fallback rules.
+- `--enum` must not be empty; reject `[]`.
+- `--default` and `--example` parse as:
+  1. JSON value first
+  2. if JSON parsing fails, treat as raw string
+- JSON objects and arrays are valid values for `--default` and `--example` when they parse successfully.
+- CLI flag parsing for spec authoring is JSON-first and does not use YAML parsing rules.
 - Unknown logical key on `spec show` and `spec delete`: clear not-found behavior (`show` fails; `delete` returns `deleted: false`).
+- Field clearing is explicit and never inferred from empty strings. Support clear flags for removable metadata fields:
+  - `--clear-default`
+  - `--clear-enum`
+  - `--clear-pattern`
+  - `--clear-summary`
+  - `--clear-description`
+  - `--clear-examples`
+  - `--clear-used-by`
+  - `--clear-deprecated`
+  - `--clear-deprecation-message`
+- `--clear-deprecated` must also clear `deprecationMessage`.
+- Conflict rules:
+  - `--default ...` with `--clear-default` rejects
+  - `--enum ...` with `--clear-enum` rejects
+  - `--pattern ...` with `--clear-pattern` rejects
+  - `--summary ...` with `--clear-summary` rejects
+  - `--description ...` with `--clear-description` rejects
+  - `--example ...` with `--clear-examples` rejects
+  - `--used-by ...` with `--clear-used-by` rejects
+  - `--clear-deprecated` with `--deprecation-message ...` rejects
+  - `--deprecated` with `--clear-deprecation-message` is allowed
+- There is no `--no-deprecated` flag in Phases 1-3; `--clear-deprecated` is the explicit negation path.
 
 ### Secret-handling rules
 
@@ -305,9 +333,27 @@ Interactive-mode JSON rule:
 - JSON output: stable top-level keys and machine-consumable per-key result status.
 - Interactive doctor modes do not support `--json` in Phases 1-3; reject clearly instead of attempting mixed-mode output.
 - Exit codes:
-  - `0` no blocking issues.
-  - `1` report found failures or write mode had failed/unresolved required issues.
+  - `0` no blocking issues, including cases where only warning-like statuses are present.
+  - `1` report found blocking failures or write mode had failed/unresolved required issues.
   - command-usage errors also return non-zero.
+
+Blocking statuses for `spec doctor`:
+
+- `missing_required`
+- `undeclared`
+- `type_mismatch`
+- `enum_mismatch`
+- `pattern_mismatch`
+- failed write actions in `--fill-missing` or `--review-all`
+
+`--review-all` rule:
+
+- if the user chooses `skip` for a `missing_required` issue, that issue remains unresolved and the run still exits `1`
+
+Warning-only statuses for `spec doctor`:
+
+- `default_applied`
+- `deprecated_in_use`
 
 ## 6. Phase-by-Phase Execution Steps
 
@@ -328,6 +374,7 @@ Interactive-mode JSON rule:
 4. Add/adjust cnos comparison foundation (`compareSpecToGraph`) while preserving existing drift contract.  
    Depends on: step 1-3.  
    Tests: drift compatibility tests remain green.
+   Clarification: this Phase 1 deliverable is the shared comparison contract and comparison primitive needed by Phase 3 doctor work, not the full doctor feature itself.
 
 ### Phase 2 - Spec authoring CLI
 
@@ -341,7 +388,7 @@ Interactive-mode JSON rule:
 
 3. Implement non-interactive `spec set` parsing/validation.  
    Depends on: step 2.  
-   Tests: enum/default/examples parsing, validation failures, and `secret.*` rejection for secret-bearing spec fields.
+   Tests: enum/default/examples parsing, empty-enum rejection, explicit clear-flag behavior, conflict-rule validation, and `secret.*` rejection for secret-bearing spec fields.
 
 4. Implement interactive `spec set` flow + non-TTY refusal path.  
    Depends on: step 3.  
@@ -371,6 +418,7 @@ Interactive-mode JSON rule:
 
 5. Update `cnos doctor` to point to `cnos spec doctor` when relevant.  
    Depends on: step 1.  
+   Trigger rule: in Phases 1-3, show the pointer whenever manifest `schema:` is non-empty.  
    Tests: doctor pointer appears without replacing existing doctor behavior.
 
 ## 7. Test Plan
@@ -411,10 +459,14 @@ Mandatory cases before approval:
 
 - Backward compatibility for existing schema manifests.
 - `spec set` create/update/delete behavior.
+- explicit field-clearing behavior for removable metadata fields.
+- conflict rules for value-setting flags vs `--clear-*` flags.
 - Interactive trigger behavior (`TTY + no field flags` => prompt).
 - Non-TTY behavior (`spec set` no flags, `spec doctor --fill-missing`, `--review-all` => fail clearly).
 - `--json` rejection for interactive doctor modes.
 - `spec doctor` report coverage (missing/undeclared/type/enum/pattern/default/deprecated).
+- `spec doctor` exit-code behavior: blocking vs warning-only statuses.
+- `--review-all` skip behavior on `missing_required` still exits non-zero.
 - `fill-missing` behavior (only missing required keys).
 - Secret-safe handling (masked prompt, secret write path, no plaintext output).
 - `secret.*` spec authoring rejects plaintext-bearing metadata fields.
@@ -435,7 +487,7 @@ Mandatory cases before approval:
    Mitigation: document current behavior, keep rewrites minimal, add regression tests for structural integrity.
 
 3. **Scalar parsing ambiguity** (`--default`, `--example`, `--enum`): strings like `01`, `true`, `null` can coerce unexpectedly.  
-   Mitigation: define deterministic parse order and explicit quoting guidance in help.
+   Mitigation: use JSON-first parsing for `--default` and `--example`, require non-empty JSON arrays for `--enum`, and document quoting guidance in help and docs. Help/docs must explicitly note the literal-string trap: `--default true` becomes boolean `true`; to store the string, use `--default '"true"'`. Apply the same guidance for numbers and `null`.
 
 4. **Doctor interruption / partial progress**: interactive session may stop mid-run.  
    Mitigation: per-key atomic writes only; report applied/skipped/failed actions in summary.
@@ -452,16 +504,10 @@ Mandatory cases before approval:
 8. **CLI docs drift risk**: new top-level CLI surfaces can land without corresponding published command docs.  
    Mitigation: implementation signoff requires command help updates plus matching published CLI docs for the new `spec` command family.
 
-## 9. Open Decisions Requiring Signoff
+9. **Masked secret input utility gap**: the codebase does not currently have a reusable masked-input helper for arbitrary secret prompts.  
+   Mitigation: implement a small cross-platform masked-input utility in the CLI layer and test shell-specific behavior, especially PowerShell echo suppression, before wiring `spec doctor` secret entry flows to it.
 
-### Blocking for implementation details
-
-1. **Field-clearing semantics in `spec set`**: how to clear existing optional metadata (`summary`, `description`, `examples`, `usedBy`, `enum`, `default`) in non-interactive mode.
-2. **Exact scalar parsing contract** for `--default`, `--example`, and `--enum` (`YAML-first` vs `JSON-first`, and escape/quoting behavior).
-3. **`spec doctor` exit-code policy**: should `defaultApplied`/`deprecatedInUse` alone fail CI (`exit 1`) or be warnings-only.
-4. **`--deprecation-message` behavior**: require explicit `--deprecated` vs auto-setting `deprecated: true`.
-
-### Non-blocking future enhancements (deferred)
+## 9. Non-blocking Future Enhancements (Deferred)
 
 - Structured `usedBy` identifiers instead of free-form strings.
 - Non-interactive batch input mode for `spec doctor --fill-missing`.
@@ -473,9 +519,15 @@ Mandatory cases before approval:
 Before feature signoff, the implementation PR must include:
 
 1. `helpRegistry.ts` updates for the full `cnos spec` command family and any `doctor` wording changes.
-2. Matching published CLI command docs under `packages/docs/docs/cli/` for:
+2. Verification that the checked-in help surface and runtime `help-ai` surface stay aligned:
+   - `cnos help`
+   - `cnos help <topic>`
+   - `cnos help-ai --format json`
+   The implementor must update/help-align all three user-facing help surfaces whenever command behavior, flags, or descriptions change.
+3. Matching published docs updates in `packages/docs` (`@kitsy/cnos-docs`) under `packages/docs/docs/cli/` for:
    - `cnos spec`
    - any subcommand pages introduced for the `spec` family
-3. Tests covering the mandatory approval cases listed above.
+   - `cnos doctor` if its published wording changes to mention the spec-doctor pointer
+4. Tests covering the mandatory approval cases listed above.
 
-This does not expand product scope beyond Phases 1-3. It is a completion requirement so the checked-in CLI surface and published docs do not drift.
+This does not expand product scope beyond Phases 1-3. It is a completion requirement so the checked-in CLI surface, runtime help surfaces, and published docs do not drift. The developer must always keep `cnos-docs`, `cnos help`, and `cnos help-ai` up to date with the implemented CLI behavior.
