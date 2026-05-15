@@ -87,7 +87,7 @@ Plan date: 2026-05-15
 - **Modify** `packages/cli/src/index.ts`  
   Route `spec` command family.
 - **Modify** `packages/cli/src/commands/doctor.ts`  
-  Add pointer line to `cnos spec doctor` when spec issues are detected.
+  Add pointer line to `cnos spec doctor`. Trigger rule: show the pointer whenever manifest `schema:` is non-empty (see §6 Phase 3 step 5 for the canonical rule).
 
 ### Phase-Specific Files
 
@@ -140,7 +140,7 @@ Type ownership:
 
 ### Manifest + Normalization Implications
 
-- Existing schema-only manifests remain valid.
+- Existing schema-only manifests remain valid, with one explicit exception: manifests that carry `default`, `examples`, or `enum` on `secret.*` entries are rejected on load (see Validation Contract Changes below). This is an intentional, non-negotiable break required by the secret-safety rule in `CLAUDE.md`. It is **not** gated by a flag, version, or migration window.
 - Normalization trims textual fields and drops empty strings/empty arrays for metadata fields.
 - Semantic fields (`type|required|default|enum|pattern`) keep current behavior.
 - Informational fields never affect runtime resolution output, projection, or env export.
@@ -154,12 +154,21 @@ Type ownership:
   - `default`
   - `examples`
   - `enum`
+- Enforcement is a hard load-time error (not a warning, not a deprecation window). The error message must:
+  - name the offending logical key,
+  - name the offending field(s),
+  - point the user to the vault as the correct home for the value, and
+  - state that removing the field from `schema:` will clear the error.
+- This rule applies symmetrically to:
+  - manifest load/normalization (existing manifests fail to load),
+  - `cnos spec set` (rejects the flag at authoring time).
 
 Rationale:
 
 - the approved design says spec definitions never contain secret values
 - repo rules forbid plaintext secrets in committed files
 - allowing those fields on `secret.*` spec entries would create a committed-secret path through `schema:`
+- a soft warn-then-error would leave a window in which plaintext secrets are accepted; the security model does not permit that window
 
 ### CLI JSON Contracts to Define Now
 
@@ -257,6 +266,8 @@ Interactive-mode JSON rule:
 
 ### `cnos spec set` options
 
+Value-setting flags:
+
 - `--type <string|number|boolean|object|array>`
 - `--required`
 - `--optional`
@@ -269,6 +280,20 @@ Interactive-mode JSON rule:
 - `--used-by <text>` (repeatable)
 - `--deprecated`
 - `--deprecation-message <text>`
+
+Field-clearing flags (see Error handling rules below for full semantics and conflict matrix):
+
+- `--clear-default`
+- `--clear-enum`
+- `--clear-pattern`
+- `--clear-summary`
+- `--clear-description`
+- `--clear-examples`
+- `--clear-used-by`
+- `--clear-deprecated`
+- `--clear-deprecation-message`
+
+Parser/help wiring must register all flags in both groups. Any flag from either group counts as a "field flag" for the interactive-trigger rule below — running `spec set <key> --clear-summary` on a TTY performs the clear non-interactively.
 
 ### Interactive vs Non-interactive
 
