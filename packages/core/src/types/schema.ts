@@ -1,7 +1,7 @@
-export interface SchemaRule {
-  type?: 'string' | 'number' | 'boolean' | 'object' | 'array';
-  required?: boolean;
-  enum?: unknown[];
-  pattern?: string;
-  default?: unknown;
-}
+import type { ConfigSpecRule } from './spec.js';
+
+/**
+ * Backward-compatible alias for the manifest schema rule type.
+ * Keep this export stable for existing importers.
+ */
+export type SchemaRule = ConfigSpecRule;

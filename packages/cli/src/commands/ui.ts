@@ -147,7 +147,7 @@ async function handleSummary(options: RuntimeServiceOptions, searchParams: URLSe
   const envEntries = runtime.toEnv();
   const publicEntries = runtime.toPublicEnv();
   const counts = Array.from(runtime.graph.entries.values()).reduce<Record<string, number>>((acc, entry) => {
-    acc.all += 1;
+    acc.all = (acc.all ?? 0) + 1;
     acc[entry.namespace] = (acc[entry.namespace] ?? 0) + 1;
     return acc;
   }, { all: 0 });
@@ -184,9 +184,14 @@ async function handleRevealList(
   const prefix = typeof body.prefix === 'string' ? body.prefix.trim() : '';
   const passphrase = typeof body.passphrase === 'string' ? body.passphrase : undefined;
   const runtimeOptions = toRuntimeOptionsFromBody(options, body);
+  const processEnv = withUiPassphrase(options.processEnv, passphrase);
   const runtime = await createRuntimeService({
     ...runtimeOptions,
-    processEnv: withUiPassphrase(options.processEnv, passphrase),
+    ...(processEnv
+      ? {
+          processEnv,
+        }
+      : {}),
     secretResolution: 'lazy',
   });
   const entries: Array<{ key: string; value: unknown; derived?: boolean }> = [];
@@ -232,9 +237,14 @@ async function handleRevealInspect(
 
   const passphrase = typeof body.passphrase === 'string' ? body.passphrase : undefined;
   const runtimeOptions = toRuntimeOptionsFromBody(options, body);
+  const processEnv = withUiPassphrase(options.processEnv, passphrase);
   const runtime = await createRuntimeService({
     ...runtimeOptions,
-    processEnv: withUiPassphrase(options.processEnv, passphrase),
+    ...(processEnv
+      ? {
+          processEnv,
+        }
+      : {}),
     ...(key.startsWith('secret.') ? { secretResolution: 'lazy' as const } : {}),
   });
 

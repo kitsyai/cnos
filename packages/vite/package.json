@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vite",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "description": "Vite integration for CNOS public config injection.",
   "type": "module",
   "main": "./dist/index.cjs",

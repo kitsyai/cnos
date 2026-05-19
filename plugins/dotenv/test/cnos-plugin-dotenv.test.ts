@@ -39,6 +39,25 @@ describe('@kitsy/cnos-plugin-dotenv', () => {
     });
   });
 
+  it('parses quoted multiline dotenv values', () => {
+    expect(
+      parseDotenv(
+        [
+          'PRIVATE_KEY="line1\\nline2"',
+          'CERT="-----BEGIN CERT-----',
+          'abc',
+          '-----END CERT-----"',
+          "NOTES='first line",
+          'second line\'',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      PRIVATE_KEY: 'line1\nline2',
+      CERT: '-----BEGIN CERT-----\nabc\n-----END CERT-----',
+      NOTES: 'first line\nsecond line',
+    });
+  });
+
   it('maps dotenv variables into logical config entries', () => {
     expect(
       dotenvEntriesFromObject(

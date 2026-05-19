@@ -35,10 +35,22 @@ export function printTable(rows: Array<Record<string, unknown>>): string {
     ),
   );
   const renderRow = (row: Record<string, unknown>) =>
-    columns.map((column, index) => stringifyCell(row[column]).padEnd(widths[index], ' ')).join('  ').trimEnd();
+    columns
+      .map((column, index) => {
+        const width = widths[index] ?? column.length;
+        return stringifyCell(row[column]).padEnd(width, ' ');
+      })
+      .join('  ')
+      .trimEnd();
 
   return [
-    columns.map((column, index) => column.padEnd(widths[index], ' ')).join('  ').trimEnd(),
+    columns
+      .map((column, index) => {
+        const width = widths[index] ?? column.length;
+        return column.padEnd(width, ' ');
+      })
+      .join('  ')
+      .trimEnd(),
     widths.map((width) => '-'.repeat(width)).join('  '),
     ...rows.map(renderRow),
   ].join('\n');

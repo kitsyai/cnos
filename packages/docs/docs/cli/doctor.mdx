@@ -14,3 +14,5 @@ cnos doctor --fix-secret-env-mappings
 The security diagnostics now flag explicit `secret.*` env mappings as a risk because they enable plaintext secret emission into private env surfaces.
 
 If those mappings were added by mistake, `cnos doctor --fix-secret-env-mappings` removes them from `envMapping.explicit` in one shot and then reruns diagnostics.
+
+When manifest `schema:` entries exist, `cnos doctor` also points to `cnos spec doctor` for spec-vs-config coverage and guided remediation.

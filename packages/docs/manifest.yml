@@ -67,6 +67,8 @@ sidebar:
         label: cnos secret
       - path: cli/define
         label: cnos define
+      - path: cli/spec
+        label: cnos spec
       - path: cli/list
         label: cnos list
       - path: cli/read

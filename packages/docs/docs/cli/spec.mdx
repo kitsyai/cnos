@@ -1,0 +1,75 @@
+---
+title: cnos spec
+description: Author and inspect CNOS config specs stored under schema.
+---
+
+# cnos spec
+
+`cnos spec` manages manifest-global config specification entries stored under `schema:` in `.cnos/cnos.yml`.
+
+Use `cnos define`, `cnos value set`, and `cnos secret set` for concrete config values and secret refs.
+
+## Commands
+
+```bash
+cnos spec list
+cnos spec show value.server.port
+cnos spec set value.server.port --type number --required --summary "HTTP server port"
+cnos spec delete value.legacy.flag
+cnos spec doctor
+```
+
+## list
+
+```bash
+cnos spec list
+cnos spec list --prefix value.server.
+```
+
+## show
+
+```bash
+cnos spec show value.server.port
+cnos spec show value.server.port --json
+```
+
+## set
+
+`cnos spec set` supports two modes:
+
+- Non-interactive: pass one or more field flags.
+- Interactive: no field flags in a TTY.
+
+Examples:
+
+```bash
+cnos spec set value.server.port --type number --required --summary "HTTP server port"
+cnos spec set value.app.stage --enum '["local","stage","prod"]'
+cnos spec set value.legacy.flag --clear-deprecated
+```
+
+Field flags use JSON-first parsing for `--default`, `--example`, and `--enum`.
+
+For `secret.*` keys, `--default`, `--example`, and `--enum` are rejected to avoid plaintext secret material in the manifest.
+
+## delete
+
+```bash
+cnos spec delete value.legacy.flag
+cnos spec remove value.legacy.flag --json
+```
+
+## doctor
+
+```bash
+cnos spec doctor
+cnos spec doctor --json
+cnos spec doctor --fill-missing
+cnos spec doctor --review-all
+```
+
+`--fill-missing` and `--review-all` are interactive write modes. In Phases 1-3 they:
+
+- require a TTY,
+- require a writable local root (remote roots are read-only),
+- reject `--json`.

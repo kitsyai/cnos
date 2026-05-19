@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
+import { formatEnvEntries } from './envSerialization.js';
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 import { resolveFilesystemBasePath } from './paths.js';
 
@@ -34,10 +35,7 @@ function resolveEnvFromRuntime(
 }
 
 export function formatEnvOutput(env: Record<string, string>): string {
-  return Object.entries(env)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
+  return formatEnvEntries(env, 'dotenv');
 }
 
 export async function resolveMaterializedEnv(

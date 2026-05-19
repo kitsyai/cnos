@@ -438,6 +438,153 @@ const COMMANDS: HelpCommand[] = [
     ],
   },
   {
+    id: 'spec',
+    summary: 'Author and inspect manifest-global config specs stored under schema.',
+    usage: 'cnos spec [list | show <logicalKey> | set <logicalKey> | delete <logicalKey> | doctor] [options] [global-options]',
+    description:
+      'Manages CNOS config specs (user-facing "spec") stored in the manifest schema: block. Use cnos define/value/secret for concrete value authoring.',
+    examples: [
+      'cnos spec list',
+      'cnos spec show value.server.port',
+      'cnos spec set value.server.port --type number --required --summary "HTTP server port"',
+      'cnos spec delete value.legacy.flag',
+      'cnos spec doctor',
+    ],
+  },
+  {
+    id: 'spec list',
+    summary: 'List declared spec entries.',
+    usage: 'cnos spec list [--prefix <path>] [global-options]',
+    description: 'Lists manifest schema entries. In v1, spec entries are manifest-global rather than workspace-scoped.',
+    options: [
+      {
+        flag: '--prefix <path>',
+        description: 'Filter listed spec keys by logical-key prefix.',
+      },
+    ],
+    examples: ['cnos spec list', 'cnos spec list --prefix value.server.'],
+  },
+  {
+    id: 'spec show',
+    summary: 'Show one spec entry.',
+    usage: 'cnos spec show <logicalKey> [global-options]',
+    description: 'Shows one manifest schema entry by namespace-qualified logical key.',
+    arguments: [
+      {
+        name: 'logicalKey',
+        description: 'Namespace-qualified key such as value.server.port.',
+        required: true,
+      },
+    ],
+    examples: ['cnos spec show value.server.port', 'cnos spec show secret.db.password --json'],
+  },
+  {
+    id: 'spec set',
+    summary: 'Create or update one spec entry.',
+    usage: 'cnos spec set <logicalKey> [field-flags] [global-options]',
+    description:
+      'Writes one manifest schema entry. With no field flags in a TTY, CNOS enters interactive authoring mode. With field flags, CNOS uses non-interactive mode.',
+    arguments: [
+      {
+        name: 'logicalKey',
+        description: 'Namespace-qualified key such as value.server.port.',
+        required: true,
+      },
+    ],
+    options: [
+      {
+        flag: '--type <string|number|boolean|object|array>',
+        description: 'Set expected value type.',
+      },
+      {
+        flag: '--required | --optional',
+        description: 'Mark key required or optional.',
+      },
+      {
+        flag: '--default <jsonOrScalar>',
+        description: 'Set default using JSON-first parsing; fallback is literal string.',
+      },
+      {
+        flag: '--enum <jsonArray>',
+        description: 'Set allowed values from a non-empty JSON array.',
+      },
+      {
+        flag: '--pattern <regex>',
+        description: 'Set regex pattern for string values.',
+      },
+      {
+        flag: '--summary <text>',
+        description: 'Set short description.',
+      },
+      {
+        flag: '--description <text>',
+        description: 'Set long description.',
+      },
+      {
+        flag: '--example <value>',
+        description: 'Add example value. Repeatable. JSON-first parsing.',
+      },
+      {
+        flag: '--used-by <text>',
+        description: 'Add usage context text. Repeatable.',
+      },
+      {
+        flag: '--deprecated',
+        description: 'Mark as deprecated.',
+      },
+      {
+        flag: '--deprecation-message <text>',
+        description: 'Set deprecation message and auto-mark deprecated.',
+      },
+      {
+        flag: '--clear-default | --clear-enum | --clear-pattern | --clear-summary | --clear-description | --clear-examples | --clear-used-by | --clear-deprecated | --clear-deprecation-message',
+        description: 'Explicitly clear stored fields.',
+      },
+    ],
+    examples: [
+      'cnos spec set value.server.port --type number --required --summary "HTTP server port"',
+      'cnos spec set value.app.stage --enum \'["local","stage","prod"]\'',
+      'cnos spec set value.legacy.flag --clear-deprecated',
+    ],
+  },
+  {
+    id: 'spec delete',
+    summary: 'Delete one spec entry.',
+    usage: 'cnos spec delete <logicalKey> [global-options]',
+    description: 'Removes one manifest schema entry by namespace-qualified logical key.',
+    arguments: [
+      {
+        name: 'logicalKey',
+        description: 'Namespace-qualified key such as value.server.port.',
+        required: true,
+      },
+    ],
+    examples: ['cnos spec delete value.legacy.flag', 'cnos spec remove value.legacy.flag --json'],
+  },
+  {
+    id: 'spec doctor',
+    summary: 'Compare declared spec against current config and guide remediation.',
+    usage: 'cnos spec doctor [--fill-missing|--review-all] [global-options]',
+    description:
+      'Report mode shows missing required keys, undeclared keys, type/enum/pattern mismatches, defaults in use, and deprecated keys in use. Write modes run interactive remediation flows.',
+    options: [
+      {
+        flag: '--fill-missing',
+        description: 'Interactively fill only missing required keys. Requires TTY and writable root.',
+      },
+      {
+        flag: '--review-all',
+        description: 'Interactively review all declared spec keys one by one. Requires TTY and writable root.',
+      },
+    ],
+    examples: [
+      'cnos spec doctor',
+      'cnos spec doctor --json',
+      'cnos spec doctor --fill-missing',
+      'cnos spec doctor --review-all --workspace api --profile stage',
+    ],
+  },
+  {
     id: 'use',
     summary: 'Persist repo-local CLI defaults such as workspace and profile.',
     usage: 'cnos use [show] [--workspace <id>] [--profile <name>] [--global-root <path>] [--root <path>] [--json]',
@@ -938,7 +1085,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Run repository and workspace diagnostics.',
     usage: 'cnos doctor [--fix-secret-env-mappings] [global-options]',
     description:
-      'Checks manifest/workspace setup, gitignore coverage, and related diagnostics for the selected workspace. Secret env mappings are reported as a security risk; use --fix-secret-env-mappings to remove them from envMapping.explicit in one shot.',
+      'Checks manifest/workspace setup, gitignore coverage, and related diagnostics for the selected workspace. Secret env mappings are reported as a security risk; use --fix-secret-env-mappings to remove them from envMapping.explicit in one shot. When schema entries exist, doctor points to cnos spec doctor for spec coverage and remediation.',
     examples: ['cnos doctor', 'cnos doctor --workspace api --json', 'cnos doctor --fix-secret-env-mappings'],
   },
   {

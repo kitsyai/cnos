@@ -79,6 +79,7 @@ export {
 export { generateCodegenContent } from './codegen/generateTypes.js';
 export { resolveCodegenPaths, writeCodegenOutput } from './codegen/writeOutput.js';
 export { watchSchema } from './codegen/watchSchema.js';
+export { compareSpecToGraph } from './spec/compareSpecToGraph.js';
 export { compareSchemaToGraph } from './drift/compareSchemaToGraph.js';
 export { formatDriftReport } from './drift/formatDriftReport.js';
 export { applyManifestMappings } from './migrate/applyManifest.js';

@@ -32,3 +32,36 @@ export function consumeOption(args: string[], flag: string): string | undefined 
 
   return undefined;
 }
+
+export function consumeOptions(args: string[], flag: string): string[] {
+  const values: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (!token) {
+      continue;
+    }
+
+    if (token.startsWith(`${flag}=`)) {
+      values.push(token.slice(flag.length + 1));
+      args.splice(index, 1);
+      index -= 1;
+      continue;
+    }
+
+    if (token === flag) {
+      const value = args[index + 1];
+
+      if (!value) {
+        throw new Error(`Missing value for ${flag}`);
+      }
+
+      values.push(value);
+      args.splice(index, 2);
+      index -= 1;
+    }
+  }
+
+  return values;
+}

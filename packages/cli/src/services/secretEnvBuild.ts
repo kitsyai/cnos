@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { spawnSync } from 'node:child_process';
@@ -82,8 +82,33 @@ function isGitIgnored(repoRoot: string, targetPath: string): boolean {
   return result.status === 0;
 }
 
-export async function assertSecretEnvTargetIsGitIgnored(targetPath: string, cwd: string): Promise<void> {
+async function resolveCanonicalRepoRoot(cwd: string): Promise<string | undefined> {
   const repoRoot = resolveGitRoot(cwd);
+
+  if (!repoRoot) {
+    return undefined;
+  }
+
+  try {
+    return await realpath(repoRoot);
+  } catch {
+    return path.resolve(repoRoot);
+  }
+}
+
+async function resolveCanonicalTargetPath(targetPath: string): Promise<string> {
+  const resolvedPath = path.resolve(targetPath);
+
+  try {
+    const resolvedDir = await realpath(path.dirname(resolvedPath));
+    return path.join(resolvedDir, path.basename(resolvedPath));
+  } catch {
+    return resolvedPath;
+  }
+}
+
+export async function assertSecretEnvTargetIsGitIgnored(targetPath: string, cwd: string): Promise<void> {
+  const repoRoot = await resolveCanonicalRepoRoot(cwd);
 
   if (!repoRoot) {
     throw new Error(
@@ -101,8 +126,10 @@ export async function assertSecretEnvTargetIsGitIgnored(targetPath: string, cwd:
     );
   }
 
-  if (!isGitIgnored(repoRoot, targetPath)) {
-    const relativeTarget = path.relative(repoRoot, targetPath).replace(/\\/g, '/');
+  const canonicalTargetPath = await resolveCanonicalTargetPath(targetPath);
+
+  if (!isGitIgnored(repoRoot, canonicalTargetPath)) {
+    const relativeTarget = path.relative(repoRoot, canonicalTargetPath).replace(/\\/g, '/');
     throw new Error(
       `Cannot write revealed secrets to ${targetPath} because ${relativeTarget} is not gitignored. Add an ignore rule first, then re-run cnos build env --reveal.`,
     );

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { resolveBrowserData, resolveFrameworkEnv, resolveServerProjection } from '@kitsy/cnos/build';
 import { stringifyYaml } from '@kitsy/cnos/internal';
 
+import { formatEnvEntries, type ProjectionFormat } from './envSerialization.js';
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 import { resolveFilesystemBasePath } from './paths.js';
 import {
@@ -14,31 +15,7 @@ import {
   hydrateSecretEnvMappings,
 } from './secretEnvBuild.js';
 
-export type ProjectionFormat = 'dotenv' | 'docker-env' | 'json' | 'shell' | 'toml' | 'yaml';
-
-function stringifyScalar(value: unknown): string {
-  if (value === undefined || value === null) {
-    return '';
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return String(value);
-  }
-
-  return JSON.stringify(value);
-}
-
-function escapeShell(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
-}
-
-function quoteToml(value: string): string {
-  return `"${escapeShell(value)}"`;
-}
+export type { ProjectionFormat } from './envSerialization.js';
 
 function formatKeyValueMap(
   values: Record<string, unknown>,
@@ -52,13 +29,13 @@ function formatKeyValueMap(
     case 'yaml':
       return stringifyYaml(Object.fromEntries(entries));
     case 'shell':
-      return entries.map(([key, value]) => `export ${key}="${escapeShell(stringifyScalar(value))}"`).join('\n');
+      return formatEnvEntries(Object.fromEntries(entries), 'shell');
     case 'toml':
-      return entries.map(([key, value]) => `${key} = ${quoteToml(stringifyScalar(value))}`).join('\n');
+      return formatEnvEntries(Object.fromEntries(entries), 'toml');
     case 'docker-env':
     case 'dotenv':
     default:
-      return entries.map(([key, value]) => `${key}=${stringifyScalar(value)}`).join('\n');
+      return formatEnvEntries(Object.fromEntries(entries), format);
   }
 }
 

@@ -1,4 +1,5 @@
 import { CnosManifestError } from '../errors.js';
+import { normalizeSpecRule } from '../spec/normalizeSpecRule.js';
 import type {
   ManifestFile,
   NamespaceDefinition,
@@ -267,6 +268,17 @@ function normalizeVaultAuth(
   };
 }
 
+function normalizeSchema(
+  schema?: ManifestFile['schema'],
+): NonNullable<ManifestFile['schema']> {
+  return Object.fromEntries(
+    Object.entries(schema ?? {}).map(([logicalKey, rule]) => [
+      logicalKey,
+      normalizeSpecRule(logicalKey, rule),
+    ]),
+  );
+}
+
 export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
   const version = manifest.version ?? 1;
 
@@ -379,6 +391,6 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
         },
       },
     },
-    schema: manifest.schema ?? {},
+    schema: normalizeSchema(manifest.schema),
   };
 }

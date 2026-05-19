@@ -20,13 +20,18 @@ export async function appendAuditEvent(
   processEnv: Record<string, string | undefined> = process.env,
 ): Promise<void> {
   const auditFile = processEnv.CNOS_AUDIT_FILE ?? path.join(resolveSecretStoreRoot(processEnv), 'audit', 'access.log');
-  await mkdir(path.dirname(auditFile), { recursive: true });
-  await appendFile(
-    auditFile,
-    `${JSON.stringify({
-      ts: new Date().toISOString(),
-      ...event,
-    })}\n`,
-    'utf8',
-  );
+
+  try {
+    await mkdir(path.dirname(auditFile), { recursive: true });
+    await appendFile(
+      auditFile,
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        ...event,
+      })}\n`,
+      'utf8',
+    );
+  } catch {
+    // Audit writes must not block runtime secret resolution paths.
+  }
 }

@@ -1,5 +1,9 @@
 import path from 'node:path';
 
+function toPortablePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
 export function displayPath(filePath: string, root = process.cwd()): string {
   const absoluteRoot = path.resolve(root);
   const absoluteFile = path.resolve(filePath);
@@ -10,8 +14,8 @@ export function displayPath(filePath: string, root = process.cwd()): string {
   }
 
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return absoluteFile;
+    return toPortablePath(absoluteFile);
   }
 
-  return relative;
+  return toPortablePath(relative);
 }

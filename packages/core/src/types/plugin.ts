@@ -1,7 +1,7 @@
 import type { ConfigEntry, InspectResult, LogicalKey, ResolvedGraph } from './core.js';
 import type { NormalizedManifest } from './manifest.js';
 import type { ProfileActivation } from './profile.js';
-import type { SchemaRule } from './schema.js';
+import type { ConfigSpecRule } from './spec.js';
 import type { WorkspaceContext } from './workspace.js';
 
 export type CnosPluginKind = 'loader' | 'resolver' | 'validator' | 'exporter' | 'inspector';
@@ -33,7 +33,7 @@ export interface ResolverContext {
 
 export interface ValidationContext {
   manifest: NormalizedManifest;
-  schema?: Record<LogicalKey, SchemaRule>;
+  schema?: Record<LogicalKey, ConfigSpecRule>;
 }
 
 export interface ExportContext {

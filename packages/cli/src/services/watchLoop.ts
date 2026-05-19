@@ -50,6 +50,18 @@ export async function startGraphWatchLoop(
           }, debounceMs);
         },
       );
+      watcher.on('error', (error: NodeJS.ErrnoException) => {
+        if (closed) {
+          return;
+        }
+
+        if (recursive && (error.code === 'EMFILE' || error.code === 'ENOSPC')) {
+          watcherMap.delete(targetPath);
+          watcher.close();
+          attachWatcher(targetPath, false);
+          return;
+        }
+      });
       watcherMap.set(targetPath, watcher);
     } catch {
       if (recursive) {

@@ -24,6 +24,7 @@ import { runPromote } from './commands/promote.js';
 import { runRead } from './commands/read.js';
 import { runCommand } from './commands/run.js';
 import { runSecret } from './commands/secret.js';
+import { runSpec } from './commands/spec.js';
 import { runUse } from './commands/use.js';
 import { runUi } from './commands/ui.js';
 import { runValidate } from './commands/validate.js';
@@ -98,6 +99,10 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
   }
 
   if (command === 'profile' && args[0] && ['create', 'list', 'use', 'delete', 'remove'].includes(args[0])) {
+    return normalizeHelpTopic([command, args[0] === 'remove' ? 'delete' : args[0]]);
+  }
+
+  if (command === 'spec' && args[0] && ['list', 'show', 'set', 'delete', 'remove', 'doctor'].includes(args[0])) {
     return normalizeHelpTopic([command, args[0] === 'remove' ? 'delete' : args[0]]);
   }
 
@@ -188,6 +193,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'secret':
       process.stdout.write(`${await runSecret(args.length > 0 ? args : ['app.token'], runtimeOptions)}\n`);
+      return;
+    case 'spec':
+      process.stdout.write(`${await runSpec(args, runtimeOptions)}\n`);
       return;
     case 'vault':
       process.stdout.write(`${await runVault(args, runtimeOptions)}\n`);

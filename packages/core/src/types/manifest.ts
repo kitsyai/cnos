@@ -1,6 +1,6 @@
 import type { LogicalKey } from './core.js';
 import type { ProfileResolveFrom } from './profile.js';
-import type { SchemaRule } from './schema.js';
+import type { ConfigSpecRule } from './spec.js';
 import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from './workspace.js';
 
 export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
@@ -115,7 +115,7 @@ export interface ManifestFile {
       targets?: Partial<Record<'value' | 'secret', string>>;
     };
   };
-  schema?: Record<LogicalKey, SchemaRule>;
+  schema?: Record<LogicalKey, ConfigSpecRule>;
 }
 
 export interface NormalizedManifest {
@@ -165,7 +165,7 @@ export interface NormalizedManifest {
       targets: Record<'value' | 'secret', string>;
     };
   };
-  schema: Record<LogicalKey, SchemaRule>;
+  schema: Record<LogicalKey, ConfigSpecRule>;
 }
 
 export interface LoadManifestOptions {

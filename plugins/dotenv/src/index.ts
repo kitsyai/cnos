@@ -26,10 +26,38 @@ function parseDoubleQuoted(value: string): string {
     .replace(/\\\\/g, '\\');
 }
 
+function isEscapedCharacter(value: string, index: number): boolean {
+  let slashCount = 0;
+
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) {
+    slashCount += 1;
+  }
+
+  return slashCount % 2 === 1;
+}
+
+function findClosingQuote(value: string, quote: '"' | "'"): number {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== quote) {
+      continue;
+    }
+
+    if (quote === '"' && isEscapedCharacter(value, index)) {
+      continue;
+    }
+
+    return index;
+  }
+
+  return -1;
+}
+
 export function parseDotenv(document: string): Record<string, string> {
   const parsed: Record<string, string> = {};
+  const lines = document.split(/\r?\n/);
 
-  for (const rawLine of document.split(/\r?\n/)) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const rawLine = lines[lineIndex] ?? '';
     const line = rawLine.trim();
 
     if (!line || line.startsWith('#')) {
@@ -50,10 +78,20 @@ export function parseDotenv(document: string): Record<string, string> {
       continue;
     }
 
-    if (value.startsWith('"') && value.endsWith('"')) {
-      value = parseDoubleQuoted(value.slice(1, -1));
-    } else if (value.startsWith("'") && value.endsWith("'")) {
-      value = value.slice(1, -1);
+    if (value.startsWith('"') || value.startsWith("'")) {
+      const quote = value.startsWith('"') ? '"' : "'";
+      let quotedContent = value.slice(1);
+      let closingIndex = findClosingQuote(quotedContent, quote);
+
+      while (closingIndex === -1 && lineIndex < lines.length - 1) {
+        lineIndex += 1;
+        quotedContent = `${quotedContent}\n${lines[lineIndex] ?? ''}`;
+        closingIndex = findClosingQuote(quotedContent, quote);
+      }
+
+      const rawQuotedValue =
+        closingIndex === -1 ? quotedContent : quotedContent.slice(0, closingIndex);
+      value = quote === '"' ? parseDoubleQuoted(rawQuotedValue) : rawQuotedValue;
     } else {
       value = value.replace(/\s+#.*$/, '').trim();
     }

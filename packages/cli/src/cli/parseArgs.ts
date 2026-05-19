@@ -51,6 +51,15 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--yaml',
   '--toml',
   '--config',
+  '--type',
+  '--default',
+  '--enum',
+  '--pattern',
+  '--summary',
+  '--description',
+  '--example',
+  '--used-by',
+  '--deprecation-message',
 ]);
 const COMMAND_FLAG_KEYS = new Set([
   '--flatten',
@@ -74,6 +83,20 @@ const COMMAND_FLAG_KEYS = new Set([
   '--source-only',
   '--allow-secret',
   '--fix-secret-env-mappings',
+  '--required',
+  '--optional',
+  '--deprecated',
+  '--clear-default',
+  '--clear-enum',
+  '--clear-pattern',
+  '--clear-summary',
+  '--clear-description',
+  '--clear-examples',
+  '--clear-used-by',
+  '--clear-deprecated',
+  '--clear-deprecation-message',
+  '--fill-missing',
+  '--review-all',
 ]);
 type ConfigOptionKey = (typeof OPTION_KEYS)[keyof typeof OPTION_KEYS];
 

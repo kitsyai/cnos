@@ -277,6 +277,61 @@ async function createRunWithLocalVaultEnvFixture(): Promise<string> {
   return root;
 }
 
+async function createMultilineEnvFixture(): Promise<string> {
+  const root = await createRuntimeFixture();
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: cli-fixture',
+      'workspaces:',
+      '  default: api',
+      '  global:',
+      '    enabled: true',
+      '    allowWrite: true',
+      '  items:',
+      '    api: {}',
+      'envMapping:',
+      '  convention: SCREAMING_SNAKE',
+      '  explicit:',
+      '    API_URL: value.api.baseUrl',
+      '    APP_CERT: value.app.cert',
+      '    SERVER_PORT: value.server.port',
+      'public:',
+      '  promote:',
+      '    - value.api.baseUrl',
+      'namespaces:',
+      '  flags:',
+      '    kind: data',
+      '    shareable: true',
+      'schema:',
+      '  value.server.port:',
+      '    type: number',
+      '    required: true',
+      '  value.server.host:',
+      '    type: string',
+      '    default: localhost',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'),
+    [
+      'app:',
+      '  name: cli-fixture',
+      '  cert: |',
+      '    -----BEGIN CERT-----',
+      '    line-2',
+      '    -----END CERT-----',
+      'server:',
+      '  port: "8080"',
+      'api:',
+      '  baseUrl: https://api.local',
+    ].join('\n'),
+  );
+  return root;
+}
+
 async function runGit(
   args: string[],
   cwd: string,
@@ -832,7 +887,7 @@ describe('@kitsy/cnos-cli', () => {
         root,
         cliArgs: ['--out', path.join('generated', 'typed-cnos.d.ts')],
       }),
-    ).resolves.toContain('generated\\typed-cnos.d.ts');
+    ).resolves.toContain('generated/typed-cnos.d.ts');
     await expect(readFile(path.join(root, 'generated', 'typed-cnos.d.ts'), 'utf8')).resolves.toContain(
       '"server.port": number;',
     );
@@ -1464,7 +1519,7 @@ describe('@kitsy/cnos-cli', () => {
         workspace: 'api',
         processEnv: {},
       }),
-    ).resolves.toBe('defined value.server.port in .cnos\\workspaces\\api\\values\\server.yml');
+    ).resolves.toBe('defined value.server.port in .cnos/workspaces/api/values/server.yml');
     await expect(
       readFile(path.join(root, '.cnos', 'workspaces', 'api', 'values', 'server.yml'), 'utf8'),
     ).resolves.toContain('3001');
@@ -1498,7 +1553,7 @@ describe('@kitsy/cnos-cli', () => {
         },
         cliArgs: ['--target', 'global'],
       }),
-    ).resolves.toContain(globalRoot);
+    ).resolves.toContain(globalRoot.replace(/\\/g, '/'));
     await expect(
       readFile(path.join(globalRoot, 'workspaces', 'api', 'secrets', 'app.yml'), 'utf8'),
     ).resolves.toContain('provider: local');
@@ -1513,7 +1568,7 @@ describe('@kitsy/cnos-cli', () => {
       runProfile(['create', 'stage'], {
         root,
       }),
-    ).resolves.toBe('created profile stage at .cnos\\profiles\\stage.yml; inherits values from base by default');
+    ).resolves.toBe('created profile stage at .cnos/profiles/stage.yml; inherits values from base by default');
 
     await expect(
       runVault(['create', 'local-dev'], {
@@ -1523,7 +1578,7 @@ describe('@kitsy/cnos-cli', () => {
           CNOS_SECRET_PASSPHRASE: 'dev-pass',
         },
       }),
-    ).resolves.toBe('created vault "local-dev" with provider "local" in .cnos\\cnos.yml');
+    ).resolves.toBe('created vault "local-dev" with provider "local" in .cnos/cnos.yml');
   });
 
   it('creates profiles with implicit base inheritance and optional no-inherit mode', async () => {
@@ -1533,7 +1588,7 @@ describe('@kitsy/cnos-cli', () => {
       runProfile(['create', 'local'], {
         root,
       }),
-    ).resolves.toBe('created profile local at .cnos\\profiles\\local.yml; inherits values from base by default');
+    ).resolves.toBe('created profile local at .cnos/profiles/local.yml; inherits values from base by default');
     await expect(readFile(path.join(root, '.cnos', 'profiles', 'local.yml'), 'utf8')).resolves.toBe('name: local\n');
 
     await expect(
@@ -1541,7 +1596,7 @@ describe('@kitsy/cnos-cli', () => {
         root,
         cliArgs: ['--no-inherit'],
       }),
-    ).resolves.toBe('created profile isolated at .cnos\\profiles\\isolated.yml without inheriting base');
+    ).resolves.toBe('created profile isolated at .cnos/profiles/isolated.yml without inheriting base');
     await expect(readFile(path.join(root, '.cnos', 'profiles', 'isolated.yml'), 'utf8')).resolves.toContain(
       'envFiles:',
     );
@@ -1864,6 +1919,59 @@ describe('@kitsy/cnos-cli', () => {
     ).resolves.toContain(dumpRoot);
     await expect(readFile(path.join(dumpRoot, 'values', 'base', 'app.yml'), 'utf8')).resolves.toContain(
       'baseUrl: https://api.local',
+    );
+  });
+
+  it('serializes multiline env values safely across export and build env formats', async () => {
+    const root = await createMultilineEnvFixture();
+    const exportRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-multiline-export-'));
+    fixtureRoots.push(exportRoot);
+
+    await expect(
+      runExport('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+      }),
+    ).resolves.toContain('APP_CERT="-----BEGIN CERT-----\\nline-2\\n-----END CERT-----\\n"');
+
+    const dotenvTarget = path.join(exportRoot, '.env.multi');
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--to', dotenvTarget],
+      }),
+    ).resolves.toContain('.env.multi');
+    await expect(readFile(dotenvTarget, 'utf8')).resolves.toContain(
+      'APP_CERT="-----BEGIN CERT-----\\nline-2\\n-----END CERT-----\\n"',
+    );
+
+    const shellTarget = path.join(exportRoot, '.env.shell');
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--format', 'shell', '--to', shellTarget],
+      }),
+    ).resolves.toContain('.env.shell');
+    await expect(readFile(shellTarget, 'utf8')).resolves.toContain(
+      "export APP_CERT='-----BEGIN CERT-----\nline-2\n-----END CERT-----\n'",
+    );
+
+    const tomlTarget = path.join(exportRoot, '.env.toml');
+    await expect(
+      runBuild('env', {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--format', 'toml', '--to', tomlTarget],
+      }),
+    ).resolves.toContain('.env.toml');
+    await expect(readFile(tomlTarget, 'utf8')).resolves.toContain(
+      'APP_CERT = "-----BEGIN CERT-----\\nline-2\\n-----END CERT-----\\n"',
     );
   });
 

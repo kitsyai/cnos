@@ -82,6 +82,14 @@ function enumMatches(value: unknown, allowed: unknown[]): boolean {
   return allowed.some((candidate) => JSON.stringify(candidate) === serialized);
 }
 
+function testPattern(pattern: string, value: string): boolean {
+  try {
+    return new RegExp(pattern).test(value);
+  } catch {
+    return false;
+  }
+}
+
 export interface ApplySchemaResult {
   graph: ResolvedGraph;
   issues: ValidationIssue[];
@@ -173,11 +181,11 @@ export function applySchemaRules(
           key,
           message: `Config key ${key} must be a string to match pattern ${rule.pattern}`,
         });
-      } else if (!new RegExp(rule.pattern).test(coercedValue)) {
+      } else if (!testPattern(rule.pattern, coercedValue)) {
         issues.push({
           code: 'schema.pattern',
           key,
-          message: `Config key ${key} does not match pattern ${rule.pattern}`,
+          message: `Config key ${key} does not match pattern ${rule.pattern} (or the pattern is invalid).`,
         });
       }
     }
