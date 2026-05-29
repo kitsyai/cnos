@@ -10,6 +10,7 @@ CNOS is a plugin-first configuration orchestration system. This repository is a 
 - `@kitsy/cnos-next`: first-party Next.js integration for CNOS public env injection.
 - `@kitsy/cnos-webpack`: first-party webpack integration for CNOS public env injection.
 - `@kitsy/cnos-docs`: source-of-truth MDX documentation package for Astro Starlight and other static docs consumers.
+- `packages/go`: first-party Go runtime client for CNOS runtime graph and server projection bootstraps, native `.cnos/` and Git-backed remote resolution, live derived reads, inspect/provenance, singleton helpers, and vault-backed secret hydration outside Node.js.
 
 Internal workspaces such as `packages/core` and `plugins/*` remain in the source monorepo for development, but they are not published as standalone npm packages.
 
@@ -25,7 +26,7 @@ Internal workspaces such as `packages/core` and `plugins/*` remain in the source
 
 ## Local development
 
-The workspace uses pnpm workspaces, TypeScript, tsup, Vitest, ESLint, Prettier, and Changesets. Core packages live under `packages/*`, official plugins live under `plugins/*`, examples live under `examples/*`, and long-form specifications stay in `docs/`.
+The workspace uses pnpm workspaces, TypeScript, tsup, Vitest, ESLint, Prettier, Changesets, and a standalone Go runtime module under `packages/go`. Core packages live under `packages/*`, official plugins live under `plugins/*`, examples live under `examples/*`, and long-form specifications stay in `docs/`.
 
 The current v1 CLI is workspace-aware and includes `init`, `onboard`, `use`, `profile`, `list`, `read`, `value`, `secret`, `inspect`, `define`, `validate`, `export env`, `dump`, `run`, `diff`, `doctor`, `help`, and `help-ai`.
 

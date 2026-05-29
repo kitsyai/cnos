@@ -19,6 +19,8 @@ sidebar:
     items:
       - path: guides/backend
         label: Backend Projects
+      - path: guides/go-runtime
+        label: Go Runtime
       - path: guides/frontend-vite
         label: Frontend with Vite
       - path: guides/frontend-webpack
