@@ -83,20 +83,20 @@ type runtimeNamespaceFile struct {
 }
 
 type vaultAuthSourceFile struct {
-	From []string `yaml:"from"`
+	From []string `yaml:"from" json:"from,omitempty"`
 }
 
 type vaultAuthFile struct {
-	Method     string               `yaml:"method"`
-	Passphrase *vaultAuthSourceFile `yaml:"passphrase"`
-	Token      *vaultAuthSourceFile `yaml:"token"`
-	Config     map[string]any       `yaml:"config"`
+	Method     string               `yaml:"method" json:"method,omitempty"`
+	Passphrase *vaultAuthSourceFile `yaml:"passphrase" json:"passphrase,omitempty"`
+	Token      *vaultAuthSourceFile `yaml:"token" json:"token,omitempty"`
+	Config     map[string]any       `yaml:"config" json:"config,omitempty"`
 }
 
 type vaultDefinition struct {
-	Provider string            `yaml:"provider"`
-	Auth     vaultAuthFile     `yaml:"auth"`
-	Mapping  map[string]string `yaml:"mapping"`
+	Provider string            `yaml:"provider" json:"provider"`
+	Auth     vaultAuthFile     `yaml:"auth" json:"auth,omitempty"`
+	Mapping  map[string]string `yaml:"mapping" json:"mapping,omitempty"`
 }
 
 type manifestFile struct {

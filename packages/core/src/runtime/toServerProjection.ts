@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import type { ResolvedGraph, ServerProjection } from '../types/core.js';
-import type { NormalizedManifest } from '../types/manifest.js';
+import type { NormalizedManifest, VaultDefinition } from '../types/manifest.js';
+import type { ProjectedVaultDefinition } from '../secrets/types.js';
 import { isSecretReference } from '../utils/secretStore.js';
 
 function stableSortObject(value: Record<string, unknown>): Record<string, unknown> {
@@ -35,6 +36,65 @@ function shouldProjectResolvedValue(sourceId: string | undefined): boolean {
   return sourceId !== 'process-env';
 }
 
+function projectVaultAuth(definition: VaultDefinition): ProjectedVaultDefinition['auth'] | undefined {
+  const auth = definition.auth;
+
+  if (!auth) {
+    return undefined;
+  }
+
+  const projected = {
+    ...(auth.method ? { method: auth.method } : {}),
+    ...(auth.passphrase?.from
+      ? {
+          passphrase: {
+            from: [...auth.passphrase.from],
+          },
+        }
+      : {}),
+    ...(auth.token?.from
+      ? {
+          token: {
+            from: [...auth.token.from],
+          },
+        }
+      : {}),
+    ...(auth.config ? { config: stableSortObject(auth.config) } : {}),
+  } satisfies ProjectedVaultDefinition['auth'];
+
+  return Object.keys(projected).length > 0 ? projected : undefined;
+}
+
+function projectVaultDefinition(definition: VaultDefinition): ProjectedVaultDefinition {
+  const auth = projectVaultAuth(definition);
+  const mapping = definition.mapping
+    ? (stableSortObject(definition.mapping) as Record<string, string>)
+    : undefined;
+
+  return {
+    provider: definition.provider,
+    ...(auth ? { auth } : {}),
+    ...(mapping && Object.keys(mapping).length > 0 ? { mapping } : {}),
+  };
+}
+
+function projectReferencedVaults(
+  manifest: NormalizedManifest,
+  vaultIds: Set<string>,
+): Record<string, ProjectedVaultDefinition> | undefined {
+  const projected: Record<string, ProjectedVaultDefinition> = {};
+
+  for (const vaultId of Array.from(vaultIds).sort((left, right) => left.localeCompare(right))) {
+    const definition = manifest.vaults[vaultId];
+
+    if (definition) {
+      projected[vaultId] = projectVaultDefinition(definition);
+    }
+  }
+
+  return Object.keys(projected).length > 0 ? projected : undefined;
+}
+
 export function toServerProjection(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
@@ -48,6 +108,7 @@ export function toServerProjection(
   const values: Record<string, unknown> = {};
   const derived: ServerProjection['derived'] = {};
   const secretRefs: ServerProjection['secretRefs'] = {};
+  const referencedVaultIds = new Set<string>();
   const namespaces = new Set<string>();
   const runtimeNamespaces = new Set<string>();
   const publicKeys = Array.from(graph.entries.values())
@@ -59,6 +120,7 @@ export function toServerProjection(
     if (entry.namespace === 'secret' && isSecretReference(entry.value)) {
       const vaultId = entry.value.vault ?? 'default';
       const envVar = resolveProjectedEnvVar(manifest, vaultId, entry.value.ref);
+      referencedVaultIds.add(vaultId);
       secretRefs[key.slice('secret.'.length)] = {
         provider: entry.value.provider,
         vault: vaultId,
@@ -123,6 +185,8 @@ export function toServerProjection(
     }
   }
 
+  const vaults = projectReferencedVaults(manifest, referencedVaultIds);
+
   return {
     version: 1,
     workspace: graph.workspace.workspaceId,
@@ -132,6 +196,7 @@ export function toServerProjection(
     values: stableSortObject(values),
     derived: stableSortObject(derived) as ServerProjection['derived'],
     secretRefs: stableSortObject(secretRefs) as ServerProjection['secretRefs'],
+    ...(vaults ? { vaults } : {}),
     publicKeys,
     runtimeNamespaces: Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right)),
     meta: {

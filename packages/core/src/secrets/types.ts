@@ -6,6 +6,25 @@ export interface SecretReference {
   vault?: string;
 }
 
+/** Auth metadata safe to serialize into server projections. */
+export interface ProjectedVaultAuthDefinition {
+  method?: VaultAuthConfig['method'];
+  passphrase?: {
+    from: string[];
+  };
+  token?: {
+    from: string[];
+  };
+  config?: Record<string, unknown>;
+}
+
+/** Vault metadata required by runtimes to hydrate projected secret refs. */
+export interface ProjectedVaultDefinition {
+  provider: string;
+  auth?: ProjectedVaultAuthDefinition;
+  mapping?: Record<string, string>;
+}
+
 export interface VaultAuthConfig {
   passphrase?: string;
   token?: string;
@@ -24,6 +43,16 @@ export interface SecretVaultProvider {
   set(ref: string, value: string): Promise<void>;
   delete(ref: string): Promise<void>;
   list(): Promise<string[]>;
+}
+
+/** Factory used by runtimes and provider packages to construct vault clients. */
+export interface SecretVaultProviderFactory {
+  readonly provider: string;
+  create(
+    vaultId: string,
+    definition: VaultDefinition,
+    processEnv?: Record<string, string | undefined>,
+  ): SecretVaultProvider;
 }
 
 export interface RemoteSecretVaultProvider extends SecretVaultProvider {

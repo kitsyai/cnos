@@ -1,6 +1,7 @@
 import type { CnosPlugin } from '../types/plugin.js';
 import type { CnosRuntime, ResolvedGraph } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
+import type { SecretVaultProviderFactory } from '../secrets/types.js';
 import { resolveSecretEntryValue } from '../secrets/batchResolve.js';
 import type { SecretCache } from '../secrets/secretCache.js';
 import { createDerivedRuntimeSupport, registerRuntimeProvider } from '../derive/runtime.js';
@@ -23,6 +24,7 @@ export function createRuntime(
   secretCache?: SecretCache,
   processEnv: Record<string, string | undefined> = process.env,
   cnosVersion = '0.0.0-dev',
+  secretVaultProviders: SecretVaultProviderFactory[] = [],
 ): CnosRuntime {
   const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
@@ -58,7 +60,7 @@ export function createRuntime(
       provider: entry.value.provider,
       auth: { passphrase: { from: [] } },
     };
-    const provider = createSecretVaultProvider(vaultId, definition, processEnv);
+    const provider = createSecretVaultProvider(vaultId, definition, processEnv, secretVaultProviders);
     const auth = await resolveVaultAuth(vaultId, definition, processEnv);
     await provider.authenticate(auth);
     const value = await provider.get(entry.value.ref);

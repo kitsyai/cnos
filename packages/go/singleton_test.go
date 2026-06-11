@@ -13,6 +13,7 @@ func TestSingletonReadyLoadsAuthoringRuntimeAndExportsHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
+	root := t.TempDir()
 	t.Cleanup(func() {
 		_ = os.Chdir(originalCwd)
 		resetDefaultRuntime()
@@ -23,7 +24,6 @@ func TestSingletonReadyLoadsAuthoringRuntimeAndExportsHelpers(t *testing.T) {
 		t.Fatalf("expected ErrRuntimeNotReady before Ready, got %v", err)
 	}
 
-	root := t.TempDir()
 	writeAuthoringFile(t, filepath.Join(root, ".cnosrc.yml"), []byte("root: ./.cnos\n"))
 	writeAuthoringFile(t, filepath.Join(root, ".cnos", "cnos.yml"), []byte(`
 version: 1

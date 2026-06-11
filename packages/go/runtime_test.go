@@ -119,6 +119,66 @@ func TestLoadProjectionReadsTemplateDerivedValuesAndCustomRuntimeProviders(t *te
 	}
 }
 
+func TestLoadProjectionPreservesVaultMetadata(t *testing.T) {
+	t.Parallel()
+
+	projection := ServerProjection{
+		Version:    1,
+		Workspace:  "api",
+		Profile:    "stage",
+		ResolvedAt: "2026-05-29T00:00:00Z",
+		ConfigHash: "hash",
+		Values:     map[string]any{},
+		Derived:    map[string]DerivedFormula{},
+		SecretRefs: map[string]SecretReference{
+			"db.password": {
+				Provider: "environment",
+				Vault:    "firebase-stage",
+				Ref:      "db.password",
+				EnvVar:   "DB_PASSWORD",
+			},
+		},
+		Vaults: map[string]vaultDefinition{
+			"firebase-stage": {
+				Provider: "environment",
+				Auth: vaultAuthFile{
+					Method: "environment",
+				},
+				Mapping: map[string]string{
+					"DB_PASSWORD": "db.password",
+				},
+			},
+		},
+		PublicKeys:        []string{},
+		RuntimeNamespaces: []string{},
+		Meta: ProjectionMeta{
+			Workspace:   "api",
+			Profile:     "stage",
+			CnosVersion: "1.10.0",
+		},
+	}
+
+	runtime := mustLoadProjectionRuntime(t, projection, Options{Environment: map[string]string{
+		"DB_PASSWORD": "projected-secret",
+	}})
+
+	value, ok, err := runtime.Secret("db.password")
+	if err != nil {
+		t.Fatalf("read projected environment secret: %v", err)
+	}
+	if !ok || value != "projected-secret" {
+		t.Fatalf("expected projected secret from vault mapping, got ok=%v value=%v", ok, value)
+	}
+
+	exported, err := runtime.ToServerProjection()
+	if err != nil {
+		t.Fatalf("export projection: %v", err)
+	}
+	if exported.Vaults["firebase-stage"].Mapping["DB_PASSWORD"] != "db.password" {
+		t.Fatalf("expected projected vault mapping to round-trip, got %#v", exported.Vaults)
+	}
+}
+
 func TestLoadAutodiscoversProjectionFile(t *testing.T) {
 	t.Parallel()
 

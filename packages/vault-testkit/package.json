@@ -1,0 +1,31 @@
+{
+  "name": "@kitsy/cnos-vault-testkit",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shared conformance helpers for CNOS secret vault providers.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@kitsy/cnos-core": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "clean": "rimraf dist",
+    "dev": "tsup src/index.ts --watch --format esm,cjs --dts",
+    "lint": "eslint src test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

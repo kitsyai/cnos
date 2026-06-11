@@ -3,7 +3,7 @@ import type { CnosPlugin } from './plugin.js';
 import type { ProfileSource } from './profile.js';
 import type { SecretCache } from '../secrets/secretCache.js';
 import type { WorkspaceContext } from './workspace.js';
-import type { SecretReference } from '../secrets/types.js';
+import type { ProjectedVaultDefinition, SecretReference, SecretVaultProviderFactory } from '../secrets/types.js';
 
 export type LogicalKey = string;
 
@@ -121,6 +121,8 @@ export interface CnosCreateOptions {
   plugins?: CnosPlugin[];
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
+  /** Additional secret vault provider factories, usually supplied by provider packages. */
+  secretVaultProviders?: SecretVaultProviderFactory[];
 }
 
 export interface ToEnvOptions {
@@ -193,6 +195,7 @@ export interface ServerProjection {
   values: Record<string, unknown>;
   derived: Record<string, DerivedFormula>;
   secretRefs: Record<string, SecretReference & { envVar?: string }>;
+  vaults?: Record<string, ProjectedVaultDefinition>;
   publicKeys: string[];
   runtimeNamespaces: string[];
   meta: {

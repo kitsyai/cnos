@@ -169,7 +169,12 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
   const secretCache =
     options.secretResolution === 'lazy'
       ? new SecretCache()
-      : await batchResolveSecrets(promotedGraph, loadedManifest.manifest, options.processEnv);
+      : await batchResolveSecrets(
+          promotedGraph,
+          loadedManifest.manifest,
+          options.processEnv,
+          options.secretVaultProviders,
+        );
 
   return createRuntime(
     loadedManifest.manifest,
@@ -181,5 +186,6 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     secretCache,
     options.processEnv,
     options.cnosVersion,
+    options.secretVaultProviders,
   );
 }

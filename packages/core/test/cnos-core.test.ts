@@ -26,6 +26,8 @@ import {
   validateWorkspaceSafety,
   type ConfigEntry,
   type LoaderPlugin,
+  type SecretVaultProviderFactory,
+  type VaultAuthConfig,
 } from '../src/index.js';
 
 const fixtureRoots: string[] = [];
@@ -462,12 +464,127 @@ describe('@kitsy/cnos-core', () => {
       processEnv: {},
     });
 
-    expect(runtime.toServerProjection().secretRefs).toEqual({
+    const projection = runtime.toServerProjection();
+
+    expect(projection.secretRefs).toEqual({
       'subscriptions.razorpay.key_id': {
         provider: 'environment',
         vault: 'firebase-stage',
         ref: 'subscriptions.razorpay.key_id',
         envVar: 'RAZORPAY_KEY_ID',
+      },
+    });
+    expect(projection.vaults).toEqual({
+      'firebase-stage': {
+        provider: 'environment',
+        auth: {
+          method: 'environment',
+        },
+        mapping: {
+          RAZORPAY_KEY_ID: 'subscriptions.razorpay.key_id',
+        },
+      },
+    });
+  });
+
+  it('resolves secrets through custom vault provider factories', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: custom-vault-provider',
+        'vaults:',
+        '  remote-prod:',
+        '    provider: test-remote',
+        '    auth:',
+        '      method: token',
+        '      token:',
+        '        from:',
+        '          - env:TEST_REMOTE_TOKEN',
+        '      config:',
+        '        address: https://vault.local',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('remote-secret-loader', [
+      {
+        key: 'secret.db.password',
+        value: {
+          provider: 'test-remote',
+          ref: 'db.password',
+          vault: 'remote-prod',
+        },
+        namespace: 'secret',
+        sourceId: 'filesystem-secrets',
+        pluginId: '@kitsy/cnos/plugins/filesystem-secrets',
+        workspaceId: 'default',
+      },
+    ]);
+    const authCalls: VaultAuthConfig[] = [];
+    const batchCalls: string[][] = [];
+    const providerFactory: SecretVaultProviderFactory = {
+      provider: 'test-remote',
+      create(vaultId, definition) {
+        return {
+          vaultId,
+          definition,
+          async authenticate(authConfig) {
+            authCalls.push(authConfig);
+          },
+          isAuthenticated() {
+            return authCalls.length > 0;
+          },
+          async batchGet(refs) {
+            batchCalls.push([...refs]);
+            return new Map(refs.map((ref) => [ref, `resolved:${ref}`]));
+          },
+          async get(ref) {
+            return `resolved:${ref}`;
+          },
+          async set() {
+            throw new Error('test provider is read-only');
+          },
+          async delete() {
+            throw new Error('test provider is read-only');
+          },
+          async list() {
+            return ['db.password'];
+          },
+        };
+      },
+    };
+
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+      processEnv: {
+        TEST_REMOTE_TOKEN: 'provider-token',
+      },
+      secretVaultProviders: [providerFactory],
+    });
+
+    expect(runtime.secret('db.password')).toBe('resolved:db.password');
+    expect(authCalls).toEqual([
+      {
+        method: 'token',
+        token: 'provider-token',
+        config: {
+          address: 'https://vault.local',
+        },
+      },
+    ]);
+    expect(batchCalls).toEqual([['db.password']]);
+    expect(runtime.toServerProjection().vaults).toEqual({
+      'remote-prod': {
+        provider: 'test-remote',
+        auth: {
+          method: 'token',
+          token: {
+            from: ['env:TEST_REMOTE_TOKEN'],
+          },
+          config: {
+            address: 'https://vault.local',
+          },
+        },
       },
     });
   });

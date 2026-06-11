@@ -68,6 +68,12 @@
       ],
       "@kitsy/cnos-webpack": [
         "packages/webpack/src/index.ts"
+      ],
+      "@kitsy/cnos-vault-testkit": [
+        "packages/vault-testkit/src/index.ts"
+      ],
+      "@kitsy/cnos-vault-fake": [
+        "packages/vault-fake/src/index.ts"
       ]
     }
   }

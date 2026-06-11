@@ -132,6 +132,22 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@24.12.0)(esbuild@0.27.7)(jiti@2.6.1)(terser@5.46.1)(yaml@2.8.3)
 
+  packages/vault-fake:
+    dependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@kitsy/cnos-vault-testkit':
+        specifier: workspace:*
+        version: link:../vault-testkit
+
+  packages/vault-testkit:
+    dependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/vite:
     dependencies:
       '@kitsy/cnos':

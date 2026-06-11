@@ -40,6 +40,7 @@ type ServerProjection struct {
 	Values            map[string]any             `json:"values"`
 	Derived           map[string]DerivedFormula  `json:"derived"`
 	SecretRefs        map[string]SecretReference `json:"secretRefs"`
+	Vaults            map[string]vaultDefinition `json:"vaults,omitempty"`
 	PublicKeys        []string                   `json:"publicKeys"`
 	RuntimeNamespaces []string                   `json:"runtimeNamespaces"`
 	Meta              ProjectionMeta             `json:"meta"`
@@ -70,6 +71,9 @@ func ParseProjection(data []byte) (ServerProjection, error) {
 	}
 	if projection.RuntimeNamespaces == nil {
 		projection.RuntimeNamespaces = []string{}
+	}
+	if projection.Vaults == nil {
+		projection.Vaults = map[string]vaultDefinition{}
 	}
 	if projection.Meta.Namespaces == nil {
 		projection.Meta.Namespaces = []string{}

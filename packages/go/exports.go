@@ -231,6 +231,7 @@ func (runtime *Runtime) ToServerProjection() (ServerProjection, error) {
 		Values:            stableSortAnyMap(values),
 		Derived:           stableSortFormulaMap(derived),
 		SecretRefs:        stableSortSecretRefMap(secretRefs),
+		Vaults:            stableSortVaultMap(projectReferencedVaults(secretRefs, runtime.manifest.Vaults)),
 		PublicKeys:        publicKeys,
 		RuntimeNamespaces: runtimeNamespaceList,
 		Meta: ProjectionMeta{
@@ -403,7 +404,7 @@ func bootstrappedManifestFromProjection(projection ServerProjection) authoringMa
 		Frameworks:        frameworks,
 		Namespaces:        namespaces,
 		RuntimeNamespaces: runtimeNamespaces,
-		Vaults:            map[string]vaultDefinition{},
+		Vaults:            stableSortVaultMap(projection.Vaults),
 	}
 }
 
@@ -568,6 +569,29 @@ func stableSortSecretRefMap(value map[string]SecretReference) map[string]SecretR
 	}
 	sort.Strings(keys)
 	sorted := map[string]SecretReference{}
+	for _, key := range keys {
+		sorted[key] = value[key]
+	}
+	return sorted
+}
+
+func projectReferencedVaults(secretRefs map[string]SecretReference, vaults map[string]vaultDefinition) map[string]vaultDefinition {
+	projected := map[string]vaultDefinition{}
+	for _, ref := range secretRefs {
+		if definition, ok := vaults[ref.Vault]; ok {
+			projected[ref.Vault] = definition
+		}
+	}
+	return projected
+}
+
+func stableSortVaultMap(value map[string]vaultDefinition) map[string]vaultDefinition {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	sorted := map[string]vaultDefinition{}
 	for _, key := range keys {
 		sorted[key] = value[key]
 	}

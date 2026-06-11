@@ -24,6 +24,8 @@ export default defineConfig({
       { find: '@kitsy/cnos-plugin-cli-args', replacement: fromRepoRoot('plugins/cli-args/src/index.ts') },
       { find: '@kitsy/cnos-plugin-basic-schema', replacement: fromRepoRoot('plugins/basic-schema/src/index.ts') },
       { find: '@kitsy/cnos-plugin-env-export', replacement: fromRepoRoot('plugins/env-export/src/index.ts') },
+      { find: '@kitsy/cnos-vault-testkit', replacement: fromRepoRoot('packages/vault-testkit/src/index.ts') },
+      { find: '@kitsy/cnos-vault-fake', replacement: fromRepoRoot('packages/vault-fake/src/index.ts') },
     ],
   },
   test: {

@@ -2,7 +2,7 @@ import type { ResolvedGraph } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
 import { appendAuditEvent } from './auditLog.js';
 import { SecretCache } from './secretCache.js';
-import type { SecretDescriptor, SecretReference } from './types.js';
+import type { SecretDescriptor, SecretReference, SecretVaultProviderFactory } from './types.js';
 import { createSecretVaultProvider } from './providers/registry.js';
 import { isSecretReference } from '../utils/secretStore.js';
 import { resolveVaultAuth } from './resolveAuth.js';
@@ -20,6 +20,7 @@ export async function batchResolveSecrets(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
   processEnv: Record<string, string | undefined> = process.env,
+  factories: SecretVaultProviderFactory[] = [],
 ): Promise<SecretCache> {
   const cache = new SecretCache();
   const descriptors = collectSecretDescriptors(graph);
@@ -33,7 +34,7 @@ export async function batchResolveSecrets(
 
   for (const [vaultId, refs] of grouped) {
     const definition = manifest.vaults[vaultId] ?? { provider: 'local', auth: { passphrase: { from: [] } } };
-    const provider = createSecretVaultProvider(vaultId, definition, processEnv);
+    const provider = createSecretVaultProvider(vaultId, definition, processEnv, factories);
     const auth = await resolveVaultAuth(vaultId, definition, processEnv);
     await provider.authenticate(auth);
     const resolved = await provider.batchGet(refs.map((entry) => entry.ref.ref));
