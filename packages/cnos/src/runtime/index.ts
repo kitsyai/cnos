@@ -14,6 +14,11 @@ import {
   type ResolvedGraph,
   type ResolvedEntry,
   type ServerProjection,
+  type CnosCreateOptions,
+  type RuntimeProvider,
+  type SecretReference,
+  type SecretVaultProviderFactory,
+  type VaultDefinition,
   readValue,
   requireValue,
   toEnv,
@@ -56,14 +61,21 @@ export interface CnosSingleton {
   ): ReturnType<CnosRuntime['toPublicEnv']>;
   format(message: string): string;
   log(message: string): string;
-  loadProjection(source: string): Promise<void>;
+  loadProjection(source: string, options?: CnosSingletonProjectionOptions): Promise<void>;
   registerRuntimeProvider(namespace: string, provider: Parameters<CnosRuntime['registerRuntimeProvider']>[1]): void;
   refreshSecrets(): Promise<void>;
   refreshSecret(key: LogicalKey): Promise<void>;
-  ready(): Promise<void>;
+  ready(options?: CnosCreateOptions): Promise<void>;
 }
 
 const NOT_READY_MESSAGE = 'CNOS not initialized. Call await cnos.ready() or use cnos run.';
+
+export interface CnosSingletonProjectionOptions {
+  secretVaultProviders?: SecretVaultProviderFactory[];
+}
+
+let bootstrappedProjection: ServerProjection | undefined;
+const singletonRuntimeProviders = new Map<string, RuntimeProvider>();
 
 function getRuntimeOrThrow(): CnosRuntime {
   const runtime = getSingletonRuntime();
@@ -151,6 +163,7 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
     return;
   }
 
+  bootstrappedProjection = undefined;
   const bootstrappedManifest: NormalizedManifest = {
     version: 1,
     project: {
@@ -225,6 +238,9 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
     schema: {},
   };
   const runtimeProviders = createDefaultRuntimeProviders(bootstrappedManifest, process.env);
+  for (const [namespace, provider] of singletonRuntimeProviders) {
+    registerRuntimeProvider(bootstrappedManifest, runtimeProviders, namespace, provider);
+  }
   const derivedSupport = createDerivedRuntimeSupport(graph, bootstrappedManifest, runtimeProviders);
 
   const resolveProjectedSourceKey = (key: string): string => {
@@ -301,6 +317,7 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
     },
     registerRuntimeProvider(namespace, provider) {
       registerRuntimeProvider(bootstrappedManifest, runtimeProviders, namespace, provider);
+      singletonRuntimeProviders.set(namespace, provider);
     },
     async refreshSecrets() {
       return;
@@ -317,6 +334,7 @@ function attachBootstrappedGraph(graph: ResolvedGraph): void {
 function toBootstrappedManifest(
   graph: ResolvedGraph,
   runtimeNamespaces: string[] = [],
+  vaults: ServerProjection['vaults'] = {},
 ): NormalizedManifest {
   return {
     version: 1,
@@ -382,7 +400,7 @@ function toBootstrappedManifest(
           ]),
       ),
     },
-    vaults: {},
+    vaults,
     writePolicy: {
       define: {
         defaultProfile: graph.profile,
@@ -534,15 +552,41 @@ function graphFromProjection(projection: ServerProjection): ResolvedGraph {
   };
 }
 
-function attachBootstrappedProjection(projection: ServerProjection, force = false): void {
+function vaultDefinitionFromProjection(
+  projection: ServerProjection,
+  ref: SecretReference & { envVar?: string },
+): VaultDefinition {
+  const vaultId = ref.vault ?? 'default';
+  const projected = projection.vaults?.[vaultId];
+  const mapping = {
+    ...(projected?.mapping ?? {}),
+    ...(ref.envVar ? { [ref.envVar]: ref.ref } : {}),
+  };
+
+  return {
+    provider: projected?.provider ?? ref.provider,
+    ...(projected?.auth ? { auth: projected.auth } : {}),
+    ...(Object.keys(mapping).length > 0 ? { mapping } : {}),
+  };
+}
+
+function attachBootstrappedProjection(
+  projection: ServerProjection,
+  force = false,
+  options: CnosSingletonProjectionOptions = {},
+): void {
   if (getSingletonRuntime() && !force) {
     return;
   }
 
+  bootstrappedProjection = projection;
   const graph = graphFromProjection(projection);
-  const manifest = toBootstrappedManifest(graph, projection.runtimeNamespaces);
+  const manifest = toBootstrappedManifest(graph, projection.runtimeNamespaces, projection.vaults ?? {});
   const hydratedSecrets = new Map<string, unknown>();
   const runtimeProviders = createDefaultRuntimeProviders(manifest, process.env);
+  for (const [namespace, provider] of singletonRuntimeProviders) {
+    registerRuntimeProvider(manifest, runtimeProviders, namespace, provider);
+  }
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
   const resolveProjectedSourceKey = (key: string): string => {
     if (!key.startsWith('public.')) {
@@ -576,17 +620,13 @@ function attachBootstrappedProjection(projection: ServerProjection, force = fals
       return undefined;
     }
 
-    const definition = {
-      provider: ref.provider,
-      ...(ref.envVar
-        ? {
-            mapping: {
-              [ref.envVar]: ref.ref,
-            },
-          }
-        : {}),
-    };
-    const provider = createSecretVaultProvider(ref.vault ?? 'default', definition, process.env);
+    const definition = vaultDefinitionFromProjection(projection, ref);
+    const provider = createSecretVaultProvider(
+      ref.vault ?? 'default',
+      definition,
+      process.env,
+      options.secretVaultProviders,
+    );
     const auth = await resolveVaultAuth(ref.vault ?? 'default', definition, process.env);
     await provider.authenticate(auth);
     const value = await provider.get(ref.ref);
@@ -707,6 +747,7 @@ function attachBootstrappedProjection(projection: ServerProjection, force = fals
     },
     registerRuntimeProvider(namespace, provider) {
       registerRuntimeProvider(manifest, runtimeProviders, namespace, provider);
+      singletonRuntimeProviders.set(namespace, provider);
     },
     async refreshSecrets() {
       for (const key of Object.keys(projection.secretRefs).map((segment) => `secret.${segment}`)) {
@@ -847,14 +888,15 @@ const cnos = Object.assign(
       console.log(formatted);
       return formatted;
     },
-    async loadProjection(source: string): Promise<void> {
+    async loadProjection(source: string, options: CnosSingletonProjectionOptions = {}): Promise<void> {
       const resolvedSource = path.resolve(source);
       const projection = deserializeServerProjection(readFileSync(resolvedSource, 'utf8'));
-      attachBootstrappedProjection(projection, true);
+      attachBootstrappedProjection(projection, true, options);
       setBootstrappedSecretHydrationRequired(Object.keys(projection.secretRefs).length > 0);
     },
     registerRuntimeProvider(namespace: string, provider: Parameters<CnosRuntime['registerRuntimeProvider']>[1]): void {
       getRuntimeOrThrow().registerRuntimeProvider(namespace, provider);
+      singletonRuntimeProviders.set(namespace, provider);
     },
     async refreshSecrets(): Promise<void> {
       await getRuntimeOrThrow().refreshSecrets();
@@ -863,11 +905,19 @@ const cnos = Object.assign(
     async refreshSecret(key: LogicalKey): Promise<void> {
       await getRuntimeOrThrow().refreshSecret(key);
     },
-    async ready(): Promise<void> {
+    async ready(options: CnosCreateOptions = {}): Promise<void> {
       const runtime = getSingletonRuntime();
 
       if (runtime && getBootstrappedSecretHydrationRequired()) {
-        await runtime.refreshSecrets();
+        const runtimeToHydrate =
+          bootstrappedProjection && options.secretVaultProviders
+            ? (attachBootstrappedProjection(bootstrappedProjection, true, {
+                secretVaultProviders: options.secretVaultProviders,
+              }),
+              getRuntimeOrThrow())
+            : runtime;
+
+        await runtimeToHydrate.refreshSecrets();
         setBootstrappedSecretHydrationRequired(false);
         return;
       }
@@ -883,7 +933,7 @@ const cnos = Object.assign(
         return;
       }
 
-      const readyPromise = createCnos().then((runtime) => {
+      const readyPromise = createCnos(options).then((runtime) => {
         setSingletonRuntime(runtime);
         setBootstrappedSecretHydrationRequired(false);
         return runtime;

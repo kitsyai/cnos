@@ -36,12 +36,46 @@ function shouldProjectResolvedValue(sourceId: string | undefined): boolean {
   return sourceId !== 'process-env';
 }
 
+function isSecretLikeConfigKey(key: string): boolean {
+  return /(secret|token|password|passphrase|private[_-]?key|credentials?|api[_-]?key)/i.test(key);
+}
+
+function sanitizeProjectedConfigValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeProjectedConfigValue(item));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return stableSortObject(
+    Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => !isSecretLikeConfigKey(key))
+        .map(([key, item]) => [key, sanitizeProjectedConfigValue(item)]),
+    ),
+  );
+}
+
+function sanitizeProjectedConfig(config: Record<string, unknown>): Record<string, unknown> | undefined {
+  const sanitized = sanitizeProjectedConfigValue(config);
+
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
+    return undefined;
+  }
+
+  return Object.keys(sanitized).length > 0 ? (sanitized as Record<string, unknown>) : undefined;
+}
+
 function projectVaultAuth(definition: VaultDefinition): ProjectedVaultDefinition['auth'] | undefined {
   const auth = definition.auth;
 
   if (!auth) {
     return undefined;
   }
+
+  const config = auth.config ? sanitizeProjectedConfig(auth.config) : undefined;
 
   const projected = {
     ...(auth.method ? { method: auth.method } : {}),
@@ -59,7 +93,7 @@ function projectVaultAuth(definition: VaultDefinition): ProjectedVaultDefinition
           },
         }
       : {}),
-    ...(auth.config ? { config: stableSortObject(auth.config) } : {}),
+    ...(config ? { config } : {}),
   } satisfies ProjectedVaultDefinition['auth'];
 
   return Object.keys(projected).length > 0 ? projected : undefined;

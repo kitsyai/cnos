@@ -501,9 +501,13 @@ describe('@kitsy/cnos-core', () => {
         '      token:',
         '        from:',
         '          - env:TEST_REMOTE_TOKEN',
-        '      config:',
-        '        address: https://vault.local',
-      ].join('\n'),
+      '      config:',
+      '        address: https://vault.local',
+      '        clientSecret: should-not-project',
+      '        nested:',
+      '          privateKey: should-not-project',
+      '          tenant: cnos',
+    ].join('\n'),
     );
     const loader = createFixtureLoader('remote-secret-loader', [
       {
@@ -569,6 +573,11 @@ describe('@kitsy/cnos-core', () => {
         token: 'provider-token',
         config: {
           address: 'https://vault.local',
+          clientSecret: 'should-not-project',
+          nested: {
+            privateKey: 'should-not-project',
+            tenant: 'cnos',
+          },
         },
       },
     ]);
@@ -583,6 +592,9 @@ describe('@kitsy/cnos-core', () => {
           },
           config: {
             address: 'https://vault.local',
+            nested: {
+              tenant: 'cnos',
+            },
           },
         },
       },

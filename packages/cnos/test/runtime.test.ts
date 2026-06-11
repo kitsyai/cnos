@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { SecretVaultProviderFactory, VaultAuthConfig } from '@kitsy/cnos-core';
 import { createCnos } from '../src/createCnos.js';
 import {
   CNOS_GRAPH_ENV_VAR,
@@ -90,6 +91,7 @@ beforeEach(() => {
   delete process.env[CNOS_PROJECTION_ENV_VAR];
   delete process.env.PORT;
   delete process.env.RAZORPAY_KEY_ID;
+  delete process.env.TEST_REMOTE_TOKEN;
 });
 
 afterEach(async () => {
@@ -98,9 +100,98 @@ afterEach(async () => {
   delete process.env[CNOS_PROJECTION_ENV_VAR];
   delete process.env.PORT;
   delete process.env.RAZORPAY_KEY_ID;
+  delete process.env.TEST_REMOTE_TOKEN;
   vi.resetModules();
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+function createProjectedRemoteSecretFixture(): {
+  projection: ReturnType<typeof createRemoteServerProjection>;
+  authCalls: VaultAuthConfig[];
+  getCalls: string[];
+  providerFactory: SecretVaultProviderFactory;
+} {
+  const authCalls: VaultAuthConfig[] = [];
+  const getCalls: string[] = [];
+  const providerFactory: SecretVaultProviderFactory = {
+    provider: 'test-remote',
+    create(vaultId, definition) {
+      return {
+        vaultId,
+        definition,
+        async authenticate(authConfig) {
+          authCalls.push(authConfig);
+        },
+        isAuthenticated() {
+          return authCalls.length > 0;
+        },
+        async batchGet(refs) {
+          return new Map(refs.map((ref) => [ref, `projected:${ref}`]));
+        },
+        async get(ref) {
+          getCalls.push(ref);
+          return `projected:${ref}`;
+        },
+        async set() {
+          throw new Error('test provider is read-only');
+        },
+        async delete() {
+          throw new Error('test provider is read-only');
+        },
+        async list() {
+          return ['db.password'];
+        },
+      };
+    },
+  };
+
+  return {
+    projection: createRemoteServerProjection(),
+    authCalls,
+    getCalls,
+    providerFactory,
+  };
+}
+
+function createRemoteServerProjection() {
+  return {
+    version: 1 as const,
+    workspace: 'api',
+    profile: 'stage',
+    resolvedAt: '2026-06-11T00:00:00.000Z',
+    configHash: 'hash',
+    values: {},
+    derived: {},
+    secretRefs: {
+      'db.password': {
+        provider: 'test-remote',
+        vault: 'remote-prod',
+        ref: 'db.password',
+      },
+    },
+    vaults: {
+      'remote-prod': {
+        provider: 'test-remote',
+        auth: {
+          method: 'token' as const,
+          token: {
+            from: ['env:TEST_REMOTE_TOKEN'],
+          },
+          config: {
+            address: 'https://vault.local',
+          },
+        },
+      },
+    },
+    publicKeys: [],
+    runtimeNamespaces: [],
+    meta: {
+      workspace: 'api',
+      profile: 'stage',
+      cnos_version: '1.10.0',
+    },
+  };
+}
 
 describe('@kitsy/cnos root runtime entry', () => {
   it('reads synchronously when bootstrapped from __CNOS_GRAPH__', async () => {
@@ -234,5 +325,71 @@ describe('@kitsy/cnos root runtime entry', () => {
     await cnos.ready();
     expect(cnos.secret('subscriptions.razorpay.key_id')).toBe('rzp_stage_live_key');
     delete process.env.RAZORPAY_KEY_ID;
+  });
+
+  it('hydrates projected remote vaults through ready() provider registration', async () => {
+    const { projection, authCalls, getCalls, providerFactory } = createProjectedRemoteSecretFixture();
+    process.env.TEST_REMOTE_TOKEN = 'projected-token';
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await cnos.ready({ secretVaultProviders: [providerFactory] });
+
+    expect(cnos.secret('db.password')).toBe('projected:db.password');
+    expect(authCalls).toEqual([
+      {
+        method: 'token',
+        token: 'projected-token',
+        config: {
+          address: 'https://vault.local',
+        },
+      },
+    ]);
+    expect(getCalls).toEqual(['db.password']);
+  });
+
+  it('hydrates loaded server projections with custom provider factories', async () => {
+    const { projection, providerFactory } = createProjectedRemoteSecretFixture();
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-load-projection-'));
+    fixtureRoots.push(root);
+    const projectionPath = path.join(root, '.cnos-server.json');
+    process.env.TEST_REMOTE_TOKEN = 'projected-token';
+    vi.resetModules();
+    await writeFile(projectionPath, serializeServerProjection(projection), 'utf8');
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await cnos.loadProjection(projectionPath, { secretVaultProviders: [providerFactory] });
+    await cnos.ready();
+
+    expect(cnos.secret('db.password')).toBe('projected:db.password');
+  });
+
+  it('preserves registered runtime providers when ready() reattaches projected vault factories', async () => {
+    const { projection: baseProjection, providerFactory } = createProjectedRemoteSecretFixture();
+    const projection = {
+      ...baseProjection,
+      derived: {
+        'value.currentTenant': {
+          expr: 'request.tenant',
+          deps: [],
+          runtimeRefs: ['request.tenant'],
+        },
+      },
+      runtimeNamespaces: ['request'],
+    };
+    process.env.TEST_REMOTE_TOKEN = 'projected-token';
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    cnos.registerRuntimeProvider('request', (path) => (path === 'tenant' ? 'acme' : undefined));
+    await cnos.ready({ secretVaultProviders: [providerFactory] });
+
+    expect(cnos.value('currentTenant')).toBe('acme');
+    expect(cnos.secret('db.password')).toBe('projected:db.password');
   });
 });
