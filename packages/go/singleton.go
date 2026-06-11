@@ -34,18 +34,22 @@ func DefaultRuntime() (*Runtime, error) {
 }
 
 func Ready(options ...Options) error {
+	loadOptions := Options{}
+	if len(options) > 0 {
+		loadOptions = options[0]
+	}
+
 	defaultRuntimeMu.Lock()
 	runtime := defaultRuntime
 	defaultRuntimeMu.Unlock()
 
 	if runtime != nil {
+		if len(loadOptions.SecretVaultProviders) > 0 {
+			runtime.RegisterSecretVaultProviders(loadOptions.SecretVaultProviders...)
+		}
 		return runtime.warmSecrets()
 	}
 
-	loadOptions := Options{}
-	if len(options) > 0 {
-		loadOptions = options[0]
-	}
 	loaded, err := Load(loadOptions)
 	if err != nil {
 		return err
@@ -185,6 +189,16 @@ func RegisterRuntimeProvider(namespace string, provider RuntimeProvider) error {
 	return runtime.RegisterRuntimeProvider(namespace, provider)
 }
 
+// RegisterSecretVaultProviders adds remote secret vault provider factories to the default runtime.
+func RegisterSecretVaultProviders(factories ...SecretVaultProviderFactory) error {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return err
+	}
+	runtime.RegisterSecretVaultProviders(factories...)
+	return nil
+}
+
 func RefreshSecrets() error {
 	runtime, err := DefaultRuntime()
 	if err != nil {
@@ -225,7 +239,7 @@ func bootstrapDefaultRuntime() {
 	}
 
 	if serialized, ok := env.Get(GraphEnvVar); ok && serialized != "" {
-		runtime, err := newRuntimeFromGraph([]byte(serialized), env, secretHome)
+		runtime, err := newRuntimeFromGraph([]byte(serialized), env, secretHome, nil)
 		if err == nil {
 			defaultRuntime = runtime
 		}
@@ -233,7 +247,7 @@ func bootstrapDefaultRuntime() {
 	}
 
 	if serialized, ok := env.Get(ProjectionEnvVar); ok && serialized != "" {
-		runtime, err := newRuntime([]byte(serialized), env, secretHome)
+		runtime, err := newRuntime([]byte(serialized), env, secretHome, nil)
 		if err == nil {
 			defaultRuntime = runtime
 		}
@@ -249,7 +263,7 @@ func bootstrapDefaultRuntime() {
 	if err != nil {
 		return
 	}
-	runtime, err := newRuntime(source, env, secretHome)
+	runtime, err := newRuntime(source, env, secretHome, nil)
 	if err == nil {
 		defaultRuntime = runtime
 	}

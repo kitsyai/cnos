@@ -12,18 +12,19 @@ import (
 type RuntimeProvider func(path string) any
 
 type Options struct {
-	ProjectionPath  string
-	ProjectionData  []byte
-	Root            string
-	Workspace       string
-	Profile         string
-	GlobalRoot      string
-	CacheMode       string
-	CacheTTLSeconds int
-	ForceRefresh    bool
-	WorkingDir      string
-	Environment     map[string]string
-	SecretHome      string
+	ProjectionPath       string
+	ProjectionData       []byte
+	Root                 string
+	Workspace            string
+	Profile              string
+	GlobalRoot           string
+	CacheMode            string
+	CacheTTLSeconds      int
+	ForceRefresh         bool
+	WorkingDir           string
+	Environment          map[string]string
+	SecretHome           string
+	SecretVaultProviders []SecretVaultProviderFactory
 }
 
 type Runtime struct {
@@ -43,6 +44,7 @@ type Runtime struct {
 	localVaultCache   map[string]map[string]string
 	logicalKeyToVault map[string]string
 	vaults            map[string]vaultDefinition
+	secretFactories   map[string]SecretVaultProviderFactory
 }
 
 type runtimeProvenance struct {
@@ -76,7 +78,7 @@ func Load(options Options) (*Runtime, error) {
 
 	switch {
 	case len(options.ProjectionData) > 0:
-		return newRuntime(options.ProjectionData, env, secretHome)
+		return newRuntime(options.ProjectionData, env, secretHome, options.SecretVaultProviders)
 	case options.ProjectionPath != "":
 		projectionPath, err := resolvePathFromWorkingDir(options.WorkingDir, options.ProjectionPath)
 		if err != nil {
@@ -86,15 +88,15 @@ func Load(options Options) (*Runtime, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cnos: read projection file %s: %w", projectionPath, err)
 		}
-		return newRuntime(bytes, env, secretHome)
+		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
 	}
 
 	if serialized, ok := env.Get(GraphEnvVar); ok && serialized != "" {
-		return newRuntimeFromGraph([]byte(serialized), env, secretHome)
+		return newRuntimeFromGraph([]byte(serialized), env, secretHome, options.SecretVaultProviders)
 	}
 
 	if serialized, ok := env.Get(ProjectionEnvVar); ok && serialized != "" {
-		return newRuntime([]byte(serialized), env, secretHome)
+		return newRuntime([]byte(serialized), env, secretHome, options.SecretVaultProviders)
 	}
 
 	projectionPath, err := findProjectionPath(options.WorkingDir)
@@ -106,7 +108,7 @@ func Load(options Options) (*Runtime, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cnos: read projection file %s: %w", projectionPath, err)
 		}
-		return newRuntime(bytes, env, secretHome)
+		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
 	}
 
 	return loadAuthoringRuntime(options, env, secretHome)
@@ -169,6 +171,16 @@ func (runtime *Runtime) RegisterRuntimeProvider(namespace string, provider Runti
 	return nil
 }
 
+// RegisterSecretVaultProviders adds remote secret vault provider factories to this runtime.
+func (runtime *Runtime) RegisterSecretVaultProviders(factories ...SecretVaultProviderFactory) {
+	if runtime.secretFactories == nil {
+		runtime.secretFactories = map[string]SecretVaultProviderFactory{}
+	}
+	for provider, factory := range secretVaultFactoryMap(factories) {
+		runtime.secretFactories[provider] = factory
+	}
+}
+
 func (runtime *Runtime) RefreshSecrets() {
 	runtime.hydratedSecrets = map[string]any{}
 	runtime.localVaultCache = map[string]map[string]string{}
@@ -186,7 +198,7 @@ func (runtime *Runtime) RefreshSecret(path string) {
 	}
 }
 
-func newRuntime(source []byte, env environment, secretHome string) (*Runtime, error) {
+func newRuntime(source []byte, env environment, secretHome string, factories []SecretVaultProviderFactory) (*Runtime, error) {
 	projection, err := ParseProjection(source)
 	if err != nil {
 		return nil, err
@@ -197,9 +209,10 @@ func newRuntime(source []byte, env environment, secretHome string) (*Runtime, er
 		return nil, err
 	}
 
+	manifest := bootstrappedManifestFromProjection(projection)
 	runtime := &Runtime{
 		projection:        projection,
-		manifest:          bootstrappedManifestFromProjection(projection),
+		manifest:          manifest,
 		profileSource:     "manifest-default",
 		workspaceState:    newImplicitWorkspaceState(projection.Workspace),
 		env:               env,
@@ -212,7 +225,8 @@ func newRuntime(source []byte, env environment, secretHome string) (*Runtime, er
 		hydratedSecrets:   map[string]any{},
 		localVaultCache:   map[string]map[string]string{},
 		logicalKeyToVault: map[string]string{},
-		vaults:            map[string]vaultDefinition{},
+		vaults:            manifest.Vaults,
+		secretFactories:   secretVaultFactoryMap(factories),
 	}
 
 	if err := runtime.populateEntries(); err != nil {
@@ -225,7 +239,7 @@ func newRuntime(source []byte, env environment, secretHome string) (*Runtime, er
 	return runtime, nil
 }
 
-func newRuntimeFromGraph(source []byte, env environment, secretHome string) (*Runtime, error) {
+func newRuntimeFromGraph(source []byte, env environment, secretHome string, factories []SecretVaultProviderFactory) (*Runtime, error) {
 	graph, err := ParseRuntimeGraph(source)
 	if err != nil {
 		return nil, err
@@ -236,8 +250,9 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string) (*Ru
 		return nil, err
 	}
 
+	manifest := bootstrappedManifestFromGraph(graph)
 	runtime := &Runtime{
-		manifest:          bootstrappedManifestFromGraph(graph),
+		manifest:          manifest,
 		profileSource:     graph.ProfileSource,
 		workspaceState:    inspectWorkspaceState{ID: graph.Workspace.WorkspaceID, Source: graph.Workspace.WorkspaceSource, Chain: append([]string(nil), graph.Workspace.WorkspaceChain...)},
 		graphBootstrapped: true,
@@ -251,7 +266,8 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string) (*Ru
 		hydratedSecrets:   map[string]any{},
 		localVaultCache:   map[string]map[string]string{},
 		logicalKeyToVault: map[string]string{},
-		vaults:            map[string]vaultDefinition{},
+		vaults:            manifest.Vaults,
+		secretFactories:   secretVaultFactoryMap(factories),
 	}
 
 	for _, resolved := range graph.Entries {
@@ -501,7 +517,13 @@ func (runtime *Runtime) readSecret(key string, ref SecretReference) (any, bool, 
 		return value, true, nil
 	}
 
-	switch ref.Provider {
+	definition := runtime.secretVaultDefinition(ref)
+	provider := definition.Provider
+	if provider == "" {
+		provider = ref.Provider
+	}
+
+	switch provider {
 	case "environment", "github-secrets":
 		value := runtime.readEnvironmentSecret(ref)
 		runtime.hydratedSecrets[key] = value
@@ -519,8 +541,79 @@ func (runtime *Runtime) readSecret(key string, ref SecretReference) (any, bool, 
 		runtime.hydratedSecrets[key] = value
 		return value, true, nil
 	default:
-		return nil, true, fmt.Errorf("cnos: unsupported vault provider: %s", ref.Provider)
+		if _, ok := runtime.secretFactories[provider]; !ok {
+			return nil, true, fmt.Errorf("cnos: unsupported vault provider: %s", provider)
+		}
+		if err := runtime.hydrateCustomVault(ref.Vault, definition); err != nil {
+			return nil, true, err
+		}
+		return runtime.hydratedSecrets[key], true, nil
 	}
+}
+
+func (runtime *Runtime) secretVaultDefinition(ref SecretReference) vaultDefinition {
+	if definition, ok := runtime.vaults[ref.Vault]; ok {
+		if definition.Provider == "" {
+			definition.Provider = ref.Provider
+		}
+		return definition
+	}
+	return vaultDefinition{
+		Provider: ref.Provider,
+		Auth: vaultAuthFile{
+			Method: defaultVaultMethod(ref.Provider),
+		},
+		Mapping: map[string]string{},
+	}
+}
+
+func (runtime *Runtime) hydrateCustomVault(vaultID string, definition vaultDefinition) error {
+	factory, ok := runtime.secretFactories[definition.Provider]
+	if !ok {
+		return fmt.Errorf("cnos: unsupported vault provider: %s", definition.Provider)
+	}
+
+	refsByLogicalKey := map[string]string{}
+	refs := []string{}
+	seen := map[string]bool{}
+	for key, entry := range runtime.entries {
+		if entry == nil || entry.secretRef == nil || entry.secretRef.Vault != vaultID {
+			continue
+		}
+		entryDefinition := runtime.secretVaultDefinition(*entry.secretRef)
+		if entryDefinition.Provider != definition.Provider {
+			continue
+		}
+		refsByLogicalKey[key] = entry.secretRef.Ref
+		if !seen[entry.secretRef.Ref] {
+			seen[entry.secretRef.Ref] = true
+			refs = append(refs, entry.secretRef.Ref)
+		}
+	}
+	sort.Strings(refs)
+
+	provider, err := factory.Create(vaultID, vaultDefinitionForProvider(definition))
+	if err != nil {
+		return fmt.Errorf("cnos: create vault provider %q for vault %q: %w", definition.Provider, vaultID, err)
+	}
+	if provider == nil {
+		return fmt.Errorf("cnos: create vault provider %q for vault %q returned nil", definition.Provider, vaultID)
+	}
+	auth, err := resolveVaultAuth(vaultID, definition, runtime.env)
+	if err != nil {
+		return err
+	}
+	if err := provider.Authenticate(auth); err != nil {
+		return fmt.Errorf("cnos: authenticate vault %q with provider %q: %w", vaultID, definition.Provider, err)
+	}
+	values, err := provider.BatchGet(refs)
+	if err != nil {
+		return fmt.Errorf("cnos: batch get secrets from vault %q with provider %q: %w", vaultID, definition.Provider, err)
+	}
+	for key, ref := range refsByLogicalKey {
+		runtime.hydratedSecrets[key] = values[ref]
+	}
+	return nil
 }
 
 func (runtime *Runtime) readEnvironmentSecret(ref SecretReference) any {

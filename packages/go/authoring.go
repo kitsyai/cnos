@@ -303,6 +303,7 @@ func loadAuthoringRuntime(options Options, env environment, secretHome string) (
 		localVaultCache:   map[string]map[string]string{},
 		logicalKeyToVault: map[string]string{},
 		vaults:            manifest.Vaults,
+		secretFactories:   secretVaultFactoryMap(options.SecretVaultProviders),
 		projection: ServerProjection{
 			Version:    1,
 			Workspace:  workspace.WorkspaceID,
