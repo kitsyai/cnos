@@ -337,6 +337,9 @@ vaults:
           - env:TEST_REMOTE_TOKEN
       config:
         address: https://vault.local
+        vaultUrl: https://cnos-test.vault.azure.net
+        tenantId: tenant-id
+        clientId: client-id
         clientSecret: should-not-project
         nested:
           privateKey: should-not-project
@@ -350,6 +353,9 @@ vaults:
               - env:FALLBACK_REMOTE_TOKEN
           config:
             endpoint: https://fallback.local
+            vaultUrl: https://fallback.vault.azure.net
+            tenantId: fallback-tenant
+            clientId: fallback-client
             authorization: bearer should-not-project
             nested:
               privateKey: should-not-project
@@ -387,6 +393,11 @@ db:
 	if projected.Auth.Config["address"] != "https://vault.local" {
 		t.Fatalf("expected address to be projected, got %#v", projected.Auth.Config)
 	}
+	if projected.Auth.Config["vaultUrl"] != "https://cnos-test.vault.azure.net" ||
+		projected.Auth.Config["tenantId"] != "tenant-id" ||
+		projected.Auth.Config["clientId"] != "client-id" {
+		t.Fatalf("expected Azure-safe config keys to be projected, got %#v", projected.Auth.Config)
+	}
 	if len(projected.Fallback) != 1 {
 		t.Fatalf("expected one fallback vault, got %#v", projected.Fallback)
 	}
@@ -400,6 +411,11 @@ db:
 	}
 	if fallback.Auth.Config["endpoint"] != "https://fallback.local" {
 		t.Fatalf("expected endpoint to be projected, got %#v", fallback.Auth.Config)
+	}
+	if fallback.Auth.Config["vaultUrl"] != "https://fallback.vault.azure.net" ||
+		fallback.Auth.Config["tenantId"] != "fallback-tenant" ||
+		fallback.Auth.Config["clientId"] != "fallback-client" {
+		t.Fatalf("expected fallback Azure-safe config keys to be projected, got %#v", fallback.Auth.Config)
 	}
 }
 

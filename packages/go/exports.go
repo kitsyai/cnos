@@ -636,6 +636,7 @@ func cloneVaultAuthSource(source *vaultAuthSourceFile) *vaultAuthSourceFile {
 var safeProjectedConfigKeys = map[string]struct{}{
 	"address":             {},
 	"audience":            {},
+	"clientid":            {},
 	"endpoint":            {},
 	"mount":               {},
 	"namespace":           {},
@@ -646,8 +647,10 @@ var safeProjectedConfigKeys = map[string]struct{}{
 	"scopes":              {},
 	"serviceaccountemail": {},
 	"tenant":              {},
+	"tenantid":            {},
 	"url":                 {},
 	"version":             {},
+	"vaulturl":            {},
 }
 
 func sanitizeProjectedConfig(config map[string]any) map[string]any {

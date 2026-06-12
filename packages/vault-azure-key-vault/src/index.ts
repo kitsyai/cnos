@@ -36,6 +36,7 @@ export interface AzureKeyVaultProviderOptions {
 
 interface AzureSecretRef {
   name: string;
+  origin?: string;
   version?: string;
 }
 
@@ -89,6 +90,7 @@ function parseAzureSecretUrl(ref: string): AzureSecretRef | undefined {
 
     return {
       name: decodeURIComponent(segments[1]),
+      origin: url.origin,
       ...(segments[2] ? { version: decodeURIComponent(segments[2]) } : {}),
     };
   } catch {
@@ -155,6 +157,10 @@ class AzureKeyVaultProvider implements RemoteSecretVaultProvider {
     return this.config.vaultUrl;
   }
 
+  private configuredVaultOrigin(): string {
+    return new URL(this.requireVaultUrl()).origin;
+  }
+
   private externalSecretIdForRef(ref: string): string {
     return Object.entries(this.definition.mapping ?? {}).find(([, logicalRef]) => logicalRef === ref)?.[0] ?? ref;
   }
@@ -168,6 +174,12 @@ class AzureKeyVaultProvider implements RemoteSecretVaultProvider {
     const parsed = parseAzureSecretUrl(external);
 
     if (parsed) {
+      if (parsed.origin !== this.configuredVaultOrigin()) {
+        throw new Error(
+          `Azure Key Vault ref "${external}" does not match configured vaultUrl "${this.requireVaultUrl()}".`,
+        );
+      }
+
       return parsed;
     }
 

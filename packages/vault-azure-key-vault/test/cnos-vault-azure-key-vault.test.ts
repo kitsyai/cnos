@@ -191,6 +191,24 @@ describe('azure-key-vault request construction', () => {
     ]);
   });
 
+  it('rejects full Azure secret URLs from a different vault origin', async () => {
+    const { factory } = createFactory();
+    const provider = factory.create('azure-prod', {
+      provider: AZURE_KEY_VAULT_PROVIDER,
+      auth: {
+        method: 'iam',
+        config: {
+          vaultUrl,
+        },
+      },
+    });
+
+    await provider.authenticate({ method: 'iam', config: { vaultUrl } });
+    await expect(
+      provider.get('https://other-vault.vault.azure.net/secrets/db-password/version-2'),
+    ).rejects.toThrow('does not match configured vaultUrl');
+  });
+
   it('lists mapped refs without remote listing and remote refs without mapping', async () => {
     const mapped = createFactory();
     const mappedProvider = mapped.factory.create('azure-mapped', {
