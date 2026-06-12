@@ -108,3 +108,31 @@ defineSecretVaultRuntimeConformanceSuite('gcp-secret-manager', () => ({
 ```
 
 The shared suite verifies provider auth, batch reads, missing refs, runtime startup hydration, projection bootstrap, refresh batching, safe projection metadata, and explicit environment fallback behavior.
+
+## Google Secret Manager
+
+Install and register the compiled-in provider:
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp-secret-manager';
+
+cnos.registerSecretVaultProvider(createGcpSecretManagerVaultProvider());
+await cnos.ready();
+```
+
+Use `auth.method: iam` and let the official Google SDK resolve Application Default Credentials or an attached service account:
+
+```yaml
+vaults:
+  prod-gcp:
+    provider: gcp-secret-manager
+    auth:
+      method: iam
+      config:
+        projectId: acme-prod
+    mapping:
+      db-password: db.password
+```
+
+CNOS resolves `secret.db.password` from `projects/acme-prod/secrets/db-password/versions/latest`. Set `auth.config.version` to read a pinned version, or `auth.config.location` for regional Secret Manager resources. A full ref such as `projects/acme-prod/secrets/db-password/versions/5` is also accepted.

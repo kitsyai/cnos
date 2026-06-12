@@ -74,6 +74,9 @@
       ],
       "@kitsy/cnos-vault-fake": [
         "packages/vault-fake/src/index.ts"
+      ],
+      "@kitsy/cnos-vault-gcp-secret-manager": [
+        "packages/vault-gcp-secret-manager/src/index.ts"
       ]
     }
   }
