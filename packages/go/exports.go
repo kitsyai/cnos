@@ -578,14 +578,122 @@ func stableSortSecretRefMap(value map[string]SecretReference) map[string]SecretR
 	return sorted
 }
 
+func stableSortStringMap(value map[string]string) map[string]string {
+	if len(value) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	sorted := map[string]string{}
+	for _, key := range keys {
+		sorted[key] = value[key]
+	}
+	return sorted
+}
+
 func projectReferencedVaults(secretRefs map[string]SecretReference, vaults map[string]vaultDefinition) map[string]vaultDefinition {
 	projected := map[string]vaultDefinition{}
 	for _, ref := range secretRefs {
 		if definition, ok := vaults[ref.Vault]; ok {
-			projected[ref.Vault] = definition
+			projected[ref.Vault] = projectVaultDefinition(definition)
 		}
 	}
 	return projected
+}
+
+func projectVaultDefinition(definition vaultDefinition) vaultDefinition {
+	projected := vaultDefinition{
+		Provider: definition.Provider,
+		Mapping:  stableSortStringMap(definition.Mapping),
+	}
+
+	projected.Auth = projectVaultAuth(definition.Auth)
+	for _, fallback := range definition.Fallback {
+		projected.Fallback = append(projected.Fallback, projectVaultDefinition(fallback))
+	}
+	return projected
+}
+
+func projectVaultAuth(auth vaultAuthFile) vaultAuthFile {
+	return vaultAuthFile{
+		Method:     auth.Method,
+		Passphrase: cloneVaultAuthSource(auth.Passphrase),
+		Token:      cloneVaultAuthSource(auth.Token),
+		Config:     sanitizeProjectedConfig(auth.Config),
+	}
+}
+
+func cloneVaultAuthSource(source *vaultAuthSourceFile) *vaultAuthSourceFile {
+	if source == nil {
+		return nil
+	}
+	return &vaultAuthSourceFile{From: append([]string(nil), source.From...)}
+}
+
+var safeProjectedConfigKeys = map[string]struct{}{
+	"address":             {},
+	"audience":            {},
+	"endpoint":            {},
+	"mount":               {},
+	"namespace":           {},
+	"path":                {},
+	"projectid":           {},
+	"region":              {},
+	"scope":               {},
+	"scopes":              {},
+	"serviceaccountemail": {},
+	"tenant":              {},
+	"url":                 {},
+	"version":             {},
+}
+
+func sanitizeProjectedConfig(config map[string]any) map[string]any {
+	sanitized, ok := sanitizeProjectedConfigValue(config).(map[string]any)
+	if !ok || len(sanitized) == 0 {
+		return nil
+	}
+	return sanitized
+}
+
+func sanitizeProjectedConfigValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		output := map[string]any{}
+		for key, item := range typed {
+			sanitized := sanitizeProjectedConfigValue(item)
+			if nested, ok := sanitized.(map[string]any); ok {
+				if len(nested) > 0 {
+					output[key] = nested
+				}
+				continue
+			}
+			if _, ok := safeProjectedConfigKeys[normalizeProjectedConfigKey(key)]; ok {
+				output[key] = sanitized
+			}
+		}
+		return stableSortAnyMap(output)
+	case []any:
+		items := make([]any, len(typed))
+		for index, item := range typed {
+			items[index] = sanitizeProjectedConfigValue(item)
+		}
+		return items
+	default:
+		return value
+	}
+}
+
+func normalizeProjectedConfigKey(key string) string {
+	var builder strings.Builder
+	for _, char := range key {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
+			builder.WriteRune(char)
+		}
+	}
+	return strings.ToLower(builder.String())
 }
 
 func stableSortVaultMap(value map[string]vaultDefinition) map[string]vaultDefinition {

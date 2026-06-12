@@ -141,5 +141,11 @@ export function resolveSecretEntryValue(
   }
 
   const vaultId = value.vault ?? 'default';
-  return cache.get(vaultId, value.ref) ?? value;
+  const resolved = cache.get(vaultId, value.ref);
+
+  if (resolved !== undefined || cache.isVaultAuthenticated(vaultId)) {
+    return resolved;
+  }
+
+  return value;
 }

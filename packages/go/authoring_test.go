@@ -317,6 +317,92 @@ app:
 	}
 }
 
+func TestAuthoringProjectionSanitizesVaultAuthConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeAuthoringFile(t, filepath.Join(root, "cnos", "cnos.yml"), []byte(`
+version: 1
+project:
+  name: cnos-go-vault-sanitize
+profiles:
+  default: local
+vaults:
+  remote-prod:
+    provider: test-remote
+    auth:
+      method: token
+      token:
+        from:
+          - env:TEST_REMOTE_TOKEN
+      config:
+        address: https://vault.local
+        clientSecret: should-not-project
+        nested:
+          privateKey: should-not-project
+          tenant: cnos
+    fallback:
+      - provider: fallback-remote
+        auth:
+          method: token
+          token:
+            from:
+              - env:FALLBACK_REMOTE_TOKEN
+          config:
+            endpoint: https://fallback.local
+            authorization: bearer should-not-project
+            nested:
+              privateKey: should-not-project
+              tenant: fallback
+`))
+	writeAuthoringFile(t, filepath.Join(root, "cnos", "secrets", "local", "db.yml"), []byte(`
+db:
+  password:
+    vault: remote-prod
+    ref: db.password
+`))
+
+	runtime, err := Load(Options{
+		Root:        root,
+		Environment: map[string]string{},
+		SecretHome:  t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("load authoring runtime: %v", err)
+	}
+
+	projection, err := runtime.ToServerProjection()
+	if err != nil {
+		t.Fatalf("build server projection: %v", err)
+	}
+
+	projected := projection.Vaults["remote-prod"]
+	if projected.Auth.Config["clientSecret"] != nil {
+		t.Fatalf("expected clientSecret to be stripped, got %#v", projected.Auth.Config)
+	}
+	nested, ok := projected.Auth.Config["nested"].(map[string]any)
+	if !ok || nested["tenant"] != "cnos" || nested["privateKey"] != nil {
+		t.Fatalf("expected sanitized nested config, got %#v", projected.Auth.Config)
+	}
+	if projected.Auth.Config["address"] != "https://vault.local" {
+		t.Fatalf("expected address to be projected, got %#v", projected.Auth.Config)
+	}
+	if len(projected.Fallback) != 1 {
+		t.Fatalf("expected one fallback vault, got %#v", projected.Fallback)
+	}
+	fallback := projected.Fallback[0]
+	if fallback.Auth.Config["authorization"] != nil {
+		t.Fatalf("expected fallback authorization to be stripped, got %#v", fallback.Auth.Config)
+	}
+	fallbackNested, ok := fallback.Auth.Config["nested"].(map[string]any)
+	if !ok || fallbackNested["tenant"] != "fallback" || fallbackNested["privateKey"] != nil {
+		t.Fatalf("expected sanitized fallback nested config, got %#v", fallback.Auth.Config)
+	}
+	if fallback.Auth.Config["endpoint"] != "https://fallback.local" {
+		t.Fatalf("expected endpoint to be projected, got %#v", fallback.Auth.Config)
+	}
+}
+
 func TestLoadAuthoringLayersGlobalAndLocalWorkspaceRoots(t *testing.T) {
 	t.Parallel()
 

@@ -18,6 +18,24 @@ export class SecretCache {
     return this.cache.get(`${vaultId}:${ref}`);
   }
 
+  delete(vaultId: string, ref: string): void {
+    this.cache.delete(`${vaultId}:${ref}`);
+  }
+
+  entriesForVault(vaultId: string): Map<string, string> {
+    const entries = new Map<string, string>();
+
+    for (const [key, value] of this.cache) {
+      const prefix = `${vaultId}:`;
+
+      if (key.startsWith(prefix)) {
+        entries.set(key.slice(prefix.length), value);
+      }
+    }
+
+    return entries;
+  }
+
   clear(vaultId?: string): void {
     if (!vaultId) {
       this.cache.clear();

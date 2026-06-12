@@ -2,7 +2,7 @@ import type { CnosPlugin } from '../types/plugin.js';
 import type { CnosRuntime, ResolvedGraph } from '../types/core.js';
 import type { NormalizedManifest } from '../types/manifest.js';
 import type { SecretVaultProviderFactory } from '../secrets/types.js';
-import { resolveSecretEntryValue } from '../secrets/batchResolve.js';
+import { batchResolveSecrets, resolveSecretEntryValue } from '../secrets/batchResolve.js';
 import type { SecretCache } from '../secrets/secretCache.js';
 import { createDerivedRuntimeSupport, registerRuntimeProvider } from '../derive/runtime.js';
 import { inspectValue } from '../runtime/inspect.js';
@@ -14,8 +14,6 @@ import { toEnv } from '../runtime/toEnv.js';
 import { toPublicEnv } from '../runtime/toPublicEnv.js';
 import { toLogicalKey } from '../utils/path.js';
 import { isSecretReference } from '../utils/secretStore.js';
-import { createSecretVaultProvider } from '../secrets/providers/registry.js';
-import { resolveVaultAuth } from '../secrets/resolveAuth.js';
 
 export function createRuntime(
   manifest: NormalizedManifest,
@@ -28,6 +26,7 @@ export function createRuntime(
 ): CnosRuntime {
   const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
+  let activeSecretCache = secretCache;
 
   function resolveProjectedSourceKey(key: string): string {
     if (!key.startsWith('public.')) {
@@ -51,60 +50,36 @@ export function createRuntime(
       return;
     }
 
-    if (!secretCache) {
+    if (!activeSecretCache) {
       return;
     }
 
     const vaultId = entry.value.vault ?? 'default';
-    const baseDefinition = manifest.vaults[vaultId] ?? {
-      provider: entry.value.provider ?? 'local',
-      auth: { passphrase: { from: [] } },
-    };
-    const definition = entry.value.provider && entry.value.provider !== baseDefinition.provider
-      ? { ...baseDefinition, provider: entry.value.provider }
-      : baseDefinition;
-    const definitions = [definition, ...(definition.fallback ?? [])];
-    let lastError: unknown;
-
-    for (const candidate of definitions) {
-      const runtimeDefinition = {
-        provider: candidate.provider,
-        ...(candidate.auth ? { auth: candidate.auth } : {}),
-        ...(candidate.mapping ? { mapping: candidate.mapping } : {}),
-      };
-
-      try {
-        const provider = createSecretVaultProvider(vaultId, runtimeDefinition, processEnv, secretVaultProviders);
-        const auth = await resolveVaultAuth(vaultId, runtimeDefinition, processEnv);
-        await provider.authenticate(auth);
-        const value = await provider.get(entry.value.ref);
-
-        if (value !== undefined) {
-          secretCache.load(vaultId, new Map([[entry.value.ref, value]]));
-          return;
-        }
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    if (lastError) {
-      throw lastError;
-    }
+    activeSecretCache.delete(vaultId, entry.value.ref);
+    const refreshed = await batchResolveSecrets(
+      {
+        ...graph,
+        entries: new Map([[key, entry]]),
+      },
+      manifest,
+      processEnv,
+      secretVaultProviders,
+    );
+    activeSecretCache.load(vaultId, refreshed.entriesForVault(vaultId));
   }
 
   async function refreshAllSecrets(): Promise<void> {
-    if (!secretCache) {
+    if (!activeSecretCache) {
       return;
     }
 
-    const secretKeys = Array.from(graph.entries.values())
-      .filter((entry) => entry.namespace === 'secret' && isSecretReference(entry.value))
-      .map((entry) => entry.key);
-
-    for (const key of secretKeys) {
-      await refreshSecretEntry(key);
-    }
+    activeSecretCache.clear();
+    activeSecretCache = await batchResolveSecrets(
+      graph,
+      manifest,
+      processEnv,
+      secretVaultProviders,
+    );
   }
 
   function readLogicalKey<T = unknown>(key: string): T | undefined {
@@ -115,11 +90,11 @@ export function createRuntime(
         return undefined;
       }
 
-      if (!secretCache) {
+      if (!activeSecretCache) {
         return entry.value;
       }
 
-      return resolveSecretEntryValue(ref, entry.value, secretCache);
+      return resolveSecretEntryValue(ref, entry.value, activeSecretCache);
     });
 
     if (resolved !== undefined || graph.entries.has(key) || manifest.runtimeNamespaces[key.split('.')[0] ?? '']) {
@@ -132,11 +107,11 @@ export function createRuntime(
       return undefined;
     }
 
-    if (!secretCache) {
+    if (!activeSecretCache) {
       return entry.value as T | undefined;
     }
 
-    return resolveSecretEntryValue(key, entry.value, secretCache) as T | undefined;
+    return resolveSecretEntryValue(key, entry.value, activeSecretCache) as T | undefined;
   }
 
   return {
@@ -178,11 +153,11 @@ export function createRuntime(
             return undefined;
           }
 
-          if (!secretCache) {
+          if (!activeSecretCache) {
             return entry.value;
           }
 
-          return resolveSecretEntryValue(candidate, entry.value, secretCache);
+          return resolveSecretEntryValue(candidate, entry.value, activeSecretCache);
         }),
       });
     },

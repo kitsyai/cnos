@@ -605,6 +605,108 @@ describe('@kitsy/cnos-core', () => {
     });
   });
 
+  it('refreshes remote secrets with batchGet and clears stale missing values', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: custom-vault-refresh',
+        'vaults:',
+        '  remote-prod:',
+        '    provider: test-remote',
+        '    auth:',
+        '      method: environment',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('refresh-secret-loader', [
+      {
+        key: 'secret.db.password',
+        value: {
+          ref: 'db.password',
+          vault: 'remote-prod',
+        },
+        namespace: 'secret',
+        sourceId: 'filesystem-secrets',
+        pluginId: '@kitsy/cnos/plugins/filesystem-secrets',
+        workspaceId: 'default',
+      },
+      {
+        key: 'secret.api.token',
+        value: {
+          ref: 'api.token',
+          vault: 'remote-prod',
+        },
+        namespace: 'secret',
+        sourceId: 'filesystem-secrets',
+        pluginId: '@kitsy/cnos/plugins/filesystem-secrets',
+        workspaceId: 'default',
+      },
+    ]);
+    const batchCalls: string[][] = [];
+    const getCalls: string[] = [];
+    const values = new Map<string, string>([
+      ['db.password', 'initial-password'],
+      ['api.token', 'initial-token'],
+    ]);
+    const providerFactory: SecretVaultProviderFactory = {
+      provider: 'test-remote',
+      create(vaultId, definition) {
+        return {
+          vaultId,
+          definition,
+          async authenticate() {},
+          isAuthenticated() {
+            return true;
+          },
+          async batchGet(refs) {
+            batchCalls.push([...refs]);
+            return new Map(refs.flatMap((ref) => {
+              const value = values.get(ref);
+              return value === undefined ? [] : [[ref, value]];
+            }));
+          },
+          async get(ref) {
+            getCalls.push(ref);
+            return values.get(ref);
+          },
+          async set() {
+            throw new Error('test provider is read-only');
+          },
+          async delete() {
+            throw new Error('test provider is read-only');
+          },
+          async list() {
+            return [...values.keys()];
+          },
+        };
+      },
+    };
+
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+      processEnv: {},
+      secretVaultProviders: [providerFactory],
+    });
+
+    expect(runtime.secret('db.password')).toBe('initial-password');
+    expect(runtime.secret('api.token')).toBe('initial-token');
+    expect(batchCalls).toEqual([['db.password', 'api.token']]);
+    expect(getCalls).toEqual([]);
+
+    values.delete('db.password');
+    values.set('api.token', 'refreshed-token');
+    await runtime.refreshSecrets();
+
+    expect(runtime.secret('db.password')).toBeUndefined();
+    expect(runtime.secret('api.token')).toBe('refreshed-token');
+    expect(batchCalls).toEqual([
+      ['db.password', 'api.token'],
+      ['db.password', 'api.token'],
+    ]);
+    expect(getCalls).toEqual([]);
+  });
+
   it('uses explicit vault fallback providers when the primary provider is unavailable', async () => {
     const root = await createFixtureRoot(
       [
