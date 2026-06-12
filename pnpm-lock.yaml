@@ -144,6 +144,9 @@ importers:
 
   packages/vault-testkit:
     dependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
       '@kitsy/cnos-core':
         specifier: workspace:*
         version: link:../core

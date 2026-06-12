@@ -19,6 +19,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@kitsy/cnos": "workspace:*",
     "@kitsy/cnos-core": "workspace:*"
   },
   "scripts": {

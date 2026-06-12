@@ -1,0 +1,110 @@
+---
+title: Vault Provider Packages
+description: Build and test compiled-in CNOS secret vault providers.
+---
+
+# Vault Provider Packages
+
+Remote vault providers are compiled into the application runtime. CNOS never loads provider packages dynamically from `.cnos/cnos.yml`.
+
+## Package names
+
+Official providers use this package shape:
+
+- `@kitsy/cnos-vault-gcp-secret-manager`
+- `@kitsy/cnos-vault-aws-secrets-manager`
+- `@kitsy/cnos-vault-hashicorp`
+- `@kitsy/cnos-vault-azure-key-vault`
+- `@kitsy/cnos-vault-firebase-secrets`
+
+Each package must export a factory named `create<Vendor>VaultProvider()`. The factory returns a `SecretVaultProviderFactory` whose `provider` field exactly matches the manifest provider name.
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp-secret-manager';
+
+cnos.registerSecretVaultProvider(createGcpSecretManagerVaultProvider());
+await cnos.ready();
+```
+
+## Manifest contract
+
+Provider selection belongs in config:
+
+```yaml
+vaults:
+  prod-gcp:
+    provider: gcp-secret-manager
+    auth:
+      method: iam
+      config:
+        projectId: acme-prod
+    fallback:
+      - provider: environment
+        mapping:
+          DB_PASSWORD: db.password
+```
+
+Secret refs should normally inherit from the named vault:
+
+```yaml
+db:
+  password:
+    vault: prod-gcp
+    ref: db.password
+```
+
+Do not set a different `provider` on a ref that also names a vault. CNOS rejects provider/vault mismatches so Node, Go, and projections all agree.
+
+## Runtime contract
+
+Every provider must implement the `SecretVaultProvider` interface:
+
+- `authenticate(authConfig)` resolves credentials supplied by CNOS.
+- `batchGet(refs)` is the startup and refresh path.
+- `get(ref)` exists for compatibility and narrow single-ref use, but provider tests must prove startup and `refreshSecrets()` do not call it.
+- `set(ref, value)` and `delete(ref)` may be writable or may reject. Declare the expected capability in testkit setup.
+- `list()` returns known refs when the backing platform supports listing.
+- `healthCheck()` is optional for remote providers.
+
+Startup hydration and full refresh are batch-only. Individual application reads use the CNOS in-memory cache and must not perform remote I/O.
+
+## Auth and projection safety
+
+Provider auth should prefer platform identity:
+
+- GCP: Application Default Credentials or attached service account.
+- AWS: IAM role or standard AWS credential chain.
+- Azure: managed identity or default credential chain.
+- HashiCorp Vault: token sources such as `env:`, `file:`, or keychain.
+- Firebase: direct provider support plus explicit `environment` fallback for injected secrets.
+
+Server projections may include safe metadata such as `projectId`, `region`, `endpoint`, `address`, `namespace`, or `tenant`. They must not include raw secrets, private keys, bearer tokens, credential blobs, or client secrets. CNOS sanitizes projected `auth.config`, but provider authors should design manifest config so credential material is referenced by source (`env:NAME`, `file:PATH`, `keychain:NAME`) rather than stored inline.
+
+## Conformance tests
+
+Provider packages should use `@kitsy/cnos-vault-testkit`:
+
+```ts
+import {
+  defineSecretVaultProviderConformanceSuite,
+  defineSecretVaultRuntimeConformanceSuite,
+} from '@kitsy/cnos-vault-testkit';
+
+defineSecretVaultProviderConformanceSuite('gcp-secret-manager', () => ({
+  factory: createGcpSecretManagerVaultProvider(),
+  definition,
+  auth,
+  refs,
+}));
+
+defineSecretVaultRuntimeConformanceSuite('gcp-secret-manager', () => ({
+  factory: createGcpSecretManagerVaultProvider(),
+  vaultId: 'prod-gcp',
+  definition,
+  refs,
+  processEnv,
+}));
+```
+
+The shared suite verifies provider auth, batch reads, missing refs, runtime startup hydration, projection bootstrap, refresh batching, safe projection metadata, and explicit environment fallback behavior.

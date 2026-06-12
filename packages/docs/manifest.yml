@@ -43,6 +43,8 @@ sidebar:
         label: Derived Values
       - path: guides/secrets
         label: Secrets and Vaults
+      - path: guides/vault-providers
+        label: Vault Providers
       - path: guides/migration
         label: Migrating from .env
       - path: guides/generated-env-files

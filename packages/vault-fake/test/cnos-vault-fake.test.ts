@@ -55,11 +55,25 @@ defineSecretVaultRuntimeConformanceSuite(FAKE_REMOTE_VAULT_PROVIDER, () => {
         token: {
           from: ['env:FAKE_REMOTE_TOKEN'],
         },
+        config: {
+          endpoint: 'https://fake-vault.local',
+          clientSecret: 'should-not-project',
+          nested: {
+            privateKey: 'should-not-project',
+            tenant: 'cnos',
+          },
+        },
       },
     },
     refs: secrets,
     processEnv: {
       FAKE_REMOTE_TOKEN: 'test-token',
+    },
+    expectedProjectedConfig: {
+      endpoint: 'https://fake-vault.local',
+      nested: {
+        tenant: 'cnos',
+      },
     },
     afterReads() {
       expect(calls.authenticate).toHaveLength(1);
