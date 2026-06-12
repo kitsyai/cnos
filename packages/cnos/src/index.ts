@@ -1,5 +1,5 @@
 export { default, default as cnos } from './runtime/index.js';
-export type { CnosSingleton } from './runtime/index.js';
+export type { CnosSingleton, CnosSingletonProjectionOptions } from './runtime/index.js';
 export type {
   ConfigEntry,
   DerivedFormula,

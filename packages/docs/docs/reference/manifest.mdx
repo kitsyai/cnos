@@ -18,3 +18,23 @@ Key sections:
 - `writePolicy`
 
 Use the main repo spec for the exhaustive schema until this reference grows into the full field-by-field version.
+
+## Vaults
+
+`vaults` declare named secret backends. Secret refs can name a vault and omit `provider`; CNOS resolves the provider from the vault definition.
+
+```yaml
+vaults:
+  prod-gcp:
+    provider: gcp-secret-manager
+    auth:
+      method: iam
+      config:
+        projectId: my-prod-project
+    fallback:
+      - provider: environment
+        mapping:
+          DB_PASSWORD: db.password
+```
+
+Fallbacks are explicit and ordered. CNOS never silently falls back to environment variables unless a fallback provider is declared.

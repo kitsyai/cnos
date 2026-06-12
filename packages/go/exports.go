@@ -164,6 +164,9 @@ func (runtime *Runtime) ToServerProjection() (ServerProjection, error) {
 
 		if entry.secretRef != nil {
 			ref := *entry.secretRef
+			if ref.Provider == "" {
+				ref.Provider = runtime.secretVaultDefinition(ref).Provider
+			}
 			if ref.EnvVar == "" {
 				ref.EnvVar = runtime.logicalRefToMappedEnvVar(ref.Vault, ref.Ref)
 			}

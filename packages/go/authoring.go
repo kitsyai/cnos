@@ -97,6 +97,7 @@ type vaultDefinition struct {
 	Provider string            `yaml:"provider" json:"provider"`
 	Auth     vaultAuthFile     `yaml:"auth" json:"auth,omitempty"`
 	Mapping  map[string]string `yaml:"mapping" json:"mapping,omitempty"`
+	Fallback []vaultDefinition `yaml:"fallback" json:"fallback,omitempty"`
 }
 
 type manifestFile struct {
@@ -592,22 +593,45 @@ func normalizeAuthoringNamespaces(raw manifestNamespacesFile) (map[string]namesp
 func normalizeAuthoringVaults(raw map[string]vaultDefinition) (map[string]vaultDefinition, error) {
 	vaults := map[string]vaultDefinition{}
 	for name, definition := range raw {
-		provider := strings.TrimSpace(definition.Provider)
-		if provider == "" {
-			return nil, fmt.Errorf("cnos: vault %q requires a provider", name)
+		normalized, err := normalizeAuthoringVaultDefinition(name, definition, false)
+		if err != nil {
+			return nil, err
 		}
-		vaults[name] = vaultDefinition{
-			Provider: provider,
-			Auth: vaultAuthFile{
-				Method:     firstNonEmpty(strings.TrimSpace(definition.Auth.Method), defaultVaultMethod(provider)),
-				Passphrase: normalizeVaultAuthSource(definition.Auth.Passphrase),
-				Token:      normalizeVaultAuthSource(definition.Auth.Token),
-				Config:     normalizeConfigMap(definition.Auth.Config),
-			},
-			Mapping: normalizeStringMap(definition.Mapping),
-		}
+		vaults[name] = normalized
 	}
 	return vaults, nil
+}
+
+func normalizeAuthoringVaultDefinition(name string, definition vaultDefinition, fallback bool) (vaultDefinition, error) {
+	provider := strings.TrimSpace(definition.Provider)
+	if provider == "" {
+		if fallback {
+			return vaultDefinition{}, fmt.Errorf("cnos: vault %q fallback requires a provider", name)
+		}
+		return vaultDefinition{}, fmt.Errorf("cnos: vault %q requires a provider", name)
+	}
+
+	normalizedFallback := make([]vaultDefinition, 0, len(definition.Fallback))
+	for _, fallbackDefinition := range definition.Fallback {
+		normalized, err := normalizeAuthoringVaultDefinition(name, fallbackDefinition, true)
+		if err != nil {
+			return vaultDefinition{}, err
+		}
+		normalized.Fallback = nil
+		normalizedFallback = append(normalizedFallback, normalized)
+	}
+
+	return vaultDefinition{
+		Provider: provider,
+		Auth: vaultAuthFile{
+			Method:     firstNonEmpty(strings.TrimSpace(definition.Auth.Method), defaultVaultMethod(provider)),
+			Passphrase: normalizeVaultAuthSource(definition.Auth.Passphrase),
+			Token:      normalizeVaultAuthSource(definition.Auth.Token),
+			Config:     normalizeConfigMap(definition.Auth.Config),
+		},
+		Mapping:  normalizeStringMap(definition.Mapping),
+		Fallback: normalizedFallback,
+	}, nil
 }
 
 func defaultVaultMethod(provider string) string {
@@ -1821,7 +1845,7 @@ func toSecretReference(value any) (SecretReference, error) {
 	provider, _ := document["provider"].(string)
 	ref, _ := document["ref"].(string)
 	vault, _ := document["vault"].(string)
-	if strings.TrimSpace(provider) == "" || strings.TrimSpace(ref) == "" {
+	if strings.TrimSpace(ref) == "" {
 		return SecretReference{}, fmt.Errorf("cnos: invalid secret reference")
 	}
 
@@ -1839,7 +1863,10 @@ func isSecretReferenceValue(value any) bool {
 	}
 	provider, providerOK := document["provider"].(string)
 	ref, refOK := document["ref"].(string)
-	if !providerOK || !refOK || strings.TrimSpace(provider) == "" || strings.TrimSpace(ref) == "" {
+	if !refOK || strings.TrimSpace(ref) == "" {
+		return false
+	}
+	if providerOK && strings.TrimSpace(provider) == "" {
 		return false
 	}
 	for key := range document {

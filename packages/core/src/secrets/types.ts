@@ -1,7 +1,7 @@
 import type { VaultDefinition } from '../types/manifest.js';
 
 export interface SecretReference {
-  provider: string;
+  provider?: string;
   ref: string;
   vault?: string;
 }
@@ -23,6 +23,7 @@ export interface ProjectedVaultDefinition {
   provider: string;
   auth?: ProjectedVaultAuthDefinition;
   mapping?: Record<string, string>;
+  fallback?: ProjectedVaultDefinition[];
 }
 
 export interface VaultAuthConfig {

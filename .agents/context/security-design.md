@@ -4,7 +4,7 @@ Full spec: see `cnos-secret-security-design.md` in project docs.
 
 ## Storage Model
 
-- Repo YAML stores only refs: `{ provider: "local", vault: "local-dev", ref: "db.password" }`.
+- Repo YAML stores only refs: `{ vault: "local-dev", ref: "db.password" }`. `provider` may be inherited from the named vault.
 - Actual secret material lives outside the repo in `~/.cnos/secrets/vaults/<vault-id>/keystore.enc`.
 - Local vault encryption: AES-256-GCM, PBKDF2-SHA512, 600K iterations, 32-byte random salt per vault.
 
@@ -26,6 +26,8 @@ All secret refs batch-resolved at startup via `batchGet()`:
 - Local vault: one file read + one decrypt = all secrets.
 - Remote providers: batch API calls.
 - Individual `cnos.secret()` reads hit in-memory cache, zero I/O.
+- Remote provider implementations are compiled/registered with the runtime. CNOS does not dynamically load provider packages from manifest config.
+- Environment fallback is explicit via `vaults.<name>.fallback`; CNOS never silently falls back to env for remote vault failures.
 
 Hydration policies: `eager` (startup, default), `lazy` (first read), `refreshing` (startup + TTL refresh).
 

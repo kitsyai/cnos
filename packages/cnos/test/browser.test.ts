@@ -124,6 +124,64 @@ async function createUnknownVaultSecretRefFixtureRoot(): Promise<string> {
   return root;
 }
 
+async function createRemoteFallbackSecretRefFixtureRoot(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-server-build-remote-fallback-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: server-build-remote-fallback-fixture',
+      'vaults:',
+      '  remote-prod:',
+      '    provider: gcp-secret-manager',
+      '    auth:',
+      '      method: iam',
+      '      config:',
+      '        projectId: cnos-prod',
+      '    fallback:',
+      '      - provider: environment',
+      '        mapping:',
+      '          DB_PASSWORD: db.password',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'secrets', 'db.yml'),
+    ['db:', '  password:', '    vault: remote-prod', '    ref: db.password'].join('\n'),
+  );
+  return root;
+}
+
+async function createConflictingVaultProviderSecretRefFixtureRoot(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-server-build-provider-conflict-'));
+  fixtureRoots.push(root);
+  await mkdir(path.join(root, '.cnos', 'secrets'), { recursive: true });
+  await writeFile(
+    path.join(root, '.cnos', 'cnos.yml'),
+    [
+      'version: 1',
+      'project:',
+      '  name: server-build-provider-conflict-fixture',
+      'vaults:',
+      '  remote-prod:',
+      '    provider: gcp-secret-manager',
+    ].join('\n'),
+  );
+  await writeFile(
+    path.join(root, '.cnos', 'secrets', 'db.yml'),
+    [
+      'db:',
+      '  password:',
+      '    provider: environment',
+      '    vault: remote-prod',
+      '    ref: db.password',
+    ].join('\n'),
+  );
+  return root;
+}
+
 describe('@kitsy/cnos/browser', () => {
   it('reads promoted public values and supports value.* aliases', async () => {
     const root = await createFixtureRoot();
@@ -207,6 +265,41 @@ describe('@kitsy/cnos/build', () => {
 
     await expect(resolveServerProjection({ root, processEnv: {} })).rejects.toThrow(
       'Unknown vault "typoed-vault" for secret ref "secret.app.token"',
+    );
+  });
+
+  it('builds server projections for remote vaults without requiring provider factories', async () => {
+    const root = await createRemoteFallbackSecretRefFixtureRoot();
+
+    await expect(resolveServerProjection({ root, processEnv: {} })).resolves.toMatchObject({
+      secretRefs: {
+        'db.password': {
+          provider: 'gcp-secret-manager',
+          vault: 'remote-prod',
+          ref: 'db.password',
+        },
+      },
+      vaults: {
+        'remote-prod': {
+          provider: 'gcp-secret-manager',
+          fallback: [
+            {
+              provider: 'environment',
+              mapping: {
+                DB_PASSWORD: 'db.password',
+              },
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it('rejects server projections when a secret ref conflicts with its named vault provider', async () => {
+    const root = await createConflictingVaultProviderSecretRefFixtureRoot();
+
+    await expect(resolveServerProjection({ root, processEnv: {} })).rejects.toThrow(
+      'Secret ref "secret.db.password" declares provider "environment" but vault "remote-prod" uses provider "gcp-secret-manager"',
     );
   });
 

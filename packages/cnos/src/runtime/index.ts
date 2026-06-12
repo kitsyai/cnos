@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   createDefaultRuntimeProviders,
   createDerivedRuntimeSupport,
+  assertSecretRefVaultProviderCompatible,
   inspectValue,
   isDerivedValue,
   parseDerivation,
@@ -63,6 +64,8 @@ export interface CnosSingleton {
   log(message: string): string;
   loadProjection(source: string, options?: CnosSingletonProjectionOptions): Promise<void>;
   registerRuntimeProvider(namespace: string, provider: Parameters<CnosRuntime['registerRuntimeProvider']>[1]): void;
+  registerSecretVaultProvider(factory: SecretVaultProviderFactory): void;
+  registerSecretVaultProviders(factories: SecretVaultProviderFactory[]): void;
   refreshSecrets(): Promise<void>;
   refreshSecret(key: LogicalKey): Promise<void>;
   ready(options?: CnosCreateOptions): Promise<void>;
@@ -76,6 +79,30 @@ export interface CnosSingletonProjectionOptions {
 
 let bootstrappedProjection: ServerProjection | undefined;
 const singletonRuntimeProviders = new Map<string, RuntimeProvider>();
+const singletonSecretVaultProviders = new Map<string, SecretVaultProviderFactory>();
+
+interface ProjectedSecretDescriptor {
+  key: string;
+  ref: SecretReference & { envVar?: string };
+  vaultId: string;
+  definitions: VaultDefinition[];
+}
+
+function registerSingletonSecretVaultProvider(factory: SecretVaultProviderFactory): void {
+  singletonSecretVaultProviders.set(factory.provider, factory);
+}
+
+function mergeSecretVaultProviders(
+  factories: SecretVaultProviderFactory[] = [],
+): SecretVaultProviderFactory[] {
+  const merged = new Map(singletonSecretVaultProviders);
+
+  for (const factory of factories) {
+    merged.set(factory.provider, factory);
+  }
+
+  return Array.from(merged.values());
+}
 
 function getRuntimeOrThrow(): CnosRuntime {
   const runtime = getSingletonRuntime();
@@ -553,9 +580,12 @@ function graphFromProjection(projection: ServerProjection): ResolvedGraph {
 }
 
 function vaultDefinitionFromProjection(
+  manifest: NormalizedManifest,
   projection: ServerProjection,
+  key: string,
   ref: SecretReference & { envVar?: string },
 ): VaultDefinition {
+  assertSecretRefVaultProviderCompatible(manifest, ref, key);
   const vaultId = ref.vault ?? 'default';
   const projected = projection.vaults?.[vaultId];
   const mapping = {
@@ -564,9 +594,10 @@ function vaultDefinitionFromProjection(
   };
 
   return {
-    provider: projected?.provider ?? ref.provider,
+    provider: projected?.provider ?? ref.provider ?? 'local',
     ...(projected?.auth ? { auth: projected.auth } : {}),
     ...(Object.keys(mapping).length > 0 ? { mapping } : {}),
+    ...(projected?.fallback ? { fallback: projected.fallback } : {}),
   };
 }
 
@@ -583,6 +614,7 @@ function attachBootstrappedProjection(
   const graph = graphFromProjection(projection);
   const manifest = toBootstrappedManifest(graph, projection.runtimeNamespaces, projection.vaults ?? {});
   const hydratedSecrets = new Map<string, unknown>();
+  const secretVaultProviders = mergeSecretVaultProviders(options.secretVaultProviders);
   const runtimeProviders = createDefaultRuntimeProviders(manifest, process.env);
   for (const [namespace, provider] of singletonRuntimeProviders) {
     registerRuntimeProvider(manifest, runtimeProviders, namespace, provider);
@@ -603,15 +635,11 @@ function attachBootstrappedProjection(
     return graph.entries.has(fallback) ? fallback : key;
   };
 
-  const resolveSecretValue = async (key: string): Promise<unknown> => {
+  const projectedDescriptorForKey = (key: string): ProjectedSecretDescriptor | undefined => {
     const entry = graph.entries.get(key);
 
     if (!entry || entry.namespace !== 'secret') {
-      return entry?.value;
-    }
-
-    if (hydratedSecrets.has(key)) {
-      return hydratedSecrets.get(key);
+      return undefined;
     }
 
     const ref = projection.secretRefs[key.slice('secret.'.length)];
@@ -620,18 +648,110 @@ function attachBootstrappedProjection(
       return undefined;
     }
 
-    const definition = vaultDefinitionFromProjection(projection, ref);
-    const provider = createSecretVaultProvider(
-      ref.vault ?? 'default',
-      definition,
-      process.env,
-      options.secretVaultProviders,
-    );
-    const auth = await resolveVaultAuth(ref.vault ?? 'default', definition, process.env);
-    await provider.authenticate(auth);
-    const value = await provider.get(ref.ref);
-    hydratedSecrets.set(key, value);
-    return value;
+    const definition = vaultDefinitionFromProjection(manifest, projection, key, ref);
+    return {
+      key,
+      ref,
+      vaultId: ref.vault ?? 'default',
+      definitions: [definition, ...(definition.fallback ?? [])],
+    };
+  };
+
+  const runtimeDefinitionForCandidate = (candidate: VaultDefinition): VaultDefinition => ({
+    provider: candidate.provider,
+    ...(candidate.auth ? { auth: candidate.auth } : {}),
+    ...(candidate.mapping ? { mapping: candidate.mapping } : {}),
+  });
+
+  const hydrateProjectedSecrets = async (keys?: string[]): Promise<void> => {
+    const requestedKeys = keys ?? Object.keys(projection.secretRefs).map((segment) => `secret.${segment}`);
+    let remaining = requestedKeys
+      .filter((key) => !hydratedSecrets.has(key))
+      .map((key) => projectedDescriptorForKey(key))
+      .filter((descriptor): descriptor is ProjectedSecretDescriptor => Boolean(descriptor));
+    const lastErrors = new Map<string, unknown>();
+    let candidateIndex = 0;
+
+    while (remaining.length > 0) {
+      const grouped = new Map<string, {
+        vaultId: string;
+        definition: VaultDefinition;
+        descriptors: ProjectedSecretDescriptor[];
+      }>();
+      const exhausted: ProjectedSecretDescriptor[] = [];
+
+      for (const descriptor of remaining) {
+        const candidate = descriptor.definitions[candidateIndex];
+
+        if (!candidate) {
+          exhausted.push(descriptor);
+          continue;
+        }
+
+        const groupKey = `${descriptor.vaultId}\0${candidate.provider}`;
+        const group = grouped.get(groupKey) ?? {
+          vaultId: descriptor.vaultId,
+          definition: candidate,
+          descriptors: [],
+        };
+        group.descriptors.push(descriptor);
+        grouped.set(groupKey, group);
+      }
+
+      if (grouped.size === 0) {
+        remaining = exhausted;
+        break;
+      }
+
+      const unresolved = [...exhausted];
+
+      for (const group of grouped.values()) {
+        const runtimeDefinition = runtimeDefinitionForCandidate(group.definition);
+
+        try {
+          const provider = createSecretVaultProvider(
+            group.vaultId,
+            runtimeDefinition,
+            process.env,
+            secretVaultProviders,
+          );
+          const auth = await resolveVaultAuth(group.vaultId, runtimeDefinition, process.env);
+          await provider.authenticate(auth);
+          const refs = Array.from(new Set(group.descriptors.map((descriptor) => descriptor.ref.ref)))
+            .sort((left, right) => left.localeCompare(right));
+          const values = await provider.batchGet(refs);
+
+          for (const descriptor of group.descriptors) {
+            const value = values.get(descriptor.ref.ref);
+
+            if (value !== undefined) {
+              hydratedSecrets.set(descriptor.key, value);
+              lastErrors.delete(descriptor.key);
+            } else {
+              unresolved.push(descriptor);
+            }
+          }
+        } catch (error) {
+          for (const descriptor of group.descriptors) {
+            lastErrors.set(descriptor.key, error);
+            unresolved.push(descriptor);
+          }
+        }
+      }
+
+      remaining = unresolved.filter((descriptor) => !hydratedSecrets.has(descriptor.key));
+      candidateIndex += 1;
+    }
+
+    for (const descriptor of remaining) {
+      const error = lastErrors.get(descriptor.key);
+
+      if (error) {
+        throw error;
+      }
+
+      hydratedSecrets.set(descriptor.key, undefined);
+    }
   };
 
   const runtime = {
@@ -750,14 +870,15 @@ function attachBootstrappedProjection(
       singletonRuntimeProviders.set(namespace, provider);
     },
     async refreshSecrets() {
-      for (const key of Object.keys(projection.secretRefs).map((segment) => `secret.${segment}`)) {
+      const keys = Object.keys(projection.secretRefs).map((segment) => `secret.${segment}`);
+      for (const key of keys) {
         hydratedSecrets.delete(key);
-        await resolveSecretValue(key);
       }
+      await hydrateProjectedSecrets(keys);
     },
     async refreshSecret(key: LogicalKey) {
       hydratedSecrets.delete(key);
-      await resolveSecretValue(key);
+      await hydrateProjectedSecrets([key]);
     },
   } satisfies CnosRuntime;
 
@@ -898,6 +1019,14 @@ const cnos = Object.assign(
       getRuntimeOrThrow().registerRuntimeProvider(namespace, provider);
       singletonRuntimeProviders.set(namespace, provider);
     },
+    registerSecretVaultProvider(factory: SecretVaultProviderFactory): void {
+      registerSingletonSecretVaultProvider(factory);
+    },
+    registerSecretVaultProviders(factories: SecretVaultProviderFactory[]): void {
+      for (const factory of factories) {
+        registerSingletonSecretVaultProvider(factory);
+      }
+    },
     async refreshSecrets(): Promise<void> {
       await getRuntimeOrThrow().refreshSecrets();
       setBootstrappedSecretHydrationRequired(false);
@@ -907,12 +1036,13 @@ const cnos = Object.assign(
     },
     async ready(options: CnosCreateOptions = {}): Promise<void> {
       const runtime = getSingletonRuntime();
+      const secretVaultProviders = mergeSecretVaultProviders(options.secretVaultProviders);
 
       if (runtime && getBootstrappedSecretHydrationRequired()) {
         const runtimeToHydrate =
-          bootstrappedProjection && options.secretVaultProviders
+          bootstrappedProjection && secretVaultProviders.length > 0
             ? (attachBootstrappedProjection(bootstrappedProjection, true, {
-                secretVaultProviders: options.secretVaultProviders,
+                secretVaultProviders,
               }),
               getRuntimeOrThrow())
             : runtime;
@@ -933,7 +1063,10 @@ const cnos = Object.assign(
         return;
       }
 
-      const readyPromise = createCnos(options).then((runtime) => {
+      const readyPromise = createCnos({
+        ...options,
+        secretVaultProviders,
+      }).then((runtime) => {
         setSingletonRuntime(runtime);
         setBootstrappedSecretHydrationRequired(false);
         return runtime;

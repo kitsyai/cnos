@@ -24,6 +24,7 @@ type VaultDefinition struct {
 	Provider string
 	Auth     VaultAuthDefinition
 	Mapping  map[string]string
+	Fallback []VaultDefinition
 }
 
 // VaultAuthConfig contains resolved in-memory auth material for a vault.
@@ -56,8 +57,29 @@ func vaultDefinitionForProvider(definition vaultDefinition) VaultDefinition {
 			Token:      vaultAuthSourceForProvider(definition.Auth.Token),
 			Config:     cloneMap(definition.Auth.Config),
 		},
-		Mapping: cloneStringMap(definition.Mapping),
+		Mapping:  cloneStringMap(definition.Mapping),
+		Fallback: vaultFallbackForProvider(definition.Fallback),
 	}
+}
+
+func vaultFallbackForProvider(fallback []vaultDefinition) []VaultDefinition {
+	if len(fallback) == 0 {
+		return nil
+	}
+	result := make([]VaultDefinition, 0, len(fallback))
+	for _, definition := range fallback {
+		result = append(result, VaultDefinition{
+			Provider: definition.Provider,
+			Auth: VaultAuthDefinition{
+				Method:     definition.Auth.Method,
+				Passphrase: vaultAuthSourceForProvider(definition.Auth.Passphrase),
+				Token:      vaultAuthSourceForProvider(definition.Auth.Token),
+				Config:     cloneMap(definition.Auth.Config),
+			},
+			Mapping: cloneStringMap(definition.Mapping),
+		})
+	}
+	return result
 }
 
 func vaultAuthSourceForProvider(source *vaultAuthSourceFile) *VaultAuthSource {

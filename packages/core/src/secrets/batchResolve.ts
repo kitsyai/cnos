@@ -1,10 +1,11 @@
 import type { ResolvedGraph } from '../types/core.js';
-import type { NormalizedManifest } from '../types/manifest.js';
+import type { NormalizedManifest, VaultDefinition, VaultFallbackDefinition } from '../types/manifest.js';
 import { appendAuditEvent } from './auditLog.js';
 import { SecretCache } from './secretCache.js';
 import type { SecretDescriptor, SecretReference, SecretVaultProviderFactory } from './types.js';
 import { createSecretVaultProvider } from './providers/registry.js';
 import { isSecretReference } from '../utils/secretStore.js';
+import { assertSecretRefVaultProviderCompatible } from './providerCompatibility.js';
 import { resolveVaultAuth } from './resolveAuth.js';
 
 function collectSecretDescriptors(graph: ResolvedGraph): SecretDescriptor[] {
@@ -16,6 +17,49 @@ function collectSecretDescriptors(graph: ResolvedGraph): SecretDescriptor[] {
     }));
 }
 
+function secretGroupKey(manifest: NormalizedManifest, descriptor: SecretDescriptor): string {
+  assertSecretRefVaultProviderCompatible(manifest, descriptor.ref, descriptor.logicalKey);
+  const vaultId = descriptor.ref.vault ?? 'default';
+  const provider = descriptor.ref.provider ?? manifest.vaults[vaultId]?.provider ?? 'local';
+  return `${vaultId}\0${provider}`;
+}
+
+function vaultDefinitionForRef(
+  manifest: NormalizedManifest,
+  ref: SecretReference,
+): VaultDefinition {
+  assertSecretRefVaultProviderCompatible(manifest, ref);
+  const vaultId = ref.vault ?? 'default';
+  const base = manifest.vaults[vaultId] ?? { provider: 'local', auth: { passphrase: { from: [] } } };
+
+  if (!ref.provider || ref.provider === base.provider) {
+    return base;
+  }
+
+  return {
+    ...base,
+    provider: ref.provider,
+  };
+}
+
+async function resolveFromDefinition(
+  vaultId: string,
+  definition: VaultDefinition | VaultFallbackDefinition,
+  refs: SecretDescriptor[],
+  processEnv: Record<string, string | undefined>,
+  factories: SecretVaultProviderFactory[],
+): Promise<Map<string, string>> {
+  const runtimeDefinition: VaultDefinition = {
+    provider: definition.provider,
+    ...(definition.auth ? { auth: definition.auth } : {}),
+    ...(definition.mapping ? { mapping: definition.mapping } : {}),
+  };
+  const provider = createSecretVaultProvider(vaultId, runtimeDefinition, processEnv, factories);
+  const auth = await resolveVaultAuth(vaultId, runtimeDefinition, processEnv);
+  await provider.authenticate(auth);
+  return provider.batchGet(refs.map((entry) => entry.ref.ref));
+}
+
 export async function batchResolveSecrets(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
@@ -25,19 +69,51 @@ export async function batchResolveSecrets(
   const cache = new SecretCache();
   const descriptors = collectSecretDescriptors(graph);
   const grouped = descriptors.reduce<Map<string, SecretDescriptor[]>>((accumulator, descriptor) => {
-    const vaultId = descriptor.ref.vault ?? 'default';
-    const bucket = accumulator.get(vaultId) ?? [];
+    const key = secretGroupKey(manifest, descriptor);
+    const bucket = accumulator.get(key) ?? [];
     bucket.push(descriptor);
-    accumulator.set(vaultId, bucket);
+    accumulator.set(key, bucket);
     return accumulator;
   }, new Map());
 
-  for (const [vaultId, refs] of grouped) {
-    const definition = manifest.vaults[vaultId] ?? { provider: 'local', auth: { passphrase: { from: [] } } };
-    const provider = createSecretVaultProvider(vaultId, definition, processEnv, factories);
-    const auth = await resolveVaultAuth(vaultId, definition, processEnv);
-    await provider.authenticate(auth);
-    const resolved = await provider.batchGet(refs.map((entry) => entry.ref.ref));
+  for (const refs of grouped.values()) {
+    const first = refs[0];
+    if (!first) {
+      continue;
+    }
+    const vaultId = first.ref.vault ?? 'default';
+    const definition = vaultDefinitionForRef(manifest, first.ref);
+    const definitions = [definition, ...(definition.fallback ?? [])];
+    const resolved = new Map<string, string>();
+    let remaining = refs;
+    let lastError: unknown;
+
+    for (const candidate of definitions) {
+      try {
+        const candidateValues = await resolveFromDefinition(vaultId, candidate, remaining, processEnv, factories);
+
+        for (const descriptor of remaining) {
+          const value = candidateValues.get(descriptor.ref.ref);
+
+          if (value !== undefined) {
+            resolved.set(descriptor.ref.ref, value);
+          }
+        }
+
+        remaining = remaining.filter((descriptor) => !resolved.has(descriptor.ref.ref));
+
+        if (remaining.length === 0) {
+          break;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (resolved.size === 0 && lastError) {
+      throw lastError;
+    }
+
     cache.load(vaultId, resolved);
     await appendAuditEvent(
       {

@@ -108,10 +108,12 @@ afterEach(async () => {
 function createProjectedRemoteSecretFixture(): {
   projection: ReturnType<typeof createRemoteServerProjection>;
   authCalls: VaultAuthConfig[];
+  batchCalls: string[][];
   getCalls: string[];
   providerFactory: SecretVaultProviderFactory;
 } {
   const authCalls: VaultAuthConfig[] = [];
+  const batchCalls: string[][] = [];
   const getCalls: string[] = [];
   const providerFactory: SecretVaultProviderFactory = {
     provider: 'test-remote',
@@ -126,6 +128,7 @@ function createProjectedRemoteSecretFixture(): {
           return authCalls.length > 0;
         },
         async batchGet(refs) {
+          batchCalls.push([...refs]);
           return new Map(refs.map((ref) => [ref, `projected:${ref}`]));
         },
         async get(ref) {
@@ -148,6 +151,7 @@ function createProjectedRemoteSecretFixture(): {
   return {
     projection: createRemoteServerProjection(),
     authCalls,
+    batchCalls,
     getCalls,
     providerFactory,
   };
@@ -167,6 +171,11 @@ function createRemoteServerProjection() {
         provider: 'test-remote',
         vault: 'remote-prod',
         ref: 'db.password',
+      },
+      'api.token': {
+        provider: 'test-remote',
+        vault: 'remote-prod',
+        ref: 'api.token',
       },
     },
     vaults: {
@@ -328,7 +337,7 @@ describe('@kitsy/cnos root runtime entry', () => {
   });
 
   it('hydrates projected remote vaults through ready() provider registration', async () => {
-    const { projection, authCalls, getCalls, providerFactory } = createProjectedRemoteSecretFixture();
+    const { projection, authCalls, batchCalls, getCalls, providerFactory } = createProjectedRemoteSecretFixture();
     process.env.TEST_REMOTE_TOKEN = 'projected-token';
     process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
     vi.resetModules();
@@ -338,6 +347,7 @@ describe('@kitsy/cnos root runtime entry', () => {
     await cnos.ready({ secretVaultProviders: [providerFactory] });
 
     expect(cnos.secret('db.password')).toBe('projected:db.password');
+    expect(cnos.secret('api.token')).toBe('projected:api.token');
     expect(authCalls).toEqual([
       {
         method: 'token',
@@ -347,7 +357,29 @@ describe('@kitsy/cnos root runtime entry', () => {
         },
       },
     ]);
-    expect(getCalls).toEqual(['db.password']);
+    expect(batchCalls).toEqual([['api.token', 'db.password']]);
+    expect(getCalls).toEqual([]);
+
+    await cnos.refreshSecrets();
+    expect(batchCalls).toEqual([
+      ['api.token', 'db.password'],
+      ['api.token', 'db.password'],
+    ]);
+    expect(getCalls).toEqual([]);
+  });
+
+  it('hydrates projected remote vaults through compiled-in singleton provider registration', async () => {
+    const { projection, providerFactory } = createProjectedRemoteSecretFixture();
+    process.env.TEST_REMOTE_TOKEN = 'projected-token';
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    cnos.registerSecretVaultProvider(providerFactory);
+    await cnos.ready();
+
+    expect(cnos.secret('db.password')).toBe('projected:db.password');
   });
 
   it('hydrates loaded server projections with custom provider factories', async () => {
@@ -391,5 +423,28 @@ describe('@kitsy/cnos root runtime entry', () => {
 
     expect(cnos.value('currentTenant')).toBe('acme');
     expect(cnos.secret('db.password')).toBe('projected:db.password');
+  });
+
+  it('rejects projected secret refs that conflict with their named vault provider', async () => {
+    const { projection: baseProjection, providerFactory } = createProjectedRemoteSecretFixture();
+    const projection = {
+      ...baseProjection,
+      secretRefs: {
+        'db.password': {
+          provider: 'environment',
+          vault: 'remote-prod',
+          ref: 'db.password',
+        },
+      },
+    };
+    process.env.TEST_REMOTE_TOKEN = 'projected-token';
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready({ secretVaultProviders: [providerFactory] })).rejects.toThrow(
+      'Secret ref "secret.db.password" declares provider "environment" but vault "remote-prod" uses provider "test-remote"',
+    );
   });
 });

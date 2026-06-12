@@ -32,6 +32,7 @@ export * from './runtime/toEnv.js';
 export * from './runtime/toPublicEnv.js';
 export * from './secrets/auditLog.js';
 export * from './secrets/batchResolve.js';
+export * from './secrets/providerCompatibility.js';
 export * from './secrets/resolveAuth.js';
 export * from './secrets/secretCache.js';
 export * from './secrets/sessionStore.js';

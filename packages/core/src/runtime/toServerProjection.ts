@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { ResolvedGraph, ServerProjection } from '../types/core.js';
 import type { NormalizedManifest, VaultDefinition } from '../types/manifest.js';
 import type { ProjectedVaultDefinition } from '../secrets/types.js';
+import { assertSecretRefVaultProviderCompatible } from '../secrets/providerCompatibility.js';
 import { isSecretReference } from '../utils/secretStore.js';
 
 function stableSortObject(value: Record<string, unknown>): Record<string, unknown> {
@@ -36,8 +37,25 @@ function shouldProjectResolvedValue(sourceId: string | undefined): boolean {
   return sourceId !== 'process-env';
 }
 
-function isSecretLikeConfigKey(key: string): boolean {
-  return /(secret|token|password|passphrase|private[_-]?key|credentials?|api[_-]?key)/i.test(key);
+const SAFE_PROJECTED_CONFIG_KEYS = new Set([
+  'address',
+  'audience',
+  'endpoint',
+  'mount',
+  'namespace',
+  'path',
+  'projectid',
+  'region',
+  'scope',
+  'scopes',
+  'serviceaccountemail',
+  'tenant',
+  'url',
+  'version',
+]);
+
+function isSafeProjectedConfigKey(key: string): boolean {
+  return SAFE_PROJECTED_CONFIG_KEYS.has(key.replace(/[^A-Za-z0-9]/g, '').toLowerCase());
 }
 
 function sanitizeProjectedConfigValue(value: unknown): unknown {
@@ -52,8 +70,14 @@ function sanitizeProjectedConfigValue(value: unknown): unknown {
   return stableSortObject(
     Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .filter(([key]) => !isSecretLikeConfigKey(key))
-        .map(([key, item]) => [key, sanitizeProjectedConfigValue(item)]),
+        .map(([key, item]) => [key, sanitizeProjectedConfigValue(item)] as const)
+        .filter(([key, item]) => {
+          if (item && typeof item === 'object' && !Array.isArray(item)) {
+            return Object.keys(item as Record<string, unknown>).length > 0;
+          }
+
+          return isSafeProjectedConfigKey(key);
+        }),
     ),
   );
 }
@@ -104,11 +128,17 @@ function projectVaultDefinition(definition: VaultDefinition): ProjectedVaultDefi
   const mapping = definition.mapping
     ? (stableSortObject(definition.mapping) as Record<string, string>)
     : undefined;
+  const fallback = definition.fallback?.map((entry) => projectVaultDefinition({
+    provider: entry.provider,
+    ...(entry.auth ? { auth: entry.auth } : {}),
+    ...(entry.mapping ? { mapping: entry.mapping } : {}),
+  }));
 
   return {
     provider: definition.provider,
     ...(auth ? { auth } : {}),
     ...(mapping && Object.keys(mapping).length > 0 ? { mapping } : {}),
+    ...(fallback && fallback.length > 0 ? { fallback } : {}),
   };
 }
 
@@ -152,11 +182,13 @@ export function toServerProjection(
 
   for (const [key, entry] of graph.entries) {
     if (entry.namespace === 'secret' && isSecretReference(entry.value)) {
+      assertSecretRefVaultProviderCompatible(manifest, entry.value, key);
       const vaultId = entry.value.vault ?? 'default';
+      const provider = entry.value.provider ?? manifest.vaults[vaultId]?.provider ?? 'local';
       const envVar = resolveProjectedEnvVar(manifest, vaultId, entry.value.ref);
       referencedVaultIds.add(vaultId);
       secretRefs[key.slice('secret.'.length)] = {
-        provider: entry.value.provider,
+        provider,
         vault: vaultId,
         ref: entry.value.ref,
         ...(envVar

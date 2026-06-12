@@ -513,7 +513,6 @@ describe('@kitsy/cnos-core', () => {
       {
         key: 'secret.db.password',
         value: {
-          provider: 'test-remote',
           ref: 'db.password',
           vault: 'remote-prod',
         },
@@ -582,6 +581,11 @@ describe('@kitsy/cnos-core', () => {
       },
     ]);
     expect(batchCalls).toEqual([['db.password']]);
+    expect(runtime.toServerProjection().secretRefs['db.password']).toEqual({
+      provider: 'test-remote',
+      vault: 'remote-prod',
+      ref: 'db.password',
+    });
     expect(runtime.toServerProjection().vaults).toEqual({
       'remote-prod': {
         provider: 'test-remote',
@@ -599,6 +603,100 @@ describe('@kitsy/cnos-core', () => {
         },
       },
     });
+  });
+
+  it('uses explicit vault fallback providers when the primary provider is unavailable', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: custom-vault-fallback',
+        'vaults:',
+        '  remote-prod:',
+        '    provider: test-remote',
+        '    fallback:',
+        '      - provider: environment',
+        '        mapping:',
+        '          DB_PASSWORD: db.password',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('fallback-secret-loader', [
+      {
+        key: 'secret.db.password',
+        value: {
+          ref: 'db.password',
+          vault: 'remote-prod',
+        },
+        namespace: 'secret',
+        sourceId: 'filesystem-secrets',
+        pluginId: '@kitsy/cnos/plugins/filesystem-secrets',
+        workspaceId: 'default',
+      },
+    ]);
+
+    const runtime = await createCnos({
+      root,
+      plugins: [loader],
+      processEnv: {
+        DB_PASSWORD: 'fallback-secret',
+      },
+    });
+
+    expect(runtime.secret('db.password')).toBe('fallback-secret');
+    expect(runtime.toServerProjection().vaults?.['remote-prod']).toEqual({
+      provider: 'test-remote',
+      fallback: [
+        {
+          provider: 'environment',
+          auth: {
+            method: 'environment',
+          },
+          mapping: {
+            DB_PASSWORD: 'db.password',
+          },
+        },
+      ],
+    });
+  });
+
+  it('rejects secret refs that conflict with their named vault provider during hydration', async () => {
+    const root = await createFixtureRoot(
+      [
+        'version: 1',
+        'project:',
+        '  name: provider-conflict',
+        'vaults:',
+        '  remote-prod:',
+        '    provider: test-remote',
+      ].join('\n'),
+    );
+    const loader = createFixtureLoader('provider-conflict-secret-loader', [
+      {
+        key: 'secret.db.password',
+        value: {
+          provider: 'environment',
+          ref: 'db.password',
+          vault: 'remote-prod',
+        },
+        namespace: 'secret',
+        sourceId: 'filesystem-secrets',
+        pluginId: '@kitsy/cnos/plugins/filesystem-secrets',
+        workspaceId: 'default',
+      },
+    ]);
+
+    await expect(
+      createCnos({
+        root,
+        plugins: [loader],
+        processEnv: {
+          'db.password': 'should-not-resolve',
+        },
+        secretResolution: 'eager',
+      }),
+    ).rejects.toThrow(
+      'Secret ref "secret.db.password" declares provider "environment" but vault "remote-prod" uses provider "test-remote"',
+    );
   });
 
   it('supports declared custom runtime namespaces through runtime providers', async () => {

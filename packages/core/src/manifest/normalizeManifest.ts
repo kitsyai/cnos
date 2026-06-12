@@ -173,14 +173,22 @@ function normalizeVaults(
       }
 
       const normalizedAuth = normalizeVaultAuth(name, provider, definition.auth);
-      const normalizedMapping = Object.fromEntries(
-        Object.entries(definition.mapping ?? {})
-          .filter(
-            (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string',
-          )
-          .map(([envVar, logicalRef]) => [envVar.trim(), logicalRef.trim()] as const)
-          .filter(([envVar, logicalRef]) => envVar.length > 0 && logicalRef.length > 0),
-      );
+      const normalizedMapping = normalizeVaultMapping(definition.mapping);
+      const fallback = (definition.fallback ?? []).map((entry, index) => {
+        const fallbackProvider = entry.provider?.trim();
+
+        if (!fallbackProvider) {
+          throw new CnosManifestError(`Vault "${name}" fallback ${index + 1} requires a provider`);
+        }
+
+        const fallbackMapping = normalizeVaultMapping(entry.mapping);
+
+        return {
+          provider: fallbackProvider,
+          auth: normalizeVaultAuth(name, fallbackProvider, entry.auth),
+          ...(Object.keys(fallbackMapping).length > 0 ? { mapping: fallbackMapping } : {}),
+        };
+      });
 
       return [
         name,
@@ -192,9 +200,21 @@ function normalizeVaults(
                 mapping: normalizedMapping,
               }
             : {}),
+          ...(fallback.length > 0 ? { fallback } : {}),
         } satisfies VaultDefinition,
       ];
     }),
+  );
+}
+
+function normalizeVaultMapping(mapping?: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(mapping ?? {})
+      .filter(
+        (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string',
+      )
+      .map(([envVar, logicalRef]) => [envVar.trim(), logicalRef.trim()] as const)
+      .filter(([envVar, logicalRef]) => envVar.length > 0 && logicalRef.length > 0),
   );
 }
 

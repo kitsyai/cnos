@@ -46,8 +46,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function isSecretReference(value: unknown): value is SecretReference {
   return (
     isObject(value) &&
-    typeof value.provider === 'string' &&
-    value.provider.trim().length > 0 &&
+    (value.provider === undefined || (typeof value.provider === 'string' && value.provider.trim().length > 0)) &&
     typeof value.ref === 'string' &&
     value.ref.trim().length > 0 &&
     ((value.vault === undefined && true) || (typeof value.vault === 'string' && value.vault.trim().length > 0)) &&

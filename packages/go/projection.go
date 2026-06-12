@@ -18,7 +18,7 @@ type DerivedFormula struct {
 }
 
 type SecretReference struct {
-	Provider string `json:"provider"`
+	Provider string `json:"provider,omitempty"`
 	Ref      string `json:"ref"`
 	Vault    string `json:"vault,omitempty"`
 	EnvVar   string `json:"envVar,omitempty"`
@@ -74,6 +74,19 @@ func ParseProjection(data []byte) (ServerProjection, error) {
 	}
 	if projection.Vaults == nil {
 		projection.Vaults = map[string]vaultDefinition{}
+	}
+	for key, ref := range projection.SecretRefs {
+		if ref.Vault == "" {
+			ref.Vault = "default"
+		}
+		if ref.Provider == "" {
+			if definition, ok := projection.Vaults[ref.Vault]; ok && definition.Provider != "" {
+				ref.Provider = definition.Provider
+			} else {
+				ref.Provider = "local"
+			}
+		}
+		projection.SecretRefs[key] = ref
 	}
 	if projection.Meta.Namespaces == nil {
 		projection.Meta.Namespaces = []string{}

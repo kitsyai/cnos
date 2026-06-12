@@ -165,11 +165,21 @@ The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, `arch`, an
 
 ## Secret hydration
 
-The Go runtime supports the current CNOS secret-ref providers used by server projections:
+The Go runtime supports built-in secret-ref providers used by server projections:
 
 - `environment`
 - `github-secrets`
 - `local`
+
+Remote providers such as GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, and Azure Key Vault are compiled into the Go binary by registering provider factories:
+
+```go
+runtime, err := cnos.Load(cnos.Options{
+	SecretVaultProviders: []cnos.SecretVaultProviderFactory{gcpFactory},
+})
+```
+
+The manifest remains the configuration source for which named vault uses which provider. Go does not dynamically load provider packages from `.cnos.yml`.
 
 For local vaults, the Go client reuses the same CNOS auth conventions:
 

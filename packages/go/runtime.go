@@ -510,6 +510,9 @@ func (runtime *Runtime) readInternal(key string, stack map[string]bool) (any, bo
 }
 
 func (runtime *Runtime) readSecret(key string, ref SecretReference) (any, bool, error) {
+	if err := runtime.validateSecretRefVaultProvider(key, ref); err != nil {
+		return nil, true, err
+	}
 	if value, ok := runtime.encryptedSecrets[key]; ok {
 		return value, true, nil
 	}
@@ -517,17 +520,32 @@ func (runtime *Runtime) readSecret(key string, ref SecretReference) (any, bool, 
 		return value, true, nil
 	}
 
-	definition := runtime.secretVaultDefinition(ref)
-	provider := definition.Provider
-	if provider == "" {
-		provider = ref.Provider
+	definitions := runtime.secretVaultDefinitions(ref)
+	var lastErr error
+	for _, definition := range definitions {
+		value, found, err := runtime.readSecretWithDefinition(key, ref, definition)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if found && value != nil {
+			runtime.hydratedSecrets[key] = value
+			return value, true, nil
+		}
 	}
 
-	switch provider {
+	if lastErr != nil {
+		return nil, true, lastErr
+	}
+
+	runtime.hydratedSecrets[key] = nil
+	return nil, true, nil
+}
+
+func (runtime *Runtime) readSecretWithDefinition(key string, ref SecretReference, definition vaultDefinition) (any, bool, error) {
+	switch definition.Provider {
 	case "environment", "github-secrets":
-		value := runtime.readEnvironmentSecret(ref)
-		runtime.hydratedSecrets[key] = value
-		return value, true, nil
+		return runtime.readEnvironmentSecretWithDefinition(ref, definition), true, nil
 	case "local":
 		secrets, err := runtime.localVaultSecrets(ref.Vault)
 		if err != nil {
@@ -535,20 +553,23 @@ func (runtime *Runtime) readSecret(key string, ref SecretReference) (any, bool, 
 		}
 		value, ok := secrets[ref.Ref]
 		if !ok {
-			runtime.hydratedSecrets[key] = nil
 			return nil, true, nil
 		}
-		runtime.hydratedSecrets[key] = value
 		return value, true, nil
 	default:
-		if _, ok := runtime.secretFactories[provider]; !ok {
-			return nil, true, fmt.Errorf("cnos: unsupported vault provider: %s", provider)
+		if _, ok := runtime.secretFactories[definition.Provider]; !ok {
+			return nil, true, fmt.Errorf("cnos: unsupported vault provider: %s", definition.Provider)
 		}
-		if err := runtime.hydrateCustomVault(ref.Vault, definition); err != nil {
+		if err := runtime.hydrateCustomVault(ref.Vault, definition, runtime.refsForVaultCandidate(ref.Vault, definition)); err != nil {
 			return nil, true, err
 		}
 		return runtime.hydratedSecrets[key], true, nil
 	}
+}
+
+func (runtime *Runtime) secretVaultDefinitions(ref SecretReference) []vaultDefinition {
+	definition := runtime.secretVaultDefinition(ref)
+	return append([]vaultDefinition{definition}, definition.Fallback...)
 }
 
 func (runtime *Runtime) secretVaultDefinition(ref SecretReference) vaultDefinition {
@@ -558,36 +579,61 @@ func (runtime *Runtime) secretVaultDefinition(ref SecretReference) vaultDefiniti
 		}
 		return definition
 	}
+	provider := ref.Provider
+	if provider == "" {
+		provider = "local"
+	}
 	return vaultDefinition{
-		Provider: ref.Provider,
+		Provider: provider,
 		Auth: vaultAuthFile{
-			Method: defaultVaultMethod(ref.Provider),
+			Method: defaultVaultMethod(provider),
 		},
 		Mapping: map[string]string{},
 	}
 }
 
-func (runtime *Runtime) hydrateCustomVault(vaultID string, definition vaultDefinition) error {
+func (runtime *Runtime) validateSecretRefVaultProvider(key string, ref SecretReference) error {
+	if ref.Vault == "" || ref.Provider == "" {
+		return nil
+	}
+	definition, ok := runtime.vaults[ref.Vault]
+	if !ok || definition.Provider == "" || definition.Provider == ref.Provider {
+		return nil
+	}
+	return fmt.Errorf("cnos: secret ref %q declares provider %q but vault %q uses provider %q", key, ref.Provider, ref.Vault, definition.Provider)
+}
+
+func (runtime *Runtime) refsForVaultCandidate(vaultID string, definition vaultDefinition) map[string]string {
+	refsByLogicalKey := map[string]string{}
+	for key, entry := range runtime.entries {
+		if entry == nil || entry.secretRef == nil || entry.secretRef.Vault != vaultID {
+			continue
+		}
+		if _, alreadyHydrated := runtime.hydratedSecrets[key]; alreadyHydrated {
+			continue
+		}
+		for _, candidate := range runtime.secretVaultDefinitions(*entry.secretRef) {
+			if candidate.Provider == definition.Provider {
+				refsByLogicalKey[key] = entry.secretRef.Ref
+				break
+			}
+		}
+	}
+	return refsByLogicalKey
+}
+
+func (runtime *Runtime) hydrateCustomVault(vaultID string, definition vaultDefinition, refsByLogicalKey map[string]string) error {
 	factory, ok := runtime.secretFactories[definition.Provider]
 	if !ok {
 		return fmt.Errorf("cnos: unsupported vault provider: %s", definition.Provider)
 	}
 
-	refsByLogicalKey := map[string]string{}
 	refs := []string{}
 	seen := map[string]bool{}
-	for key, entry := range runtime.entries {
-		if entry == nil || entry.secretRef == nil || entry.secretRef.Vault != vaultID {
-			continue
-		}
-		entryDefinition := runtime.secretVaultDefinition(*entry.secretRef)
-		if entryDefinition.Provider != definition.Provider {
-			continue
-		}
-		refsByLogicalKey[key] = entry.secretRef.Ref
-		if !seen[entry.secretRef.Ref] {
-			seen[entry.secretRef.Ref] = true
-			refs = append(refs, entry.secretRef.Ref)
+	for _, ref := range refsByLogicalKey {
+		if !seen[ref] {
+			seen[ref] = true
+			refs = append(refs, ref)
 		}
 	}
 	sort.Strings(refs)
@@ -611,7 +657,12 @@ func (runtime *Runtime) hydrateCustomVault(vaultID string, definition vaultDefin
 		return fmt.Errorf("cnos: batch get secrets from vault %q with provider %q: %w", vaultID, definition.Provider, err)
 	}
 	for key, ref := range refsByLogicalKey {
-		runtime.hydratedSecrets[key] = values[ref]
+		if _, alreadyHydrated := runtime.hydratedSecrets[key]; alreadyHydrated {
+			continue
+		}
+		if value := values[ref]; value != nil {
+			runtime.hydratedSecrets[key] = value
+		}
 	}
 	return nil
 }
@@ -633,6 +684,26 @@ func (runtime *Runtime) readEnvironmentSecret(ref SecretReference) any {
 				}
 				break
 			}
+		}
+	}
+	return nil
+}
+
+func (runtime *Runtime) readEnvironmentSecretWithDefinition(ref SecretReference, definition vaultDefinition) any {
+	if value, ok := runtime.env.Get(ref.Ref); ok {
+		return value
+	}
+	if ref.EnvVar != "" {
+		if value, ok := runtime.env.Get(ref.EnvVar); ok {
+			return value
+		}
+	}
+	for envVar, logicalRef := range definition.Mapping {
+		if logicalRef == ref.Ref {
+			if value, ok := runtime.env.Get(envVar); ok {
+				return value
+			}
+			break
 		}
 	}
 	return nil

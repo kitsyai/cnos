@@ -56,17 +56,40 @@ export function createRuntime(
     }
 
     const vaultId = entry.value.vault ?? 'default';
-    const definition = manifest.vaults[vaultId] ?? {
-      provider: entry.value.provider,
+    const baseDefinition = manifest.vaults[vaultId] ?? {
+      provider: entry.value.provider ?? 'local',
       auth: { passphrase: { from: [] } },
     };
-    const provider = createSecretVaultProvider(vaultId, definition, processEnv, secretVaultProviders);
-    const auth = await resolveVaultAuth(vaultId, definition, processEnv);
-    await provider.authenticate(auth);
-    const value = await provider.get(entry.value.ref);
+    const definition = entry.value.provider && entry.value.provider !== baseDefinition.provider
+      ? { ...baseDefinition, provider: entry.value.provider }
+      : baseDefinition;
+    const definitions = [definition, ...(definition.fallback ?? [])];
+    let lastError: unknown;
 
-    if (value !== undefined) {
-      secretCache.load(vaultId, new Map([[entry.value.ref, value]]));
+    for (const candidate of definitions) {
+      const runtimeDefinition = {
+        provider: candidate.provider,
+        ...(candidate.auth ? { auth: candidate.auth } : {}),
+        ...(candidate.mapping ? { mapping: candidate.mapping } : {}),
+      };
+
+      try {
+        const provider = createSecretVaultProvider(vaultId, runtimeDefinition, processEnv, secretVaultProviders);
+        const auth = await resolveVaultAuth(vaultId, runtimeDefinition, processEnv);
+        await provider.authenticate(auth);
+        const value = await provider.get(entry.value.ref);
+
+        if (value !== undefined) {
+          secretCache.load(vaultId, new Map([[entry.value.ref, value]]));
+          return;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
     }
   }
 

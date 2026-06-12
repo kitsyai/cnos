@@ -1,6 +1,6 @@
 import {
   CnosManifestError,
-  createSecretVaultProvider,
+  assertSecretRefVaultProviderCompatible,
   isSecretReference,
   type CnosCreateOptions,
   type CnosRuntime,
@@ -155,16 +155,14 @@ function validateServerProjectionSecretRefs(runtime: CnosRuntime): void {
     const vaultId = entry.value.vault ?? 'default';
     const definition = runtime.manifest.vaults[vaultId];
 
-    if (!definition) {
+    if (!definition && entry.value.vault) {
       throw new CnosManifestError(`Unknown vault "${vaultId}" for secret ref "${entry.key}"`);
     }
 
-    if (entry.value.provider !== definition.provider) {
-      throw new CnosManifestError(
-        `Secret ref "${entry.key}" declares provider "${entry.value.provider}" but vault "${vaultId}" uses provider "${definition.provider}"`,
-      );
+    if (!definition && !entry.value.provider) {
+      throw new CnosManifestError(`Secret ref "${entry.key}" must declare a provider or reference a configured vault`);
     }
 
-    createSecretVaultProvider(vaultId, definition);
+    assertSecretRefVaultProviderCompatible(runtime.manifest, entry.value, entry.key);
   }
 }

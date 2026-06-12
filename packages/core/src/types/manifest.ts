@@ -47,6 +47,12 @@ export interface VaultAuthDefinition {
   config?: Record<string, unknown>;
 }
 
+export interface VaultFallbackDefinition {
+  provider: VaultProviderName;
+  auth?: VaultAuthDefinition;
+  mapping?: Record<string, string>;
+}
+
 export interface NamespaceDefinition {
   kind: NamespaceKind;
   shareable: boolean;
@@ -59,6 +65,7 @@ export interface VaultDefinition {
   provider: VaultProviderName;
   auth?: VaultAuthDefinition;
   mapping?: Record<string, string>;
+  fallback?: VaultFallbackDefinition[];
 }
 
 export interface ManifestFile {

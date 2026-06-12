@@ -37,6 +37,8 @@ The runtime currently exposes:
 - `cnos.log(message)`
 - `cnos.loadProjection(path)`
 - `cnos.registerRuntimeProvider(namespace, provider)`
+- `cnos.registerSecretVaultProvider(factory)`
+- `cnos.registerSecretVaultProviders(factories)`
 - `cnos.refreshSecrets()`
 - `cnos.refreshSecret(key)`
 
@@ -110,6 +112,20 @@ cnos.registerRuntimeProvider('request', (key) => {
 ```
 
 That lets server-side derived values depend on live request, session, or app-framework context without adding a second config layer.
+
+## Secret Vault Providers
+
+Vault selection is declared in `.cnos/cnos.yml`; runtime code only declares which provider implementations were compiled into the bundle.
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp-secret-manager';
+
+cnos.registerSecretVaultProvider(createGcpSecretManagerVaultProvider());
+await cnos.ready();
+```
+
+Provider packages and batteries-included wrappers should register capabilities before `ready()`. CNOS does not dynamically load provider packages from manifest config.
 
 ## Typed values
 

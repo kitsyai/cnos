@@ -69,8 +69,8 @@ func TestLoadProjectionHydratesCustomVaultProviderInSingleBatch(t *testing.T) {
 		Values:     map[string]any{},
 		Derived:    map[string]DerivedFormula{},
 		SecretRefs: map[string]SecretReference{
-			"db.password": {Provider: "test-remote", Vault: "remote-prod", Ref: "db.password"},
-			"api.token":   {Provider: "test-remote", Vault: "remote-prod", Ref: "api.token"},
+			"db.password": {Vault: "remote-prod", Ref: "db.password"},
+			"api.token":   {Vault: "remote-prod", Ref: "api.token"},
 		},
 		Vaults: map[string]vaultDefinition{
 			"remote-prod": {
@@ -122,6 +122,172 @@ func TestLoadProjectionHydratesCustomVaultProviderInSingleBatch(t *testing.T) {
 	}
 	if len(batchCalls) != 1 || len(getCalls) != 0 {
 		t.Fatalf("expected reads to use cache, got batch=%#v get=%#v", batchCalls, getCalls)
+	}
+}
+
+func TestLoadProjectionUsesExplicitVaultFallback(t *testing.T) {
+	t.Parallel()
+
+	runtime := mustLoadProjectionRuntime(t, ServerProjection{
+		Version:    1,
+		Workspace:  "api",
+		Profile:    "prod",
+		ResolvedAt: "2026-06-11T00:00:00Z",
+		ConfigHash: "hash",
+		Values:     map[string]any{},
+		Derived:    map[string]DerivedFormula{},
+		SecretRefs: map[string]SecretReference{
+			"db.password": {Vault: "remote-prod", Ref: "db.password"},
+		},
+		Vaults: map[string]vaultDefinition{
+			"remote-prod": {
+				Provider: "test-remote",
+				Fallback: []vaultDefinition{
+					{
+						Provider: "environment",
+						Mapping: map[string]string{
+							"DB_PASSWORD": "db.password",
+						},
+					},
+				},
+			},
+		},
+		PublicKeys:        []string{},
+		RuntimeNamespaces: []string{},
+		Meta:              ProjectionMeta{Workspace: "api", Profile: "prod", CnosVersion: "1.10.0"},
+	}, Options{
+		Environment: map[string]string{"DB_PASSWORD": "fallback-secret"},
+		SecretHome:  t.TempDir(),
+	})
+
+	password, ok, err := runtime.Secret("db.password")
+	if err != nil {
+		t.Fatalf("read fallback password: %v", err)
+	}
+	if !ok || password != "fallback-secret" {
+		t.Fatalf("expected fallback secret, got ok=%v value=%v", ok, password)
+	}
+
+	exported, err := runtime.ToServerProjection()
+	if err != nil {
+		t.Fatalf("export projection: %v", err)
+	}
+	if exported.SecretRefs["db.password"].Provider != "test-remote" {
+		t.Fatalf("expected exported secret ref to inherit provider, got %#v", exported.SecretRefs["db.password"])
+	}
+	if len(exported.Vaults["remote-prod"].Fallback) != 1 || exported.Vaults["remote-prod"].Fallback[0].Provider != "environment" {
+		t.Fatalf("expected fallback to round-trip, got %#v", exported.Vaults["remote-prod"])
+	}
+}
+
+func TestLoadProjectionUsesCustomProviderFallback(t *testing.T) {
+	t.Parallel()
+
+	primaryBatchCalls := [][]string{}
+	fallbackBatchCalls := [][]string{}
+	primaryFactory := SecretVaultProviderFactory{
+		Provider: "primary-remote",
+		Create: func(_ string, _ VaultDefinition) (SecretVaultProvider, error) {
+			return &fakeSecretVaultProvider{
+				authCalls:  &[]VaultAuthConfig{},
+				batchCalls: &primaryBatchCalls,
+				getCalls:   &[]string{},
+				values:     map[string]any{},
+			}, nil
+		},
+	}
+	fallbackFactory := SecretVaultProviderFactory{
+		Provider: "fallback-remote",
+		Create: func(_ string, _ VaultDefinition) (SecretVaultProvider, error) {
+			return &fakeSecretVaultProvider{
+				authCalls:  &[]VaultAuthConfig{},
+				batchCalls: &fallbackBatchCalls,
+				getCalls:   &[]string{},
+				values:     map[string]any{"db.password": "fallback-remote-secret"},
+			}, nil
+		},
+	}
+
+	runtime := mustLoadProjectionRuntime(t, ServerProjection{
+		Version:    1,
+		Workspace:  "api",
+		Profile:    "prod",
+		ResolvedAt: "2026-06-11T00:00:00Z",
+		ConfigHash: "hash",
+		Values:     map[string]any{},
+		Derived:    map[string]DerivedFormula{},
+		SecretRefs: map[string]SecretReference{
+			"db.password": {Vault: "remote-prod", Ref: "db.password"},
+		},
+		Vaults: map[string]vaultDefinition{
+			"remote-prod": {
+				Provider: "primary-remote",
+				Fallback: []vaultDefinition{
+					{Provider: "fallback-remote"},
+				},
+			},
+		},
+		PublicKeys:        []string{},
+		RuntimeNamespaces: []string{},
+		Meta:              ProjectionMeta{Workspace: "api", Profile: "prod", CnosVersion: "1.10.0"},
+	}, Options{
+		Environment:          map[string]string{},
+		SecretHome:           t.TempDir(),
+		SecretVaultProviders: []SecretVaultProviderFactory{primaryFactory, fallbackFactory},
+	})
+
+	password, ok, err := runtime.Secret("db.password")
+	if err != nil {
+		t.Fatalf("read custom fallback password: %v", err)
+	}
+	if !ok || password != "fallback-remote-secret" {
+		t.Fatalf("expected fallback remote secret, got ok=%v value=%v", ok, password)
+	}
+	if len(primaryBatchCalls) != 1 || !reflect.DeepEqual(primaryBatchCalls[0], []string{"db.password"}) {
+		t.Fatalf("expected primary batch call, got %#v", primaryBatchCalls)
+	}
+	if len(fallbackBatchCalls) != 1 || !reflect.DeepEqual(fallbackBatchCalls[0], []string{"db.password"}) {
+		t.Fatalf("expected fallback batch call, got %#v", fallbackBatchCalls)
+	}
+}
+
+func TestLoadProjectionRejectsConflictingSecretRefProvider(t *testing.T) {
+	t.Parallel()
+
+	runtime := mustLoadProjectionRuntime(t, ServerProjection{
+		Version:    1,
+		Workspace:  "api",
+		Profile:    "prod",
+		ResolvedAt: "2026-06-11T00:00:00Z",
+		ConfigHash: "hash",
+		Values:     map[string]any{},
+		Derived:    map[string]DerivedFormula{},
+		SecretRefs: map[string]SecretReference{
+			"db.password": {
+				Provider: "environment",
+				Vault:    "remote-prod",
+				Ref:      "db.password",
+			},
+		},
+		Vaults: map[string]vaultDefinition{
+			"remote-prod": {
+				Provider: "test-remote",
+			},
+		},
+		PublicKeys:        []string{},
+		RuntimeNamespaces: []string{},
+		Meta:              ProjectionMeta{Workspace: "api", Profile: "prod", CnosVersion: "1.10.0"},
+	}, Options{
+		Environment: map[string]string{"db.password": "should-not-resolve"},
+		SecretHome:  t.TempDir(),
+	})
+
+	_, _, err := runtime.Secret("db.password")
+	if err == nil {
+		t.Fatal("expected conflicting secret ref provider to fail")
+	}
+	if got := err.Error(); got != `cnos: secret ref "secret.db.password" declares provider "environment" but vault "remote-prod" uses provider "test-remote"` {
+		t.Fatalf("unexpected error: %s", got)
 	}
 }
 
@@ -226,7 +392,7 @@ func remoteProviderProjection(tokenSources []string) ServerProjection {
 		Values:     map[string]any{},
 		Derived:    map[string]DerivedFormula{},
 		SecretRefs: map[string]SecretReference{
-			"db.password": {Provider: "test-remote", Vault: "remote-prod", Ref: "db.password"},
+			"db.password": {Vault: "remote-prod", Ref: "db.password"},
 		},
 		Vaults: map[string]vaultDefinition{
 			"remote-prod": {

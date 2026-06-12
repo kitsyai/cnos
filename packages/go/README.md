@@ -95,7 +95,7 @@ if err := runtime.RegisterRuntimeProvider("request", func(path string) any {
 }
 ```
 
-Remote vault providers can be registered programmatically for projection or authoring runtimes:
+Remote vault providers are compiled into the binary by registering provider factories. The manifest still decides which named vault uses which provider:
 
 ```go
 factory := cnos.SecretVaultProviderFactory{
@@ -110,7 +110,7 @@ runtime, err := cnos.Load(cnos.Options{
 })
 ```
 
-The runtime resolves projected auth refs such as `env:NAME`, `file:~/.token`, and `keychain:cnos/prod` into an in-memory `VaultAuthConfig`, calls `Authenticate`, and batches startup hydration with one `BatchGet` call per vault.
+Secret refs may omit `provider` when they name a configured vault. The runtime resolves projected auth refs such as `env:NAME`, `file:~/.token`, and `keychain:cnos/prod` into an in-memory `VaultAuthConfig`, calls `Authenticate`, and batches startup hydration with one `BatchGet` call per vault. Explicit vault fallbacks are supported; there is no automatic env fallback.
 
 Built-in `process.*` reads support `env.*`, `cwd`, `platform`, `arch`, and `pid`. `process.node.version` remains Node-only and resolves only in the JavaScript runtime.
 
