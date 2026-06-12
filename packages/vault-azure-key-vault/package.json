@@ -1,0 +1,36 @@
+{
+  "name": "@kitsy/cnos-vault-azure-key-vault",
+  "version": "0.0.0",
+  "description": "Azure Key Vault provider for CNOS.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@azure/identity": "^4.13.1",
+    "@azure/keyvault-secrets": "^4.11.2",
+    "@kitsy/cnos-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@kitsy/cnos-vault-testkit": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "clean": "rimraf dist",
+    "dev": "tsup src/index.ts --watch --format esm,cjs --dts",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

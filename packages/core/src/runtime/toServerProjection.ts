@@ -40,6 +40,7 @@ function shouldProjectResolvedValue(sourceId: string | undefined): boolean {
 const SAFE_PROJECTED_CONFIG_KEYS = new Set([
   'address',
   'audience',
+  'clientid',
   'endpoint',
   'mount',
   'namespace',
@@ -50,8 +51,10 @@ const SAFE_PROJECTED_CONFIG_KEYS = new Set([
   'scopes',
   'serviceaccountemail',
   'tenant',
+  'tenantid',
   'url',
   'version',
+  'vaulturl',
 ]);
 
 function isSafeProjectedConfigKey(key: string): boolean {

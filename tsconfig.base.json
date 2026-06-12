@@ -78,6 +78,9 @@
       "@kitsy/cnos-vault-aws-secrets-manager": [
         "packages/vault-aws-secrets-manager/src/index.ts"
       ],
+      "@kitsy/cnos-vault-azure-key-vault": [
+        "packages/vault-azure-key-vault/src/index.ts"
+      ],
       "@kitsy/cnos-vault-gcp-secret-manager": [
         "packages/vault-gcp-secret-manager/src/index.ts"
       ],

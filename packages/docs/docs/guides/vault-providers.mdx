@@ -198,3 +198,32 @@ vaults:
 ```
 
 For KV v2, CNOS reads `secret.data.db/password` and extracts the `password` field. Use `path#field` refs or mapping keys to select fields from a Vault secret object. Set `auth.config.version: 1` for KV v1 mounts, and `auth.config.path` to apply a shared path prefix.
+
+## Azure Key Vault
+
+Install and register the compiled-in provider:
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createAzureKeyVaultProvider } from '@kitsy/cnos-vault-azure-key-vault';
+
+cnos.registerSecretVaultProvider(createAzureKeyVaultProvider());
+await cnos.ready();
+```
+
+Use `auth.method: iam` and let Azure Identity resolve credentials from managed identity, workload identity, environment credentials, or the standard `DefaultAzureCredential` chain:
+
+```yaml
+vaults:
+  prod-azure:
+    provider: azure-key-vault
+    auth:
+      method: iam
+      config:
+        vaultUrl: https://acme-prod.vault.azure.net
+        tenantId: 00000000-0000-0000-0000-000000000000
+    mapping:
+      db-password: db.password
+```
+
+CNOS resolves `secret.db.password` from the Azure secret name `db-password`. Set `auth.config.version` for a pinned version, or use a full Azure secret URL such as `https://acme-prod.vault.azure.net/secrets/db-password/version-id` as the ref when no mapping is required.
