@@ -10,7 +10,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
-    "publish:check": "pnpm build && pnpm --filter @kitsy/cnos --filter @kitsy/cnos-cli --filter @kitsy/cnos-ui --filter @kitsy/cnos-vite --filter @kitsy/cnos-next --filter @kitsy/cnos-webpack --filter @kitsy/cnos-docs --filter @kitsy/cnos-vault-gcp-secret-manager --filter @kitsy/cnos-vault-aws-secrets-manager --filter @kitsy/cnos-vault-hashicorp --filter @kitsy/cnos-vault-azure-key-vault pack --pack-destination .artifacts",
+    "publish:check": "pnpm build && pnpm --filter @kitsy/cnos --filter @kitsy/cnos-cli --filter @kitsy/cnos-ui --filter @kitsy/cnos-vite --filter @kitsy/cnos-next --filter @kitsy/cnos-webpack --filter @kitsy/cnos-docs --filter @kitsy/cnos-vault-gcp-secret-manager --filter @kitsy/cnos-vault-firebase-secrets --filter @kitsy/cnos-vault-aws-secrets-manager --filter @kitsy/cnos-vault-hashicorp --filter @kitsy/cnos-vault-azure-key-vault pack --pack-destination .artifacts",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish"

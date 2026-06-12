@@ -137,6 +137,40 @@ vaults:
 
 CNOS resolves `secret.db.password` from `projects/acme-prod/secrets/db-password/versions/latest`. Set `auth.config.version` to read a pinned version, or `auth.config.location` for regional Secret Manager resources. A full ref such as `projects/acme-prod/secrets/db-password/versions/5` is also accepted.
 
+## Firebase Secrets
+
+Install and register the compiled-in provider:
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createFirebaseSecretsVaultProvider } from '@kitsy/cnos-vault-firebase-secrets';
+
+cnos.registerSecretVaultProvider(createFirebaseSecretsVaultProvider());
+await cnos.ready();
+```
+
+Firebase Secrets are backed by Google Secret Manager. Use `auth.method: iam` and let the official Google SDK resolve Application Default Credentials or an attached service account:
+
+```yaml
+vaults:
+  prod-firebase:
+    provider: firebase-secrets
+    auth:
+      method: iam
+      config:
+        projectId: acme-prod
+    mapping:
+      DB_PASSWORD: db.password
+    fallback:
+      - provider: environment
+        mapping:
+          DB_PASSWORD: db.password
+```
+
+CNOS resolves `secret.db.password` from `projects/acme-prod/secrets/DB_PASSWORD/versions/latest`. Set `auth.config.version` to read a pinned version, or `auth.config.location` for regional Secret Manager resources. A full ref such as `projects/acme-prod/secrets/DB_PASSWORD/versions/5` is also accepted.
+
+Firebase and Google Cloud Functions can inject secrets as environment variables. Model that as an explicit `environment` fallback in the vault definition; CNOS never silently falls back to env when a remote provider fails.
+
 ## AWS Secrets Manager
 
 Install and register the compiled-in provider:

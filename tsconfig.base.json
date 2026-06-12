@@ -84,6 +84,9 @@
       "@kitsy/cnos-vault-gcp-secret-manager": [
         "packages/vault-gcp-secret-manager/src/index.ts"
       ],
+      "@kitsy/cnos-vault-firebase-secrets": [
+        "packages/vault-firebase-secrets/src/index.ts"
+      ],
       "@kitsy/cnos-vault-hashicorp": [
         "packages/vault-hashicorp/src/index.ts"
       ]
