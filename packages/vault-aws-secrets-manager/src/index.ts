@@ -41,12 +41,20 @@ interface AwsSecretValue {
 
 interface AwsBatchGetSecretValueOutput {
   SecretValues?: AwsSecretValue[];
+  Errors?: AwsBatchGetSecretValueError[];
+}
+
+interface AwsBatchGetSecretValueError {
+  ErrorCode?: string;
+  Message?: string;
+  SecretId?: string;
 }
 
 type AwsGetSecretValueOutput = AwsSecretValue;
 
 interface AwsListSecretsOutput {
   SecretList?: Array<{ Name?: string; ARN?: string }>;
+  NextToken?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,6 +114,10 @@ function isResourceNotFound(error: unknown): boolean {
   }
 
   return error.name === 'ResourceNotFoundException' || error.Code === 'ResourceNotFoundException';
+}
+
+function isResourceNotFoundCode(errorCode: string | undefined): boolean {
+  return errorCode === 'ResourceNotFoundException';
 }
 
 class AwsSecretsManagerVaultProvider implements RemoteSecretVaultProvider {
@@ -175,15 +187,33 @@ class AwsSecretsManagerVaultProvider implements RemoteSecretVaultProvider {
   }
 
   private resolveOutputRef(secret: AwsSecretValue, requestedRefs: Map<string, string>): string | undefined {
+    if (secret.ARN) {
+      const arnRef = requestedRefs.get(secret.ARN);
+
+      if (arnRef) {
+        return arnRef;
+      }
+    }
+
     if (secret.Name) {
       return requestedRefs.get(secret.Name) ?? this.logicalRefForExternalSecretId(secret.Name);
     }
 
-    if (secret.ARN) {
-      return requestedRefs.get(secret.ARN);
-    }
-
     return undefined;
+  }
+
+  private assertBatchErrors(output: AwsBatchGetSecretValueOutput): void {
+    for (const error of output.Errors ?? []) {
+      if (isResourceNotFoundCode(error.ErrorCode)) {
+        continue;
+      }
+
+      throw new Error(
+        `AWS Secrets Manager batch read failed for "${error.SecretId ?? 'unknown'}": ${
+          error.ErrorCode ?? 'UnknownError'
+        }${error.Message ? `: ${error.Message}` : ''}`,
+      );
+    }
   }
 
   private async getOne(ref: string): Promise<string | undefined> {
@@ -223,7 +253,10 @@ class AwsSecretsManagerVaultProvider implements RemoteSecretVaultProvider {
         SecretIdList: requestedRefs.map((ref) => this.externalSecretIdForRef(ref)),
       }));
 
-      for (const secret of (response as AwsBatchGetSecretValueOutput).SecretValues ?? []) {
+      const output = response as AwsBatchGetSecretValueOutput;
+      this.assertBatchErrors(output);
+
+      for (const secret of output.SecretValues ?? []) {
         const ref = this.resolveOutputRef(secret, externalToLogical);
         const value = decodeSecretValue(secret);
 
@@ -268,11 +301,27 @@ class AwsSecretsManagerVaultProvider implements RemoteSecretVaultProvider {
   }
 
   async list(): Promise<string[]> {
-    const response = await this.client.send(new ListSecretsCommand({}));
+    const secretIds = new Set<string>();
+    let nextToken: string | undefined;
 
-    return ((response as AwsListSecretsOutput).SecretList ?? [])
-      .map((secret) => secret.Name ?? secret.ARN)
-      .filter((secretId): secretId is string => Boolean(secretId))
+    do {
+      const response = await this.client.send(new ListSecretsCommand({
+        ...(nextToken ? { NextToken: nextToken } : {}),
+      }));
+      const output = response as AwsListSecretsOutput;
+
+      for (const secret of output.SecretList ?? []) {
+        const secretId = secret.Name ?? secret.ARN;
+
+        if (secretId) {
+          secretIds.add(secretId);
+        }
+      }
+
+      nextToken = output.NextToken;
+    } while (nextToken);
+
+    return Array.from(secretIds)
       .map((secretId) => this.logicalRefForExternalSecretId(secretId))
       .sort((left, right) => left.localeCompare(right));
   }
