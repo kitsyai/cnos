@@ -2,13 +2,13 @@ import {
   defineSecretVaultProviderConformanceSuite,
   defineSecretVaultRuntimeConformanceSuite,
 } from '@kitsy/cnos-vault-testkit';
+import { describe, expect, it } from 'vitest';
 
 import {
   GCP_SECRET_MANAGER_VAULT_PROVIDER,
   type GcpSecretManagerClient,
   createGcpSecretManagerVaultProvider,
 } from '../src/index.js';
-import { expect } from 'vitest';
 
 const projectId = 'cnos-test-project';
 const secrets = {
@@ -136,4 +136,91 @@ defineSecretVaultRuntimeConformanceSuite(GCP_SECRET_MANAGER_VAULT_PROVIDER, () =
       ]);
     },
   };
+});
+
+describe('gcp-secret-manager ref path construction', () => {
+  it('uses auth.config.version for pinned secret versions', async () => {
+    const calls = createCalls();
+    const provider = createGcpSecretManagerVaultProvider({ client: createClient(calls) }).create('gcp-prod', {
+      provider: GCP_SECRET_MANAGER_VAULT_PROVIDER,
+      mapping,
+      auth: {
+        method: 'iam',
+        config: {
+          projectId,
+          version: '7',
+        },
+      },
+    });
+
+    await provider.authenticate({ method: 'iam', config: { projectId, version: '7' } });
+    await provider.get('db.password');
+
+    expect(calls.accessSecretVersion).toEqual([
+      `projects/${projectId}/secrets/db-password/versions/7`,
+    ]);
+  });
+
+  it('uses auth.config.location for regional Secret Manager resources', async () => {
+    const calls = createCalls();
+    const provider = createGcpSecretManagerVaultProvider({ client: createClient(calls) }).create('gcp-regional', {
+      provider: GCP_SECRET_MANAGER_VAULT_PROVIDER,
+      mapping,
+      auth: {
+        method: 'iam',
+        config: {
+          projectId,
+          location: 'us-central1',
+        },
+      },
+    });
+
+    await provider.authenticate({ method: 'iam', config: { projectId, location: 'us-central1' } });
+    await provider.get('app.token');
+    await provider.list();
+
+    expect(calls.accessSecretVersion).toEqual([
+      `projects/${projectId}/locations/us-central1/secrets/app-token/versions/latest`,
+    ]);
+    expect(calls.listSecrets).toEqual([`projects/${projectId}/locations/us-central1`]);
+  });
+
+  it('passes full Secret Manager version refs through unchanged', async () => {
+    const calls = createCalls();
+    const fullRef = `projects/${projectId}/secrets/db-password/versions/3`;
+    const provider = createGcpSecretManagerVaultProvider({ client: createClient(calls) }).create('gcp-full-ref', {
+      provider: GCP_SECRET_MANAGER_VAULT_PROVIDER,
+      auth: {
+        method: 'iam',
+        config: {
+          projectId: 'ignored-project',
+          version: 'ignored-version',
+        },
+      },
+    });
+
+    await provider.authenticate({ method: 'iam', config: { projectId: 'ignored-project' } });
+    await provider.get(fullRef);
+
+    expect(calls.accessSecretVersion).toEqual([fullRef]);
+  });
+
+  it('falls back to the SDK project ID when auth.config.projectId is omitted', async () => {
+    const calls = createCalls();
+    const provider = createGcpSecretManagerVaultProvider({ client: createClient(calls) }).create('gcp-adc', {
+      provider: GCP_SECRET_MANAGER_VAULT_PROVIDER,
+      mapping,
+      auth: {
+        method: 'iam',
+      },
+    });
+
+    await provider.authenticate({ method: 'iam' });
+    await provider.get('db.password');
+
+    expect(calls.getProjectId).toBe(1);
+    expect(calls.accessSecretVersion).toEqual([
+      `projects/${projectId}/secrets/db-password/versions/latest`,
+    ]);
+  });
 });
