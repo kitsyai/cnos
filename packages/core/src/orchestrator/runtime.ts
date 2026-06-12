@@ -55,7 +55,6 @@ export function createRuntime(
     }
 
     const vaultId = entry.value.vault ?? 'default';
-    activeSecretCache.delete(vaultId, entry.value.ref);
     const refreshed = await batchResolveSecrets(
       {
         ...graph,
@@ -65,7 +64,14 @@ export function createRuntime(
       processEnv,
       secretVaultProviders,
     );
-    activeSecretCache.load(vaultId, refreshed.entriesForVault(vaultId));
+    const resolved = refreshed.get(vaultId, entry.value.ref);
+    const existing = activeSecretCache.entriesForVault(vaultId);
+
+    existing.delete(entry.value.ref);
+    if (resolved !== undefined) {
+      existing.set(entry.value.ref, resolved);
+    }
+    activeSecretCache.replace(vaultId, existing);
   }
 
   async function refreshAllSecrets(): Promise<void> {
@@ -73,13 +79,13 @@ export function createRuntime(
       return;
     }
 
-    activeSecretCache.clear();
-    activeSecretCache = await batchResolveSecrets(
+    const refreshed = await batchResolveSecrets(
       graph,
       manifest,
       processEnv,
       secretVaultProviders,
     );
+    activeSecretCache = refreshed;
   }
 
   function readLogicalKey<T = unknown>(key: string): T | undefined {

@@ -648,6 +648,7 @@ describe('@kitsy/cnos-core', () => {
       ['db.password', 'initial-password'],
       ['api.token', 'initial-token'],
     ]);
+    let failBatch = false;
     const providerFactory: SecretVaultProviderFactory = {
       provider: 'test-remote',
       create(vaultId, definition) {
@@ -660,6 +661,9 @@ describe('@kitsy/cnos-core', () => {
           },
           async batchGet(refs) {
             batchCalls.push([...refs]);
+            if (failBatch) {
+              throw new Error('remote unavailable');
+            }
             return new Map(refs.flatMap((ref) => {
               const value = values.get(ref);
               return value === undefined ? [] : [[ref, value]];
@@ -704,6 +708,18 @@ describe('@kitsy/cnos-core', () => {
       ['db.password', 'api.token'],
       ['db.password', 'api.token'],
     ]);
+    expect(getCalls).toEqual([]);
+
+    values.set('db.password', 'should-not-commit');
+    values.set('api.token', 'should-not-commit');
+    failBatch = true;
+    await expect(runtime.refreshSecrets()).rejects.toThrow('remote unavailable');
+    expect(runtime.secret('db.password')).toBeUndefined();
+    expect(runtime.secret('api.token')).toBe('refreshed-token');
+
+    await expect(runtime.refreshSecret('secret.api.token')).rejects.toThrow('remote unavailable');
+    expect(runtime.secret('db.password')).toBeUndefined();
+    expect(runtime.secret('api.token')).toBe('refreshed-token');
     expect(getCalls).toEqual([]);
   });
 

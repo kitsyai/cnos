@@ -22,6 +22,11 @@ export class SecretCache {
     this.cache.delete(`${vaultId}:${ref}`);
   }
 
+  replace(vaultId: string, secrets: Map<string, string>): void {
+    this.clear(vaultId);
+    this.load(vaultId, secrets);
+  }
+
   entriesForVault(vaultId: string): Map<string, string> {
     const entries = new Map<string, string>();
 
