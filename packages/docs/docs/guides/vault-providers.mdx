@@ -136,3 +136,31 @@ vaults:
 ```
 
 CNOS resolves `secret.db.password` from `projects/acme-prod/secrets/db-password/versions/latest`. Set `auth.config.version` to read a pinned version, or `auth.config.location` for regional Secret Manager resources. A full ref such as `projects/acme-prod/secrets/db-password/versions/5` is also accepted.
+
+## AWS Secrets Manager
+
+Install and register the compiled-in provider:
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createAwsSecretsManagerVaultProvider } from '@kitsy/cnos-vault-aws-secrets-manager';
+
+cnos.registerSecretVaultProvider(createAwsSecretsManagerVaultProvider());
+await cnos.ready();
+```
+
+Use `auth.method: iam` and let AWS SDK v3 resolve credentials from IAM roles, web identity, environment credentials, or the standard AWS provider chain:
+
+```yaml
+vaults:
+  prod-aws:
+    provider: aws-secrets-manager
+    auth:
+      method: iam
+      config:
+        region: us-east-1
+    mapping:
+      db/password: db.password
+```
+
+CNOS resolves `secret.db.password` from the AWS secret ID `db/password`. Set `auth.config.versionId` or `auth.config.versionStage` for pinned or staged reads. Secret refs may also be direct AWS secret names or ARNs when no mapping is required.
