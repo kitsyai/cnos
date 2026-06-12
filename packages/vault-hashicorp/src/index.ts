@@ -40,6 +40,7 @@ export interface HashicorpVaultProviderOptions {
 interface VaultReadRef {
   path: string;
   field: string;
+  explicitField: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,12 +104,13 @@ function parseVaultRef(ref: string): VaultReadRef {
   const separator = ref.lastIndexOf('#');
 
   if (separator === -1) {
-    return { path: ref, field: 'value' };
+    return { path: ref, field: 'value', explicitField: false };
   }
 
   return {
     path: ref.slice(0, separator),
     field: ref.slice(separator + 1) || 'value',
+    explicitField: true,
   };
 }
 
@@ -116,7 +118,7 @@ function uniqueRefs(refs: string[]): string[] {
   return Array.from(new Set(refs)).sort((left, right) => left.localeCompare(right));
 }
 
-function decodeVaultValue(data: unknown, field: string): string | undefined {
+function decodeVaultValue(data: unknown, field: string, explicitField: boolean): string | undefined {
   if (!isRecord(data)) {
     return undefined;
   }
@@ -129,6 +131,10 @@ function decodeVaultValue(data: unknown, field: string): string | undefined {
 
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
+  }
+
+  if (explicitField) {
+    return undefined;
   }
 
   const primitiveEntries = Object.values(data).filter(
@@ -272,7 +278,7 @@ class HashicorpVaultProvider implements RemoteSecretVaultProvider {
       return undefined;
     }
 
-    return decodeVaultValue(readKvData(response.body, this.config.version), parsed.field);
+    return decodeVaultValue(readKvData(response.body, this.config.version), parsed.field, parsed.explicitField);
   }
 
   async batchGet(refs: string[]): Promise<Map<string, string>> {

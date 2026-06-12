@@ -41,6 +41,10 @@ function secretForPath(path: string): Record<string, string> | undefined {
     return { password: secrets['db.password'] };
   }
 
+  if (path.endsWith('/db/missing-password')) {
+    return { username: 'db-user' };
+  }
+
   return undefined;
 }
 
@@ -283,6 +287,28 @@ describe('hashicorp-vault request construction', () => {
       path: 'secret/metadata',
       query: { list: 'true' },
     });
+  });
+
+  it('does not use single primitive fallback when an explicit field is missing', async () => {
+    const { factory } = createFactory();
+    const provider = factory.create('vault-explicit-field', {
+      provider: HASHICORP_VAULT_PROVIDER,
+      auth: {
+        method: 'token',
+        token: {
+          from: ['env:VAULT_TOKEN'],
+        },
+        config: {
+          address,
+          mount: 'secret',
+          version: 2,
+        },
+      },
+    });
+
+    await provider.authenticate({ method: 'token', token, config: { address } });
+    await expect(provider.get('db/missing-password#password')).resolves.toBeUndefined();
+    await expect(provider.get('db/missing-password')).resolves.toBe('db-user');
   });
 
   it('rejects missing token authentication', async () => {
