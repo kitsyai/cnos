@@ -168,6 +168,16 @@ importers:
         specifier: workspace:*
         version: link:../vault-testkit
 
+  packages/vault-hashicorp:
+    dependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@kitsy/cnos-vault-testkit':
+        specifier: workspace:*
+        version: link:../vault-testkit
+
   packages/vault-testkit:
     dependencies:
       '@kitsy/cnos':

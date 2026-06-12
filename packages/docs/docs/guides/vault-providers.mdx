@@ -164,3 +164,37 @@ vaults:
 ```
 
 CNOS resolves `secret.db.password` from the AWS secret ID `db/password`. Set `auth.config.versionId` or `auth.config.versionStage` for pinned or staged reads. Secret refs may also be direct AWS secret names or ARNs when no mapping is required.
+
+## HashiCorp Vault
+
+Install and register the compiled-in provider:
+
+```ts
+import cnos from '@kitsy/cnos';
+import { createHashicorpVaultProvider } from '@kitsy/cnos-vault-hashicorp';
+
+cnos.registerSecretVaultProvider(createHashicorpVaultProvider());
+await cnos.ready();
+```
+
+Use `auth.method: token` and source the Vault token from env, file, or keychain. CNOS resolves the token and passes it to Vault as `X-Vault-Token`:
+
+```yaml
+vaults:
+  prod-vault:
+    provider: hashicorp-vault
+    auth:
+      method: token
+      token:
+        from:
+          - env:VAULT_TOKEN
+      config:
+        address: https://vault.example.com
+        mount: secret
+        namespace: admin/team-a
+        version: 2
+    mapping:
+      db/password#password: db.password
+```
+
+For KV v2, CNOS reads `secret.data.db/password` and extracts the `password` field. Use `path#field` refs or mapping keys to select fields from a Vault secret object. Set `auth.config.version: 1` for KV v1 mounts, and `auth.config.path` to apply a shared path prefix.
