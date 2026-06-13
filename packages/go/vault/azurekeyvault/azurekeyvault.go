@@ -287,14 +287,22 @@ func newSDKClient(config vaultConfig) (Client, error) {
 }
 
 func newCredential(config vaultConfig) (azcore.TokenCredential, error) {
-	if config.clientID != "" {
-		return azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
-			ID: azidentity.ClientID(config.clientID),
-		})
-	}
-	return azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+	defaultCredential, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
 		TenantID: config.tenantID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if config.clientID != "" {
+		managedIdentity, err := azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
+			ID: azidentity.ClientID(config.clientID),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return azidentity.NewChainedTokenCredential([]azcore.TokenCredential{managedIdentity, defaultCredential}, nil)
+	}
+	return defaultCredential, nil
 }
 
 func (client *sdkClient) GetSecret(ctx context.Context, name string, version string) (*string, error) {

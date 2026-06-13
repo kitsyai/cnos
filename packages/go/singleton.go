@@ -204,8 +204,7 @@ func RefreshSecrets() error {
 	if err != nil {
 		return err
 	}
-	runtime.RefreshSecrets()
-	return runtime.warmSecrets()
+	return runtime.RefreshSecrets()
 }
 
 func RefreshSecret(path string) error {
@@ -213,8 +212,7 @@ func RefreshSecret(path string) error {
 	if err != nil {
 		return err
 	}
-	runtime.RefreshSecret(path)
-	return nil
+	return runtime.RefreshSecret(path)
 }
 
 func Projection() (ServerProjection, error) {

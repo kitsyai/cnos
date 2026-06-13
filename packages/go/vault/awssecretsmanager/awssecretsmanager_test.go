@@ -20,6 +20,7 @@ type fakeClient struct {
 	getInputs   []*secretsmanager.GetSecretValueInput
 	batchErrors []types.APIErrorType
 	values      map[string]string
+	binary      map[string][]byte
 }
 
 func (client *fakeClient) BatchGetSecretValue(_ context.Context, input *secretsmanager.BatchGetSecretValueInput, _ ...func(*secretsmanager.Options)) (*secretsmanager.BatchGetSecretValueOutput, error) {
@@ -33,6 +34,8 @@ func (client *fakeClient) BatchGetSecretValue(_ context.Context, input *secretsm
 				entry.ARN = aws.String(directARN)
 			}
 			output.SecretValues = append(output.SecretValues, entry)
+		} else if value, ok := client.binary[id]; ok {
+			output.SecretValues = append(output.SecretValues, types.SecretValueEntry{Name: aws.String(id), SecretBinary: value})
 		}
 	}
 	return output, nil
@@ -43,6 +46,9 @@ func (client *fakeClient) GetSecretValue(_ context.Context, input *secretsmanage
 	secretID := aws.ToString(input.SecretId)
 	if value, ok := client.values[secretID]; ok {
 		return &secretsmanager.GetSecretValueOutput{Name: aws.String(secretID), SecretString: aws.String(value)}, nil
+	}
+	if value, ok := client.binary[secretID]; ok {
+		return &secretsmanager.GetSecretValueOutput{Name: aws.String(secretID), SecretBinary: value}, nil
 	}
 	return nil, resourceNotFoundError{}
 }
@@ -168,6 +174,45 @@ func TestBatchErrorsFailExceptMissing(t *testing.T) {
 	_, err = provider.BatchGet([]string{"db.password"})
 	if err == nil || !strings.Contains(err.Error(), "DecryptionFailure") {
 		t.Fatalf("expected decryption failure, got %v", err)
+	}
+}
+
+func TestSecretBinaryUsesRawSDKBytes(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeClient{binary: map[string][]byte{"db/password": []byte("cGFzcw==")}}
+	provider, err := New("aws-prod", cnos.VaultDefinition{
+		Provider: Provider,
+		Mapping:  map[string]string{"db/password": "db.password"},
+	}, WithClient(client))
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	values, err := provider.BatchGet([]string{"db.password"})
+	if err != nil {
+		t.Fatalf("batch get: %v", err)
+	}
+	if values["db.password"] != "cGFzcw==" {
+		t.Fatalf("expected raw batch binary bytes, got %#v", values["db.password"])
+	}
+
+	versioned, err := New("aws-prod", cnos.VaultDefinition{
+		Provider: Provider,
+		Mapping:  map[string]string{"db/password": "db.password"},
+		Auth: cnos.VaultAuthDefinition{
+			Config: map[string]any{"versionId": "version-123"},
+		},
+	}, WithClient(client))
+	if err != nil {
+		t.Fatalf("create versioned provider: %v", err)
+	}
+	value, err := versioned.Get("db.password")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if value != "cGFzcw==" {
+		t.Fatalf("expected raw get binary bytes, got %#v", value)
 	}
 }
 

@@ -2,6 +2,7 @@ package cnos
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ type fakeSecretVaultProvider struct {
 	batchCalls *[][]string
 	getCalls   *[]string
 	values     map[string]any
+	batchErr   error
 }
 
 func (provider *fakeSecretVaultProvider) Authenticate(auth VaultAuthConfig) error {
@@ -22,11 +24,107 @@ func (provider *fakeSecretVaultProvider) Authenticate(auth VaultAuthConfig) erro
 
 func (provider *fakeSecretVaultProvider) BatchGet(refs []string) (map[string]any, error) {
 	*provider.batchCalls = append(*provider.batchCalls, append([]string(nil), refs...))
+	if provider.batchErr != nil {
+		return nil, provider.batchErr
+	}
 	result := map[string]any{}
 	for _, ref := range refs {
 		result[ref] = provider.values[ref]
 	}
 	return result, nil
+}
+
+func TestRefreshSecretsKeepsCachedValuesWhenRemoteRefreshFails(t *testing.T) {
+	t.Parallel()
+
+	refreshErr := errors.New("remote unavailable")
+	failRefresh := false
+	factory := SecretVaultProviderFactory{
+		Provider: "test-remote",
+		Create: func(_ string, _ VaultDefinition) (SecretVaultProvider, error) {
+			provider := &fakeSecretVaultProvider{
+				authCalls:  &[]VaultAuthConfig{},
+				batchCalls: &[][]string{},
+				getCalls:   &[]string{},
+				values:     map[string]any{"db.password": "remote-password"},
+			}
+			if failRefresh {
+				provider.batchErr = refreshErr
+			}
+			return provider, nil
+		},
+	}
+
+	runtime := mustLoadProjectionRuntime(t, remoteProviderProjection([]string{"env:REMOTE_TOKEN"}), Options{
+		Environment:          map[string]string{"REMOTE_TOKEN": "provider-token"},
+		SecretHome:           t.TempDir(),
+		SecretVaultProviders: []SecretVaultProviderFactory{factory},
+	})
+	password, ok, err := runtime.Secret("db.password")
+	if err != nil || !ok || password != "remote-password" {
+		t.Fatalf("expected initial remote secret, got value=%v ok=%v err=%v", password, ok, err)
+	}
+
+	failRefresh = true
+	if err := runtime.RefreshSecrets(); !errors.Is(err, refreshErr) {
+		t.Fatalf("expected refresh error, got %v", err)
+	}
+	password, ok, err = runtime.Secret("db.password")
+	if err != nil || !ok || password != "remote-password" {
+		t.Fatalf("expected failed refresh to keep cached secret, got value=%v ok=%v err=%v", password, ok, err)
+	}
+}
+
+func TestRefreshSecretClearsStaleValueOnlyAfterSuccessfulRefresh(t *testing.T) {
+	t.Parallel()
+
+	refreshErr := errors.New("remote unavailable")
+	values := map[string]any{"db.password": "remote-password"}
+	failRefresh := false
+	factory := SecretVaultProviderFactory{
+		Provider: "test-remote",
+		Create: func(_ string, _ VaultDefinition) (SecretVaultProvider, error) {
+			provider := &fakeSecretVaultProvider{
+				authCalls:  &[]VaultAuthConfig{},
+				batchCalls: &[][]string{},
+				getCalls:   &[]string{},
+				values:     values,
+			}
+			if failRefresh {
+				provider.batchErr = refreshErr
+			}
+			return provider, nil
+		},
+	}
+
+	runtime := mustLoadProjectionRuntime(t, remoteProviderProjection([]string{"env:REMOTE_TOKEN"}), Options{
+		Environment:          map[string]string{"REMOTE_TOKEN": "provider-token"},
+		SecretHome:           t.TempDir(),
+		SecretVaultProviders: []SecretVaultProviderFactory{factory},
+	})
+	password, ok, err := runtime.Secret("db.password")
+	if err != nil || !ok || password != "remote-password" {
+		t.Fatalf("expected initial remote secret, got value=%v ok=%v err=%v", password, ok, err)
+	}
+
+	failRefresh = true
+	if err := runtime.RefreshSecret("db.password"); !errors.Is(err, refreshErr) {
+		t.Fatalf("expected refresh error, got %v", err)
+	}
+	password, ok, err = runtime.Secret("db.password")
+	if err != nil || !ok || password != "remote-password" {
+		t.Fatalf("expected failed single refresh to keep cached secret, got value=%v ok=%v err=%v", password, ok, err)
+	}
+
+	failRefresh = false
+	values = map[string]any{}
+	if err := runtime.RefreshSecret("db.password"); err != nil {
+		t.Fatalf("refresh missing secret: %v", err)
+	}
+	password, ok, err = runtime.Secret("db.password")
+	if err != nil || !ok || password != nil {
+		t.Fatalf("expected successful missing refresh to clear stale secret, got value=%v ok=%v err=%v", password, ok, err)
+	}
 }
 
 func (provider *fakeSecretVaultProvider) Get(ref string) (any, error) {

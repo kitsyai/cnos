@@ -181,21 +181,54 @@ func (runtime *Runtime) RegisterSecretVaultProviders(factories ...SecretVaultPro
 	}
 }
 
-func (runtime *Runtime) RefreshSecrets() {
-	runtime.hydratedSecrets = map[string]any{}
-	runtime.localVaultCache = map[string]map[string]string{}
-	_ = runtime.warmSecrets()
+func (runtime *Runtime) RefreshSecrets() error {
+	refreshed := runtime.withSecretCaches(map[string]any{}, map[string]map[string]string{})
+	if err := refreshed.warmSecrets(); err != nil {
+		return err
+	}
+	runtime.hydratedSecrets = refreshed.hydratedSecrets
+	runtime.localVaultCache = refreshed.localVaultCache
+	return nil
 }
 
-func (runtime *Runtime) RefreshSecret(path string) {
+func (runtime *Runtime) RefreshSecret(path string) error {
 	key := toLogicalKey("secret", path)
-	delete(runtime.hydratedSecrets, key)
+	entry := runtime.entries[key]
+	if entry == nil || entry.secretRef == nil {
+		return nil
+	}
+
+	hydratedSecrets := cloneAnyMap(runtime.hydratedSecrets)
+	delete(hydratedSecrets, key)
+	localVaultCache := cloneLocalVaultCache(runtime.localVaultCache)
 	if vault, ok := runtime.logicalKeyToVault[key]; ok {
-		delete(runtime.localVaultCache, vault)
+		delete(localVaultCache, vault)
 	}
-	if entry := runtime.entries[key]; entry != nil && entry.secretRef != nil {
-		_, _, _ = runtime.readSecret(key, *entry.secretRef)
+
+	refreshed := runtime.withSecretCaches(hydratedSecrets, localVaultCache)
+	if _, _, err := refreshed.readSecret(key, *entry.secretRef); err != nil {
+		return err
 	}
+
+	delete(runtime.hydratedSecrets, key)
+	if value, ok := refreshed.hydratedSecrets[key]; ok {
+		runtime.hydratedSecrets[key] = value
+	}
+	if vault, ok := runtime.logicalKeyToVault[key]; ok {
+		if cache, found := refreshed.localVaultCache[vault]; found {
+			runtime.localVaultCache[vault] = cache
+		} else {
+			delete(runtime.localVaultCache, vault)
+		}
+	}
+	return nil
+}
+
+func (runtime *Runtime) withSecretCaches(hydratedSecrets map[string]any, localVaultCache map[string]map[string]string) *Runtime {
+	copy := *runtime
+	copy.hydratedSecrets = hydratedSecrets
+	copy.localVaultCache = localVaultCache
+	return &copy
 }
 
 func newRuntime(source []byte, env environment, secretHome string, factories []SecretVaultProviderFactory) (*Runtime, error) {
@@ -802,6 +835,26 @@ func copyStack(source map[string]bool) map[string]bool {
 		copy[key] = value
 	}
 	return copy
+}
+
+func cloneAnyMap(source map[string]any) map[string]any {
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneLocalVaultCache(source map[string]map[string]string) map[string]map[string]string {
+	result := make(map[string]map[string]string, len(source))
+	for vault, secrets := range source {
+		secretsCopy := make(map[string]string, len(secrets))
+		for key, value := range secrets {
+			secretsCopy[key] = value
+		}
+		result[vault] = secretsCopy
+	}
+	return result
 }
 
 func IsProjectionNotFound(err error) bool {

@@ -94,7 +94,9 @@ func TestLoadProjectionHydratesLocalVaultFromSessionFileAndRefreshes(t *testing.
 	writeLocalVaultFixture(t, secretHome, "local-dev", map[string]string{
 		"app.token": "second-value",
 	})
-	runtime.RefreshSecrets()
+	if err := runtime.RefreshSecrets(); err != nil {
+		t.Fatalf("refresh secrets: %v", err)
+	}
 
 	value, ok, err = runtime.Secret("app.token")
 	if err != nil {

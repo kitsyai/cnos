@@ -3,7 +3,6 @@ package awssecretsmanager
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"sort"
@@ -290,12 +289,6 @@ func decodeGetSecretValue(secret *secretsmanager.GetSecretValueOutput) *string {
 		return &value
 	}
 	if secret.SecretBinary != nil {
-		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(secret.SecretBinary)))
-		n, err := base64.StdEncoding.Decode(decoded, secret.SecretBinary)
-		if err == nil {
-			value := string(decoded[:n])
-			return &value
-		}
 		value := string(secret.SecretBinary)
 		return &value
 	}
