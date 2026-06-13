@@ -205,6 +205,29 @@ describe('firebase-secrets ref path construction', () => {
     expect(calls.accessSecretVersion).toEqual([fullRef]);
   });
 
+  it('passes mapped full Secret Manager version refs through unchanged', async () => {
+    const calls = createCalls();
+    const fullRef = `projects/${projectId}/secrets/DB_PASSWORD/versions/5`;
+    const provider = createFirebaseSecretsVaultProvider({ client: createClient(calls) }).create('firebase-full-ref-map', {
+      provider: FIREBASE_SECRETS_VAULT_PROVIDER,
+      mapping: {
+        [fullRef]: 'db.password',
+      },
+      auth: {
+        method: 'iam',
+        config: {
+          projectId: 'ignored-project',
+          version: 'ignored-version',
+        },
+      },
+    });
+
+    await provider.authenticate({ method: 'iam', config: { projectId: 'ignored-project' } });
+    await provider.get('db.password');
+
+    expect(calls.accessSecretVersion).toEqual([fullRef]);
+  });
+
   it('falls back to the SDK project ID when auth.config.projectId is omitted', async () => {
     const calls = createCalls();
     const provider = createFirebaseSecretsVaultProvider({ client: createClient(calls) }).create('firebase-adc', {

@@ -167,12 +167,13 @@ class GcpSecretManagerVaultProvider implements RemoteSecretVaultProvider {
   }
 
   private async versionNameForRef(ref: string): Promise<string> {
-    if (isFullSecretVersionName(ref)) {
-      return ref;
+    const secretId = this.externalSecretIdForRef(ref);
+
+    if (isFullSecretVersionName(secretId)) {
+      return secretId;
     }
 
     const projectId = await this.resolveProjectId();
-    const secretId = this.externalSecretIdForRef(ref);
     const version = this.config.version ?? 'latest';
 
     if (this.config.location) {
