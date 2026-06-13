@@ -1,5 +1,5 @@
-// Package hashicorpvault provides a compiled-in CNOS provider for HashiCorp Vault.
-package hashicorpvault
+// Package hashicorp provides a compiled-in CNOS provider for HashiCorp Vault.
+package hashicorp
 
 import (
 	"context"

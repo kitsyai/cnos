@@ -1,22 +1,22 @@
-// Package firebasesecrets provides a compiled-in CNOS provider for Firebase Secrets.
-package firebasesecrets
+// Package firebase provides a compiled-in CNOS provider for Firebase Secrets.
+package firebase
 
 import (
 	cnos "github.com/kitsyai/cnos/packages/go"
-	"github.com/kitsyai/cnos/packages/go/vault/gcpsecretmanager"
+	"github.com/kitsyai/cnos/packages/go/vault/gcp"
 )
 
 const Provider = "firebase-secrets"
 
 // Client is the narrow Secret Manager client surface used by this provider.
-type Client = gcpsecretmanager.Client
+type Client = gcp.Client
 
 // Option configures the Firebase Secrets provider factory.
-type Option = gcpsecretmanager.Option
+type Option = gcp.Option
 
 // WithClient injects a client, primarily for tests or custom transports.
 func WithClient(client Client) Option {
-	return gcpsecretmanager.WithClient(client)
+	return gcp.WithClient(client)
 }
 
 // Factory returns a CNOS provider factory for Firebase Secrets.
@@ -31,8 +31,8 @@ func Factory(configure ...Option) cnos.SecretVaultProviderFactory {
 
 // New creates a Firebase Secrets CNOS provider instance.
 func New(vaultID string, definition cnos.VaultDefinition, configure ...Option) (cnos.SecretVaultProvider, error) {
-	definition.Provider = gcpsecretmanager.Provider
-	provider, err := gcpsecretmanager.New(vaultID, definition, configure...)
+	definition.Provider = gcp.Provider
+	provider, err := gcp.New(vaultID, definition, configure...)
 	if err != nil {
 		return nil, err
 	}

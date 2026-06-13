@@ -7,11 +7,11 @@ const cache = resolve(root, ".tmp", "go-build");
 const workspace = resolve(root, "go.work");
 const modules = [
   "packages/go",
-  "packages/go/vault/gcpsecretmanager",
-  "packages/go/vault/firebasesecrets",
-  "packages/go/vault/awssecretsmanager",
-  "packages/go/vault/hashicorpvault",
-  "packages/go/vault/azurekeyvault",
+  "packages/go/vault/gcp",
+  "packages/go/vault/firebase",
+  "packages/go/vault/aws",
+  "packages/go/vault/hashicorp",
+  "packages/go/vault/azure",
 ];
 
 mkdirSync(cache, { recursive: true });

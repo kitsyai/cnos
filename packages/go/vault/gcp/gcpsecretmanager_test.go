@@ -1,4 +1,4 @@
-package gcpsecretmanager
+package gcp
 
 import (
 	"context"
@@ -40,7 +40,7 @@ func TestBatchGetUsesMappedSecretManagerRefs(t *testing.T) {
 	t.Parallel()
 
 	client := &fakeClient{values: map[string]string{
-		"projects/acme/secrets/app-token/versions/latest": "token",
+		"projects/acme/secrets/app-token/versions/latest":   "token",
 		"projects/acme/secrets/db-password/versions/latest": "password",
 	}}
 	provider, err := New("gcp-prod", cnos.VaultDefinition{

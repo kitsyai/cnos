@@ -1,4 +1,4 @@
-package firebasesecrets
+package firebase
 
 import (
 	"context"

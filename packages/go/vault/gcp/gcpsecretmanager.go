@@ -1,5 +1,5 @@
-// Package gcpsecretmanager provides a compiled-in CNOS provider for Google Secret Manager.
-package gcpsecretmanager
+// Package gcp provides a compiled-in CNOS provider for Google Secret Manager.
+package gcp
 
 import (
 	"context"

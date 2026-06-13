@@ -1,5 +1,5 @@
-// Package awssecretsmanager provides a compiled-in CNOS provider for AWS Secrets Manager.
-package awssecretsmanager
+// Package aws provides a compiled-in CNOS provider for AWS Secrets Manager.
+package aws
 
 import (
 	"context"

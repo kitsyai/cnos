@@ -1,5 +1,5 @@
-// Package azurekeyvault provides a compiled-in CNOS provider for Azure Key Vault.
-package azurekeyvault
+// Package azure provides a compiled-in CNOS provider for Azure Key Vault.
+package azure
 
 import (
 	"context"
