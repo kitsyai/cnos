@@ -1,5 +1,5 @@
 {
-  "name": "@kitsy/cnos-vault-firebase-secrets",
+  "name": "@kitsy/cnos-vault-firebase",
   "version": "1.11.0",
   "description": "Firebase Secrets vault provider for CNOS.",
   "type": "module",

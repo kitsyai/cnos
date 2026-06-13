@@ -119,7 +119,7 @@ Vault selection is declared in `.cnos/cnos.yml`; runtime code only declares whic
 
 ```ts
 import cnos from '@kitsy/cnos';
-import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp-secret-manager';
+import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp';
 
 cnos.registerSecretVaultProvider(createGcpSecretManagerVaultProvider());
 await cnos.ready();

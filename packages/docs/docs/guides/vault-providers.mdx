@@ -11,17 +11,17 @@ Remote vault providers are compiled into the application runtime. CNOS never loa
 
 Official providers use this package shape:
 
-- `@kitsy/cnos-vault-gcp-secret-manager`
-- `@kitsy/cnos-vault-aws-secrets-manager`
+- `@kitsy/cnos-vault-gcp`
+- `@kitsy/cnos-vault-aws`
 - `@kitsy/cnos-vault-hashicorp`
-- `@kitsy/cnos-vault-azure-key-vault`
-- `@kitsy/cnos-vault-firebase-secrets`
+- `@kitsy/cnos-vault-azure`
+- `@kitsy/cnos-vault-firebase`
 
 Each package must export a factory named `create<Vendor>VaultProvider()`. The factory returns a `SecretVaultProviderFactory` whose `provider` field exactly matches the manifest provider name.
 
 ```ts
 import cnos from '@kitsy/cnos';
-import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp-secret-manager';
+import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp';
 
 cnos.registerSecretVaultProvider(createGcpSecretManagerVaultProvider());
 await cnos.ready();
@@ -115,7 +115,7 @@ Install and register the compiled-in provider:
 
 ```ts
 import cnos from '@kitsy/cnos';
-import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp-secret-manager';
+import { createGcpSecretManagerVaultProvider } from '@kitsy/cnos-vault-gcp';
 
 cnos.registerSecretVaultProvider(createGcpSecretManagerVaultProvider());
 await cnos.ready();
@@ -143,7 +143,7 @@ Install and register the compiled-in provider:
 
 ```ts
 import cnos from '@kitsy/cnos';
-import { createFirebaseSecretsVaultProvider } from '@kitsy/cnos-vault-firebase-secrets';
+import { createFirebaseSecretsVaultProvider } from '@kitsy/cnos-vault-firebase';
 
 cnos.registerSecretVaultProvider(createFirebaseSecretsVaultProvider());
 await cnos.ready();
@@ -177,7 +177,7 @@ Install and register the compiled-in provider:
 
 ```ts
 import cnos from '@kitsy/cnos';
-import { createAwsSecretsManagerVaultProvider } from '@kitsy/cnos-vault-aws-secrets-manager';
+import { createAwsSecretsManagerVaultProvider } from '@kitsy/cnos-vault-aws';
 
 cnos.registerSecretVaultProvider(createAwsSecretsManagerVaultProvider());
 await cnos.ready();
@@ -239,7 +239,7 @@ Install and register the compiled-in provider:
 
 ```ts
 import cnos from '@kitsy/cnos';
-import { createAzureKeyVaultProvider } from '@kitsy/cnos-vault-azure-key-vault';
+import { createAzureKeyVaultProvider } from '@kitsy/cnos-vault-azure';
 
 cnos.registerSecretVaultProvider(createAzureKeyVaultProvider());
 await cnos.ready();

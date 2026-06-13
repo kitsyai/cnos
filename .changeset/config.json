@@ -12,11 +12,11 @@
       "@kitsy/cnos-webpack",
       "@kitsy/cnos-docs",
       "@kitsy/cnos-ui",
-      "@kitsy/cnos-vault-gcp-secret-manager",
-      "@kitsy/cnos-vault-firebase-secrets",
-      "@kitsy/cnos-vault-aws-secrets-manager",
+      "@kitsy/cnos-vault-gcp",
+      "@kitsy/cnos-vault-firebase",
+      "@kitsy/cnos-vault-aws",
       "@kitsy/cnos-vault-hashicorp",
-      "@kitsy/cnos-vault-azure-key-vault"
+      "@kitsy/cnos-vault-azure"
     ]
   ],
   "linked": [],

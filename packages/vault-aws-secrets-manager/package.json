@@ -1,5 +1,5 @@
 {
-  "name": "@kitsy/cnos-vault-aws-secrets-manager",
+  "name": "@kitsy/cnos-vault-aws",
   "version": "1.11.0",
   "description": "AWS Secrets Manager vault provider for CNOS.",
   "type": "module",

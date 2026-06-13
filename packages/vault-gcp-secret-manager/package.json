@@ -1,5 +1,5 @@
 {
-  "name": "@kitsy/cnos-vault-gcp-secret-manager",
+  "name": "@kitsy/cnos-vault-gcp",
   "version": "1.11.0",
   "description": "Google Secret Manager vault provider for CNOS.",
   "type": "module",
