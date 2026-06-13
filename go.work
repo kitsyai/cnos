@@ -9,6 +9,6 @@ use (
 	./packages/go/vault/hashicorpvault
 )
 
-replace github.com/kitsyai/cnos/packages/go v1.10.0 => ./packages/go
+replace github.com/kitsyai/cnos/packages/go v1.11.0 => ./packages/go
 
-replace github.com/kitsyai/cnos/packages/go/vault/gcpsecretmanager v1.10.0 => ./packages/go/vault/gcpsecretmanager
+replace github.com/kitsyai/cnos/packages/go/vault/gcpsecretmanager v1.11.0 => ./packages/go/vault/gcpsecretmanager

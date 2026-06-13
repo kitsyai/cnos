@@ -3,8 +3,8 @@ module github.com/kitsyai/cnos/packages/go/vault/firebasesecrets
 go 1.25.0
 
 require (
-	github.com/kitsyai/cnos/packages/go v1.10.0
-	github.com/kitsyai/cnos/packages/go/vault/gcpsecretmanager v1.10.0
+	github.com/kitsyai/cnos/packages/go v1.11.0
+	github.com/kitsyai/cnos/packages/go/vault/gcpsecretmanager v1.11.0
 	google.golang.org/grpc v1.80.0
 )
 
