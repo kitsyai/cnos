@@ -11,7 +11,7 @@
     "test:go": "node scripts/test-go.mjs",
     "typecheck": "pnpm -r typecheck",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
-    "publish:check": "pnpm build && pnpm --filter @kitsy/cnos --filter @kitsy/cnos-cli --filter @kitsy/cnos-vite --filter @kitsy/cnos-next --filter @kitsy/cnos-webpack --filter @kitsy/cnos-docs --filter @kitsy/cnos-vault-gcp --filter @kitsy/cnos-vault-firebase --filter @kitsy/cnos-vault-aws --filter @kitsy/cnos-vault-hashicorp --filter @kitsy/cnos-vault-azure pack --pack-destination .artifacts",
+    "publish:check": "pnpm build && pnpm --filter @kitsy/cnos --filter @kitsy/cnos-cli --filter @kitsy/cnos-ui --filter @kitsy/cnos-vite --filter @kitsy/cnos-next --filter @kitsy/cnos-webpack --filter @kitsy/cnos-docs --filter @kitsy/cnos-vault-gcp --filter @kitsy/cnos-vault-firebase --filter @kitsy/cnos-vault-aws --filter @kitsy/cnos-vault-hashicorp --filter @kitsy/cnos-vault-azure pack --pack-destination .artifacts",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish"
