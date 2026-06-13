@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-cli",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "CLI entry point and developer tooling for CNOS.",
   "type": "module",
   "main": "./dist/index.js",

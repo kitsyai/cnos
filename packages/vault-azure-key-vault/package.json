@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vault-azure-key-vault",
-  "version": "0.0.0",
+  "version": "1.11.0",
   "description": "Azure Key Vault provider for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -17,6 +17,9 @@
     "dist"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@azure/identity": "^4.13.1",
     "@azure/keyvault-secrets": "^4.11.2",
