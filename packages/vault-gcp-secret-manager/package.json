@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vault-gcp",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "Google Secret Manager vault provider for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -21,10 +21,13 @@
     "access": "public"
   },
   "dependencies": {
-    "@google-cloud/secret-manager": "^6.1.3",
-    "@kitsy/cnos-core": "workspace:*"
+    "@google-cloud/secret-manager": "^6.1.3"
+  },
+  "peerDependencies": {
+    "@kitsy/cnos": "^1.11.1"
   },
   "devDependencies": {
+    "@kitsy/cnos": "workspace:*",
     "@kitsy/cnos-vault-testkit": "workspace:*"
   },
   "scripts": {

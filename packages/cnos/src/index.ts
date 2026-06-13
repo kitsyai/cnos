@@ -14,4 +14,9 @@ export type {
   ManifestFile,
   NormalizedManifest,
   RuntimeProvider,
+  RemoteSecretVaultProvider,
+  SecretVaultProvider,
+  SecretVaultProviderFactory,
+  VaultAuthConfig,
+  VaultDefinition,
 } from '@kitsy/cnos-core';

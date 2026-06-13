@@ -5,7 +5,7 @@ import type {
   SecretVaultProviderFactory,
   VaultAuthConfig,
   VaultDefinition,
-} from '@kitsy/cnos-core';
+} from '@kitsy/cnos';
 
 export const AZURE_KEY_VAULT_PROVIDER = 'azure-key-vault';
 

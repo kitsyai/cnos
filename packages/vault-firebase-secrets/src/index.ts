@@ -4,7 +4,7 @@ import type {
   SecretVaultProviderFactory,
   VaultAuthConfig,
   VaultDefinition,
-} from '@kitsy/cnos-core';
+} from '@kitsy/cnos';
 
 export const FIREBASE_SECRETS_VAULT_PROVIDER = 'firebase-secrets';
 

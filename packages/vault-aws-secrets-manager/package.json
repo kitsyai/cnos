@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vault-aws",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "AWS Secrets Manager vault provider for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -21,10 +21,13 @@
     "access": "public"
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.1067.0",
-    "@kitsy/cnos-core": "workspace:*"
+    "@aws-sdk/client-secrets-manager": "^3.1067.0"
+  },
+  "peerDependencies": {
+    "@kitsy/cnos": "^1.11.1"
   },
   "devDependencies": {
+    "@kitsy/cnos": "workspace:*",
     "@kitsy/cnos-vault-testkit": "workspace:*"
   },
   "scripts": {

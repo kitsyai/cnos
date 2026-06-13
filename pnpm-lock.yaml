@@ -137,10 +137,10 @@ importers:
       '@aws-sdk/client-secrets-manager':
         specifier: ^3.1067.0
         version: 3.1067.0
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
       '@kitsy/cnos-vault-testkit':
         specifier: workspace:*
         version: link:../vault-testkit
@@ -153,10 +153,10 @@ importers:
       '@azure/keyvault-secrets':
         specifier: ^4.11.2
         version: 4.11.2
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
       '@kitsy/cnos-vault-testkit':
         specifier: workspace:*
         version: link:../vault-testkit
@@ -176,10 +176,10 @@ importers:
       '@google-cloud/secret-manager':
         specifier: ^6.1.3
         version: 6.1.3
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
       '@kitsy/cnos-vault-testkit':
         specifier: workspace:*
         version: link:../vault-testkit
@@ -189,20 +189,19 @@ importers:
       '@google-cloud/secret-manager':
         specifier: ^6.1.3
         version: 6.1.3
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
       '@kitsy/cnos-vault-testkit':
         specifier: workspace:*
         version: link:../vault-testkit
 
   packages/vault-hashicorp:
-    dependencies:
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
+      '@kitsy/cnos':
+        specifier: workspace:*
+        version: link:../cnos
       '@kitsy/cnos-vault-testkit':
         specifier: workspace:*
         version: link:../vault-testkit

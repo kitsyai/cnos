@@ -4,7 +4,7 @@ import type {
   SecretVaultProviderFactory,
   VaultAuthConfig,
   VaultDefinition,
-} from '@kitsy/cnos-core';
+} from '@kitsy/cnos';
 
 export const GCP_SECRET_MANAGER_VAULT_PROVIDER = 'gcp-secret-manager';
 
