@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/hashicorp/vault/api v1.23.0
-	github.com/kitsyai/cnos/packages/go v0.0.0
+	github.com/kitsyai/cnos/packages/go v1.10.0
 )
 
 require (
@@ -28,5 +28,3 @@ require (
 	golang.org/x/time v0.12.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/kitsyai/cnos/packages/go => ../..

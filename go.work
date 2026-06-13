@@ -1,0 +1,14 @@
+go 1.25.0
+
+use (
+	./packages/go
+	./packages/go/vault/awssecretsmanager
+	./packages/go/vault/azurekeyvault
+	./packages/go/vault/firebasesecrets
+	./packages/go/vault/gcpsecretmanager
+	./packages/go/vault/hashicorpvault
+)
+
+replace github.com/kitsyai/cnos/packages/go v1.10.0 => ./packages/go
+
+replace github.com/kitsyai/cnos/packages/go/vault/gcpsecretmanager v1.10.0 => ./packages/go/vault/gcpsecretmanager
