@@ -772,7 +772,7 @@ describe('@kitsy/cnos-cli', () => {
     expect(runHelp('vault create')).toContain('Usage: cnos vault create <name>');
     expect(runHelp('secret set')).toContain('Usage: cnos secret set <path> [value]');
     expect(runHelp('secret set')).toContain('--stdin');
-    expect(runHelp('secret set')).toContain('masked value interactively');
+    expect(runHelp('secret set')).toContain('reference metadata only');
     expect(runHelp('value set')).toContain('Usage: cnos value set <path> <value>');
     expect(runHelp('value set')).toContain('--derive');
     expect(runHelp('value set')).toContain('--expr');
@@ -807,7 +807,7 @@ describe('@kitsy/cnos-cli', () => {
     const secretSetPayload = JSON.parse(runHelpAi('secret set', ['--format=json']));
     expect(secretSetPayload.command.id).toBe('secret set');
     expect(secretSetPayload.command.usage).toContain('cnos secret set <path> [value]');
-    expect(secretSetPayload.command.description).toContain('masked value interactively');
+    expect(secretSetPayload.command.description).toContain('reference metadata only');
     expect(JSON.parse(runHelpAi('value set', ['--format=json'])).command.options.some((option: { flag: string }) => option.flag === '--derive')).toBe(true);
     expect(commandPayload.command.options.some((option: { flag: string }) => option.flag === '--public')).toBe(
       true,
@@ -1137,6 +1137,39 @@ describe('@kitsy/cnos-cli', () => {
         cliArgs: ['--vault', 'default', '--reveal'],
       }),
     ).rejects.toThrow(`Missing CNOS secret path: ${secretPath}`);
+  });
+
+  it('defaults omitted provider-backed secret set values to logical refs instead of prompting for material', async () => {
+    const root = await createRuntimeFixture();
+    const manifestPath = path.join(root, '.cnos', 'cnos.yml');
+
+    await writeFile(
+      manifestPath,
+      `${await readFile(manifestPath, 'utf8')}\n${[
+        'vaults:',
+        '  media-gcp-prod:',
+        '    provider: gcp-secret-manager',
+        '    auth:',
+        '      method: iam',
+        '    mapping:',
+        '      YOUTUBE_API_KEY: youtube.apiKey',
+      ].join('\n')}\n`,
+    );
+
+    await expect(
+      runSecret(['set', 'youtube.apiKey'], {
+        root,
+        workspace: 'api',
+        processEnv: {},
+        cliArgs: ['--vault', 'media-gcp-prod'],
+      }),
+    ).resolves.toContain('No secret material was written by CNOS');
+
+    const secretFile = await readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'youtube.yml'), 'utf8');
+
+    expect(secretFile).toContain('provider: gcp-secret-manager');
+    expect(secretFile).toContain('ref: youtube.apiKey');
+    expect(secretFile).toContain('vault: media-gcp-prod');
   });
 
   it('allows vault auth to reuse an existing local session key', async () => {
@@ -1720,7 +1753,7 @@ describe('@kitsy/cnos-cli', () => {
         processEnv: {},
         cliArgs: ['--vault', 'github-ci'],
       }),
-    ).resolves.toContain('via github-secrets');
+    ).resolves.toContain('No secret material was written by CNOS');
 
     await expect(readFile(path.join(root, '.cnos', 'workspaces', 'api', 'secrets', 'db.yml'), 'utf8')).resolves.toContain(
       'provider: github-secrets',
@@ -1787,6 +1820,31 @@ describe('@kitsy/cnos-cli', () => {
         processEnv: {},
       }),
     ).resolves.toContain('removed vault "github-ci"');
+  });
+
+  it('lists local vault stores outside a CNOS project root', async () => {
+    const root = await createRuntimeFixture();
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-outside-root-'));
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-global-vault-list-'));
+    fixtureRoots.push(outsideRoot);
+    fixtureRoots.push(secretHome);
+
+    await runVault(['create', 'media-vault'], {
+      root,
+      processEnv: {
+        CNOS_SECRET_HOME: secretHome,
+        CNOS_SECRET_PASSPHRASE: 'dev-pass',
+      },
+    });
+
+    await expect(
+      runVault(['list'], {
+        root: outsideRoot,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+        },
+      }),
+    ).resolves.toContain('media-vault provider=local auth=passphrase local-store=true source=local-store');
   });
 
   it('exports env projections and dumps snapshot files', async () => {

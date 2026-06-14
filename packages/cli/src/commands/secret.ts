@@ -79,7 +79,33 @@ async function promptHiddenValue(message: string): Promise<string> {
   }
 }
 
-async function resolveSecretSetValue(secretPath: string, providedValue: string | undefined, stdin: boolean): Promise<string> {
+async function shouldPromptForMissingSecretValue(
+  vault: string,
+  mode: 'local' | 'remote' | 'ref' | undefined,
+  options: RuntimeServiceOptions,
+): Promise<boolean> {
+  if (mode === 'local') {
+    return true;
+  }
+
+  if (mode === 'remote' || mode === 'ref') {
+    return false;
+  }
+
+  const runtime = await createRuntimeService({
+    ...options,
+    secretResolution: 'lazy',
+  });
+
+  return runtime.manifest.vaults[vault]?.provider === 'local';
+}
+
+async function resolveSecretSetValue(
+  secretPath: string,
+  providedValue: string | undefined,
+  stdin: boolean,
+  promptForMissingValue: boolean,
+): Promise<string> {
   if (stdin) {
     return readStdinValue();
   }
@@ -88,7 +114,11 @@ async function resolveSecretSetValue(secretPath: string, providedValue: string |
     return providedValue;
   }
 
-  return promptHiddenValue(`Enter value for secret "${secretPath}": `);
+  if (promptForMissingValue) {
+    return promptHiddenValue(`Enter value for secret "${secretPath}": `);
+  }
+
+  return secretPath;
 }
 
 class WritableMask extends Writable {
@@ -158,7 +188,12 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const vault = consumeOption(cliArgs, '--vault') ?? 'default';
     const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : undefined;
     const resolvedSecretPath = secretPath ?? 'app.token';
-    const rawValue = await resolveSecretSetValue(resolvedSecretPath, tail[1], stdin);
+    const promptForMissingValue = await shouldPromptForMissingSecretValue(vault, mode, {
+      ...options,
+      cliArgs,
+      target,
+    });
+    const rawValue = await resolveSecretSetValue(resolvedSecretPath, tail[1], stdin, promptForMissingValue);
     const result = await setSecret(resolvedSecretPath, rawValue, {
       ...options,
       cliArgs,
@@ -174,7 +209,7 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
 
     return result.provider === 'local'
       ? `set secret.${secretPath} in vault "${result.vault ?? 'default'}" with ref "${result.ref}" and repo pointer ${displayPath(result.filePath, root)}`
-      : `set secret.${secretPath} via ${result.provider} in ${displayPath(result.filePath, root)}`;
+      : `added secret reference secret.${secretPath} -> ref "${result.ref}" in vault "${result.vault ?? 'default'}" using provider "${result.provider}" at ${displayPath(result.filePath, root)}. No secret material was written by CNOS; create or update the secret in the configured vault separately.`;
   }
 
   if (action === 'delete') {

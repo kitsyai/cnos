@@ -18,3 +18,5 @@ For local vaults, `cnos vault create <name>` initializes the encrypted keystore 
 `cnos vault auth <name>` re-authenticates an existing vault and fails on wrong credentials. Successful auth writes a derived session key under `~/.cnos/secrets/sessions`, so later CNOS commands can reuse it across shells until you run `cnos vault logout <name>` or `cnos vault logout --all`. With `--store-keychain`, CNOS also stores the derived key in the OS keychain.
 
 After local vault auth, `cnos secret set <path> --vault <name>` can prompt for a masked secret value interactively when you omit `[value]`.
+
+`cnos vault list` can also run outside a CNOS project. In that mode it lists local vault stores from the configured CNOS secret home instead of requiring `.cnosrc.yml`. Project-scoped vault definitions are included when the command runs inside a CNOS workspace.

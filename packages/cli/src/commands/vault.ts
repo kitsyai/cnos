@@ -9,6 +9,7 @@ import {
   createVaultDefinition,
   listLocalStoreVaults,
   listVaultDefinitions,
+  type VaultRecord,
   logoutVault,
   removeVaultDefinition,
 } from '../services/vaults.js';
@@ -104,30 +105,64 @@ export async function runVault(args: string[] = [], options: RuntimeServiceOptio
     return result.deleted ? `removed vault "${result.name}"` : `vault "${result.name}" was not found`;
   }
 
-  const [manifestVaults, localStoreVaults] = await Promise.all([
-    listVaultDefinitions(options),
-    listLocalStoreVaults(options),
-  ]);
+  const localStoreVaults = await listLocalStoreVaults(options);
+  let manifestVaults: VaultRecord[] = [];
+
+  try {
+    manifestVaults = await listVaultDefinitions(options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (!message.includes('No .cnosrc.yml found') && !message.includes('Could not locate .cnos/cnos.yml')) {
+      throw error;
+    }
+  }
+
+  const manifestNames = new Set(manifestVaults.map((vault) => vault.name));
+  const localOnlyVaults = localStoreVaults
+    .filter((name) => !manifestNames.has(name))
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => ({
+      name,
+      provider: 'local',
+      authMethod: 'passphrase',
+      localStore: true,
+      source: 'local-store',
+    }));
 
   if (options.json) {
     return printJson(
-      manifestVaults.map((vault) => ({
-        ...vault,
-        localStore: localStoreVaults.includes(vault.name),
-      })),
+      [
+        ...manifestVaults.map((vault) => ({
+          ...vault,
+          localStore: localStoreVaults.includes(vault.name),
+        })),
+        ...localOnlyVaults,
+      ],
     );
   }
 
-  if (manifestVaults.length === 0) {
+  const vaults = [
+    ...manifestVaults.map((vault) => ({
+      name: vault.name,
+      provider: vault.provider,
+      authMethod: vault.authMethod,
+      localStore: localStoreVaults.includes(vault.name),
+      source: undefined,
+    })),
+    ...localOnlyVaults,
+  ];
+
+  if (vaults.length === 0) {
     return '';
   }
 
-  return manifestVaults
+  return vaults
     .map(
       (vault) =>
         `${vault.name} provider=${vault.provider} auth=${vault.authMethod}${
-          localStoreVaults.includes(vault.name) ? ' local-store=true' : ''
-        }`,
+          vault.localStore ? ' local-store=true' : ''
+        }${vault.source ? ` source=${vault.source}` : ''}`,
     )
     .join('\n');
 }

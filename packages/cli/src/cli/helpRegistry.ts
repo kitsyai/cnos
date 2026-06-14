@@ -313,11 +313,12 @@ const COMMANDS: HelpCommand[] = [
       },
       {
         flag: '--provider <name>',
-        description: 'Provider name for --remote or --ref secret writes.',
+        description: 'Provider name for remote/reference secret metadata writes.',
       },
       {
         flag: '--vault <name>',
-        description: 'Use a manifest-defined vault. Provider behavior is inferred from the vault definition.',
+        description:
+          'Use a manifest-defined vault. Local vaults store encrypted material; non-local vaults write reference metadata only.',
       },
       {
         flag: '--reveal',
@@ -331,6 +332,7 @@ const COMMANDS: HelpCommand[] = [
       'cnos secret set app.token super-secret --vault local-dev',
       'cnos vault create github-ci --provider environment --no-passphrase',
       'cnos secret set app.token APP_TOKEN --vault github-ci',
+      'cnos secret set app.token --vault prod-gcp',
     ],
   },
   {
@@ -393,7 +395,8 @@ const COMMANDS: HelpCommand[] = [
     id: 'vault list',
     summary: 'List manifest-defined vaults.',
     usage: 'cnos vault list [global-options]',
-    description: 'Lists vault definitions together with provider and passphrase policy.',
+    description:
+      'Lists project vault definitions together with provider and passphrase policy. Outside a CNOS project, lists local vault stores from the configured CNOS secret home.',
     examples: ['cnos vault list'],
   },
   {
@@ -697,7 +700,7 @@ const COMMANDS: HelpCommand[] = [
     summary: 'Write a secret securely.',
     usage: 'cnos secret set <path> [value] [--local|--remote|--ref] [--vault <name>] [--provider <name>] [--stdin] [global-options]',
     description:
-      'Writes a secret reference into the repo. When a local vault is selected, CNOS stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>; when an environment-backed vault is selected, CNOS writes an env-backed ref for CI or cloud runtimes. If [value] is omitted, CNOS prompts for a masked value interactively; use --stdin for pipelines.',
+      'Writes a secret reference into the repo. When a local vault is selected, CNOS stores encrypted secret material outside the repo under ~/.cnos/secrets/vaults/<vault>; when a non-local vault is selected, CNOS writes reference metadata only and never prompts for secret material by default. If [value] is omitted for a non-local vault, the logical path is used as the external ref.',
     examples: [
       'cnos vault create db',
       'cnos vault auth db',
@@ -706,6 +709,7 @@ const COMMANDS: HelpCommand[] = [
       'printf "super-secret" | cnos secret set app.token --vault db --stdin',
       'cnos vault create github-ci --provider environment --no-passphrase',
       'cnos secret set app.token APP_TOKEN --vault github-ci',
+      'cnos secret set app.token --vault prod-gcp',
     ],
   },
   {
