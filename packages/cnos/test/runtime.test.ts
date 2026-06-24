@@ -294,6 +294,28 @@ describe('@kitsy/cnos root runtime entry', () => {
     expect(cnos.value('server.port')).toBe(3000);
   });
 
+  it('autoloads from .cnos-server.json from a nested next runtime path', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+    const nestedNextPath = path.join(root, '.next', 'standalone', 'apps', 'web');
+    await mkdir(nestedNextPath, { recursive: true });
+    await writeFile(
+      path.join(root, '.cnos-server.json'),
+      serializeServerProjection(runtime.toServerProjection()),
+      'utf8',
+    );
+
+    process.chdir(nestedNextPath);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    expect(cnos.value('server.port')).toBe(3000);
+  });
+
   it('keeps runtime-dependent formulas live after projection bootstrap', async () => {
     const root = await createFixtureRoot();
     process.env.PORT = '4500';

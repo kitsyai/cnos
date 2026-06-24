@@ -911,6 +911,7 @@ function bootstrapFromProcessEnv(): void {
 
 function discoverProjectionPathSync(): string | undefined {
   const cwd = process.cwd();
+  const maxProjectionDiscoveryDepth = 8;
   const directCandidates = [
     path.join(cwd, '.cnos-server.json'),
   ];
@@ -923,7 +924,7 @@ function discoverProjectionPathSync(): string | undefined {
 
   let current = cwd;
 
-  for (let depth = 0; depth <= 3; depth += 1) {
+  for (let depth = 0; depth <= maxProjectionDiscoveryDepth; depth += 1) {
     const rcCandidate = path.join(current, '.cnosrc.yml');
 
     if (existsSync(rcCandidate)) {
