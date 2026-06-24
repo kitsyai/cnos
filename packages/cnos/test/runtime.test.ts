@@ -9,6 +9,8 @@ import { createCnos } from '../src/createCnos.js';
 import {
   CNOS_GRAPH_ENV_VAR,
   CNOS_PROJECTION_ENV_VAR,
+  CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR,
+  CNOS_SERVER_PROJECTION_PATH_ENV_VAR,
   serializeRuntimeGraph,
   serializeServerProjection,
 } from '../src/runtime/bootstrap.js';
@@ -89,6 +91,8 @@ async function createEnvSecretFixtureRoot(): Promise<string> {
 beforeEach(() => {
   delete process.env[CNOS_GRAPH_ENV_VAR];
   delete process.env[CNOS_PROJECTION_ENV_VAR];
+  delete process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR];
+  delete process.env[CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR];
   delete process.env.PORT;
   delete process.env.RAZORPAY_KEY_ID;
   delete process.env.TEST_REMOTE_TOKEN;
@@ -98,6 +102,8 @@ afterEach(async () => {
   process.chdir(originalCwd);
   delete process.env[CNOS_GRAPH_ENV_VAR];
   delete process.env[CNOS_PROJECTION_ENV_VAR];
+  delete process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR];
+  delete process.env[CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR];
   delete process.env.PORT;
   delete process.env.RAZORPAY_KEY_ID;
   delete process.env.TEST_REMOTE_TOKEN;
@@ -314,6 +320,131 @@ describe('@kitsy/cnos root runtime entry', () => {
     const { default: cnos } = await import('../src/index.js');
 
     expect(cnos.value('server.port')).toBe(3000);
+  });
+
+  it('autoloads from an explicit CNOS_SERVER_PROJECTION_PATH', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+
+    const projectionRoot = path.join(root, '.next', 'standalone', 'apps', 'web');
+    await mkdir(projectionRoot, { recursive: true });
+    const projectionPath = path.join(projectionRoot, '.cnos-server.json');
+    await writeFile(projectionPath, serializeServerProjection(runtime.toServerProjection()), 'utf8');
+
+    process.chdir(root);
+    process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR] = projectionPath;
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    expect(cnos.value('server.port')).toBe(3000);
+  });
+
+  it('prefers __CNOS_PROJECTION__ over CNOS_SERVER_PROJECTION_PATH', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+    const explicitProjection = serializeServerProjection(runtime.toServerProjection());
+    const invalidProjectionPath = path.join(root, '.cnos-server.json');
+
+    await writeFile(invalidProjectionPath, '{not-valid-json}', 'utf8');
+
+    process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR] = invalidProjectionPath;
+    process.env[CNOS_PROJECTION_ENV_VAR] = explicitProjection;
+    process.chdir(root);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    expect(cnos.value('server.port')).toBe(3000);
+  });
+
+  it('fails when __CNOS_PROJECTION__ is invalid even if CNOS_SERVER_PROJECTION_PATH is valid', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+    const projectionPath = path.join(root, '.cnos-server.json');
+    await writeFile(projectionPath, serializeServerProjection(runtime.toServerProjection()), 'utf8');
+
+    process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR] = projectionPath;
+    process.env[CNOS_PROJECTION_ENV_VAR] = '{not-valid-json}';
+    process.chdir(root);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready()).rejects.toThrow('CNOS server projection required but not found.');
+    await expect(cnos.ready()).rejects.toThrow(/- __CNOS_PROJECTION__ error:/);
+  });
+
+  it('fails when __CNOS_GRAPH__ is invalid even if __CNOS_PROJECTION__ is valid', async () => {
+    const root = await createFixtureRoot();
+    const runtime = await createCnos({
+      root,
+      processEnv: {},
+    });
+
+    process.env[CNOS_GRAPH_ENV_VAR] = '{not-json';
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(runtime.toServerProjection());
+    process.chdir(root);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready()).rejects.toThrow('CNOS server projection required but not found.');
+    await expect(cnos.ready()).rejects.toThrow(/- __CNOS_GRAPH__ error:/);
+  });
+
+  it('throws a clear error when CNOS_REQUIRE_SERVER_PROJECTION is enabled and projection is missing', async () => {
+    const root = await createFixtureRoot();
+    process.chdir(root);
+    process.env[CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR] = 'true';
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready()).rejects.toThrow(
+      'CNOS server projection required but not found.',
+    );
+    await expect(cnos.ready()).rejects.toThrow(
+      `- CNOS_SERVER_PROJECTION_PATH: not set`,
+    );
+    await expect(cnos.ready()).rejects.toThrow(`- ancestor discovery from ${process.cwd()}`);
+  });
+
+  it('throws when explicit CNOS_SERVER_PROJECTION_PATH is invalid even without CNOS_REQUIRE_SERVER_PROJECTION', async () => {
+    const root = await createFixtureRoot();
+    process.chdir(root);
+    process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR] = path.join(root, '.cnos-server.json');
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready()).rejects.toThrow('CNOS server projection required but not found.');
+  });
+
+  it('throws a clear error when an explicit CNOS_SERVER_PROJECTION_PATH cannot be read in required mode', async () => {
+    const root = await createFixtureRoot();
+    process.chdir(root);
+    process.env[CNOS_SERVER_PROJECTION_PATH_ENV_VAR] = path.join(root, '.cnos-server.json');
+    process.env[CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR] = '1';
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready()).rejects.toThrow(
+      'CNOS server projection required but not found.',
+    );
+    await expect(cnos.ready()).rejects.toThrow(
+      `- CNOS_SERVER_PROJECTION_PATH: ${path.join(root, '.cnos-server.json')}`,
+    );
   });
 
   it('keeps runtime-dependent formulas live after projection bootstrap', async () => {

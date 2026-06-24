@@ -277,6 +277,17 @@ When `import cnos from "@kitsy/cnos"` is called in a server process, the runtime
 
 For the browser runtime (`@kitsy/cnos/browser`), the data is embedded by the bundler plugin at build time into `globalThis.__CNOS_BROWSER_DATA__`. No file discovery needed — the bundler handles injection.
 
+### 4.3.1 Production bootstrap for standalone/server containers
+
+For production deployments where the server process may run from `.next` or other nested output directories, set:
+
+```
+CNOS_SERVER_PROJECTION_PATH=/app/.cnos-server.json
+CNOS_REQUIRE_SERVER_PROJECTION=1
+```
+
+`CNOS_SERVER_PROJECTION_PATH` pins the exact projection file to load, and `CNOS_REQUIRE_SERVER_PROJECTION` stops startup from silently falling back to other resolution paths when that projection is missing or invalid.
+
 ### 4.4 `cnos.loadProjection()` for explicit control
 
 For advanced use cases (custom paths, testing, non-standard deployment):

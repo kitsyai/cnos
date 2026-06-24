@@ -32,7 +32,11 @@ import { resolveVaultAuth } from '@kitsy/cnos-core';
 
 import { createCnos } from '../createCnos.js';
 import {
+  CNOS_GRAPH_ENV_VAR,
+  CNOS_PROJECTION_ENV_VAR,
   deserializeServerProjection,
+  CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR,
+  CNOS_SERVER_PROJECTION_PATH_ENV_VAR,
   graphRequiresSecretHydration,
   readRuntimeGraphFromEnv,
   readServerProjectionFromEnv,
@@ -80,6 +84,61 @@ export interface CnosSingletonProjectionOptions {
 let bootstrappedProjection: ServerProjection | undefined;
 const singletonRuntimeProviders = new Map<string, RuntimeProvider>();
 const singletonSecretVaultProviders = new Map<string, SecretVaultProviderFactory>();
+const maxProjectionDiscoveryDepth = 8;
+const truthyEnvValues = new Set(['1', 'true', 'yes', 'on']);
+
+let explicitServerProjectionPathError: Error | undefined;
+let bootstrapGraphEnvError: Error | undefined;
+let bootstrapEnvProjectionError: Error | undefined;
+
+function getProcessEnvFlag(env: Record<string, string | undefined>, key: string): boolean {
+  const raw = env[key];
+  return raw !== undefined && truthyEnvValues.has(raw.toLowerCase());
+}
+
+function resolveExplicitProjectionPath(processEnv: Record<string, string | undefined>): string | undefined {
+  const raw = processEnv[CNOS_SERVER_PROJECTION_PATH_ENV_VAR];
+
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const trimmed = raw.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return path.resolve(trimmed);
+}
+
+function projectionRequirementMessage(processEnv: Record<string, string | undefined>): string {
+  const projectionPath = resolveExplicitProjectionPath(processEnv);
+  const hasProjectionPayload = processEnv[CNOS_PROJECTION_ENV_VAR] !== undefined;
+  const hasGraphPayload = processEnv[CNOS_GRAPH_ENV_VAR] !== undefined;
+  const details = [
+    `CNOS server projection required but not found.`,
+    `Checked:`,
+    `- __CNOS_GRAPH__: ${hasGraphPayload ? 'set' : 'not set'}`,
+    `- CNOS_SERVER_PROJECTION_PATH: ${projectionPath ?? 'not set'}`,
+    `- __CNOS_PROJECTION__: ${hasProjectionPayload ? 'set' : 'not set'}`,
+    `- ancestor discovery from ${process.cwd()}`,
+  ];
+
+  if (hasGraphPayload && bootstrapGraphEnvError) {
+    details.push(`- __CNOS_GRAPH__ error: ${bootstrapGraphEnvError.message}`);
+  }
+
+  if (projectionPath && explicitServerProjectionPathError) {
+    details.push(`- CNOS_SERVER_PROJECTION_PATH error: ${explicitServerProjectionPathError.message}`);
+  }
+
+  if (hasProjectionPayload && bootstrapEnvProjectionError) {
+    details.push(`- __CNOS_PROJECTION__ error: ${bootstrapEnvProjectionError.message}`);
+  }
+
+  return details.join('\n');
+}
 
 interface ProjectedSecretDescriptor {
   key: string;
@@ -891,27 +950,52 @@ function bootstrapFromProcessEnv(): void {
     return;
   }
 
-  try {
-    const graph = readRuntimeGraphFromEnv(process.env);
+  if (process.env[CNOS_GRAPH_ENV_VAR] !== undefined) {
+    try {
+      const graph = readRuntimeGraphFromEnv(process.env);
 
-    if (graph) {
-      attachBootstrappedGraph(graph);
-      return;
+      if (graph) {
+        bootstrapGraphEnvError = undefined;
+        attachBootstrappedGraph(graph);
+        return;
+      }
+
+      bootstrapGraphEnvError = new Error('Invalid CNOS runtime bootstrap payload in __CNOS_GRAPH__.');
+    } catch (error) {
+      bootstrapGraphEnvError =
+        error instanceof Error ? error : new Error('Invalid CNOS runtime bootstrap payload in __CNOS_GRAPH__.');
     }
 
-    const projection = readServerProjectionFromEnv(process.env);
-
-    if (projection) {
-      attachBootstrappedProjection(projection);
-    }
-  } catch {
-    // Ignore malformed bootstrap payloads here; explicit ready() will surface real resolution errors.
+    return;
   }
+
+  if (process.env[CNOS_PROJECTION_ENV_VAR] !== undefined) {
+    try {
+      const projection = readServerProjectionFromEnv(process.env);
+
+      if (projection) {
+        bootstrapEnvProjectionError = undefined;
+        attachBootstrappedProjection(projection);
+        return;
+      }
+
+      bootstrapEnvProjectionError = new Error('Invalid CNOS server projection payload in __CNOS_PROJECTION__.');
+    } catch (error) {
+      bootstrapEnvProjectionError =
+        error instanceof Error
+          ? error
+          : new Error('Invalid CNOS server projection payload in __CNOS_PROJECTION__.');
+    }
+
+    return;
+  }
+
+  bootstrapGraphEnvError = undefined;
+  bootstrapEnvProjectionError = undefined;
 }
 
 function discoverProjectionPathSync(): string | undefined {
   const cwd = process.cwd();
-  const maxProjectionDiscoveryDepth = 8;
   const directCandidates = [
     path.join(cwd, '.cnos-server.json'),
   ];
@@ -948,22 +1032,61 @@ function discoverProjectionPathSync(): string | undefined {
 }
 
 function bootstrapFromProjectionFile(): void {
-  if (getSingletonRuntime()) {
+  if (getSingletonRuntime() || bootstrapGraphEnvError || bootstrapEnvProjectionError) {
     return;
   }
 
-  try {
-    const projectionPath = discoverProjectionPathSync();
+  const processEnv = process.env;
+  const projectionPath = resolveExplicitProjectionPath(processEnv);
 
-    if (!projectionPath) {
+  try {
+    if (projectionPath) {
+      const projection = deserializeServerProjection(readFileSync(projectionPath, 'utf8'));
+      attachBootstrappedProjection(projection);
       return;
     }
 
-    const projection = deserializeServerProjection(readFileSync(projectionPath, 'utf8'));
+    const discoveryPath = discoverProjectionPathSync();
+
+    if (!discoveryPath) {
+      return;
+    }
+
+    const projection = deserializeServerProjection(readFileSync(discoveryPath, 'utf8'));
     attachBootstrappedProjection(projection);
-  } catch {
-    // Ignore malformed projection artifacts here; ready() will surface explicit errors.
+  } catch (error) {
+    if (projectionPath) {
+      explicitServerProjectionPathError =
+        error instanceof Error
+          ? error
+          : new Error(`Unable to load CNOS server projection from ${projectionPath}.`);
+    }
+    // Ignore malformed auto-discovery projection artifacts here; ready() will surface explicit errors.
   }
+}
+
+function getBootstrapFailure(processEnv: Record<string, string | undefined>): Error | undefined {
+  if (getSingletonRuntime()) {
+    return undefined;
+  }
+
+  if (bootstrapGraphEnvError) {
+    return bootstrapGraphEnvError;
+  }
+
+  if (bootstrapEnvProjectionError) {
+    return bootstrapEnvProjectionError;
+  }
+
+  if (explicitServerProjectionPathError) {
+    return explicitServerProjectionPathError;
+  }
+
+  if (getProcessEnvFlag(processEnv, CNOS_REQUIRE_SERVER_PROJECTION_ENV_VAR)) {
+    return new Error(projectionRequirementMessage(processEnv));
+  }
+
+  return undefined;
 }
 
 bootstrapFromProcessEnv();
@@ -1037,7 +1160,13 @@ const cnos = Object.assign(
     },
     async ready(options: CnosCreateOptions = {}): Promise<void> {
       const runtime = getSingletonRuntime();
+      const processEnv = process.env;
       const secretVaultProviders = mergeSecretVaultProviders(options.secretVaultProviders);
+      const bootstrapFailure = getBootstrapFailure(processEnv);
+
+      if (runtime === undefined && bootstrapFailure) {
+        throw new Error(projectionRequirementMessage(processEnv));
+      }
 
       if (runtime && getBootstrappedSecretHydrationRequired()) {
         const runtimeToHydrate =

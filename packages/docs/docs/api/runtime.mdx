@@ -70,6 +70,15 @@ await cnos.loadProjection('./.cnos-server.json');
 await cnos.ready();
 ```
 
+Bootstrap sources are checked in order:
+
+1. `__CNOS_GRAPH__`
+2. `__CNOS_PROJECTION__`
+3. `CNOS_SERVER_PROJECTION_PATH`
+4. auto-discovery of `.cnos-server.json` from `process.cwd()` and bounded ancestor `.cnosrc.yml`
+
+For production servers, set `CNOS_REQUIRE_SERVER_PROJECTION=1` to avoid falling back into full authoring-time resolution when no projection can be loaded.
+
 ## Derived Values
 
 Derived values resolve transparently through the same read APIs.
