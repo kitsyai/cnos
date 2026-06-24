@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	cloud.google.com/go/secretmanager v1.20.0
-	github.com/kitsyai/cnos/packages/go v1.11.2
+	github.com/kitsyai/cnos/packages/go v1.11.3
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.274.0
 	google.golang.org/grpc v1.80.0

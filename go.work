@@ -9,6 +9,6 @@ use (
 	./packages/go/vault/hashicorp
 )
 
-replace github.com/kitsyai/cnos/packages/go v1.11.2 => ./packages/go
+replace github.com/kitsyai/cnos/packages/go v1.11.3 => ./packages/go
 
-replace github.com/kitsyai/cnos/packages/go/vault/gcp v1.11.2 => ./packages/go/vault/gcp
+replace github.com/kitsyai/cnos/packages/go/vault/gcp v1.11.3 => ./packages/go/vault/gcp

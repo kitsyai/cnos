@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vault-hashicorp",
-  "version": "1.11.2",
+  "version": "1.11.3",
   "description": "HashiCorp Vault provider for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -21,7 +21,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@kitsy/cnos": "^1.11.2"
+    "@kitsy/cnos": "^1.11.3"
   },
   "devDependencies": {
     "@kitsy/cnos": "workspace:*",
