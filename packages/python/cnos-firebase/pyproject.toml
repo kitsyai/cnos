@@ -1,15 +1,15 @@
-[build-system]
+﻿[build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "cnos-firebase"
-version = "1.11.3"
+version = "1.11.4"
 description = "CNOS Firebase Secrets provider (thin wrapper over cnos-gcp)"
 requires-python = ">=3.8"
 dependencies = [
-    "cnos>=1.11.3",
-    "cnos-gcp>=1.11.3",
+    "cnos>=1.11.4",
+    "cnos-gcp>=1.11.4",
 ]
 
 [tool.hatch.build.targets.wheel]

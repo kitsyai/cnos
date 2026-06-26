@@ -1,7 +1,7 @@
-{
+﻿{
   "name": "@kitsy/cnos-plugin-cli-args",
   "private": true,
-  "version": "1.11.3",
+  "version": "1.11.4",
   "description": "CLI argument plugin scaffold for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",

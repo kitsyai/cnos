@@ -1,10 +1,10 @@
-module github.com/kitsyai/cnos/packages/go/vault/gcp
+﻿module github.com/kitsyai/cnos/packages/go/vault/gcp
 
 go 1.25.0
 
 require (
 	cloud.google.com/go/secretmanager v1.20.0
-	github.com/kitsyai/cnos/packages/go v1.11.3
+	github.com/kitsyai/cnos/packages/go v1.11.4
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.274.0
 	google.golang.org/grpc v1.80.0

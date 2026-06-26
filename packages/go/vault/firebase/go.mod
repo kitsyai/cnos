@@ -1,10 +1,10 @@
-module github.com/kitsyai/cnos/packages/go/vault/firebase
+﻿module github.com/kitsyai/cnos/packages/go/vault/firebase
 
 go 1.25.0
 
 require (
-	github.com/kitsyai/cnos/packages/go v1.11.3
-	github.com/kitsyai/cnos/packages/go/vault/gcp v1.11.3
+	github.com/kitsyai/cnos/packages/go v1.11.4
+	github.com/kitsyai/cnos/packages/go/vault/gcp v1.11.4
 	google.golang.org/grpc v1.80.0
 )
 

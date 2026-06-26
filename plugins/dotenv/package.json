@@ -1,7 +1,7 @@
-{
+﻿{
   "name": "@kitsy/cnos-plugin-dotenv",
   "private": true,
-  "version": "1.11.3",
+  "version": "1.11.4",
   "description": "dotenv loading plugin scaffold for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",

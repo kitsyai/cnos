@@ -1,14 +1,14 @@
-[build-system]
+﻿[build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "cnos-hashicorp"
-version = "1.11.3"
+version = "1.11.4"
 description = "CNOS HashiCorp Vault vault provider"
 requires-python = ">=3.8"
 dependencies = [
-    "cnos>=1.11.3",
+    "cnos>=1.11.4",
     "hvac>=1.2.0",
 ]
 
