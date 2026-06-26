@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.kitsy</groupId>
+    <artifactId>cnos-java-parent</artifactId>
+    <version>1.11.3</version>
+  </parent>
+
+  <artifactId>cnos-java-firebase</artifactId>
+  <name>CNOS Java Firebase Secrets Provider</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>ai.kitsy</groupId>
+      <artifactId>cnos-java</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.kitsy</groupId>
+      <artifactId>cnos-java-gcp</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-junit-jupiter</artifactId>
+    </dependency>
+  </dependencies>
+</project>

@@ -819,6 +819,10 @@ func splitLogicalKey(key string) (string, string, bool) {
 }
 
 func toLogicalKey(namespace, valuePath string) string {
+	// Idempotency guard: already-prefixed key passes through unchanged.
+	if strings.HasPrefix(valuePath, namespace+".") {
+		return valuePath
+	}
 	parts := []string{}
 	for _, chunk := range strings.Split(valuePath, ".") {
 		chunk = strings.TrimSpace(chunk)

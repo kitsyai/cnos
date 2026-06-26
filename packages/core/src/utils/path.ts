@@ -197,6 +197,8 @@ export function joinConfigPath(...parts: string[]): string {
 }
 
 export function toLogicalKey(namespace: NamespaceName, valuePath: string): LogicalKey {
+  // Idempotency guard: already-prefixed key passes through unchanged.
+  if (valuePath.startsWith(`${namespace}.`)) return valuePath as LogicalKey;
   return `${namespace}.${joinConfigPath(valuePath)}`;
 }
 

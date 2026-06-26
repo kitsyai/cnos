@@ -21,6 +21,7 @@ import {
   parseGitUri,
   resolveWorkspaceContext,
   resolveActiveProfile,
+  toLogicalKey,
   validateEnvMappingCollisions,
   validatePublicSafety,
   validateWorkspaceSafety,
@@ -1338,5 +1339,18 @@ describe('@kitsy/cnos-core', () => {
         expect.objectContaining({ code: 'schema.required', key: 'value.app.name' }),
       ]),
     );
+  });
+});
+
+describe('toLogicalKey idempotency', () => {
+  it.each([
+    ['value', 'server.port', 'value.server.port'],
+    ['value', 'value.server.port', 'value.server.port'],   // already prefixed
+    ['secret', 'db.password', 'secret.db.password'],
+    ['secret', 'secret.db.password', 'secret.db.password'], // already prefixed
+    ['meta', 'workspace', 'meta.workspace'],
+    ['meta', 'meta.workspace', 'meta.workspace'],           // already prefixed
+  ] as const)('toLogicalKey(%s, %s) === %s', (namespace, input, expected) => {
+    expect(toLogicalKey(namespace, input)).toBe(expected);
   });
 });

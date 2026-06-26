@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cnos"
+version = "1.11.3"
+description = "CNOS runtime client for Python"
+requires-python = ">=3.8"
+dependencies = [
+    "cryptography>=41.0.0",
+]
+
+[project.optional-dependencies]
+keyring = ["keyring>=24.0.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cnos"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -539,6 +539,28 @@ func TestLoadPrefersGraphBootstrapAndSupportsInspect(t *testing.T) {
 	}
 }
 
+func TestToLogicalKeyIdempotency(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		namespace string
+		input     string
+		want      string
+	}{
+		{"value", "server.port", "value.server.port"},
+		{"value", "value.server.port", "value.server.port"}, // already prefixed
+		{"secret", "db.password", "secret.db.password"},
+		{"secret", "secret.db.password", "secret.db.password"}, // already prefixed
+		{"meta", "workspace", "meta.workspace"},
+		{"meta", "meta.workspace", "meta.workspace"}, // already prefixed
+	}
+	for _, tc := range cases {
+		got := toLogicalKey(tc.namespace, tc.input)
+		if got != tc.want {
+			t.Errorf("toLogicalKey(%q, %q) = %q; want %q", tc.namespace, tc.input, got, tc.want)
+		}
+	}
+}
+
 func mustLoadProjectionRuntime(t *testing.T, projection ServerProjection, options Options) *Runtime {
 	t.Helper()
 
