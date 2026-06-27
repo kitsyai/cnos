@@ -1,8 +1,0 @@
-is_global = true
-build_property.RootNamespace = Kitsy.Cnos
-build_property.ProjectDir = C:\Users\pkvsi\Wks\kitsy\cnos\packages\csharp\Kitsy.Cnos\
-build_property.EnableComHosting = 
-build_property.EnableGeneratedComInterfaceComImportInterop = 
-build_property.CsWinRTUseWindowsUIXamlProjections = false
-build_property.EffectiveAnalysisLevelStyle = 
-build_property.EnableCodeStyleSeverity = 
