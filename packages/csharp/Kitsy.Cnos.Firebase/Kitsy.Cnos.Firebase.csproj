@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <RootNamespace>Kitsy.Cnos.Firebase</RootNamespace>
+    <AssemblyName>Kitsy.Cnos.Firebase</AssemblyName>
+
+    <PackageId>Kitsy.Cnos.Firebase</PackageId>
+    <Version>1.11.4</Version>
+    <Authors>Prashant Sinha</Authors>
+    <Company>Kitsy AI</Company>
+    <Description>CNOS C# vault provider for Firebase Secrets (backed by GCP Secret Manager).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kitsyai/cnos</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kitsyai/cnos</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>cnos;configuration;secrets;firebase;gcp;kitsy</PackageTags>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kitsy.Cnos\Kitsy.Cnos.csproj" />
+    <ProjectReference Include="..\Kitsy.Cnos.Gcp\Kitsy.Cnos.Gcp.csproj" />
+  </ItemGroup>
+</Project>

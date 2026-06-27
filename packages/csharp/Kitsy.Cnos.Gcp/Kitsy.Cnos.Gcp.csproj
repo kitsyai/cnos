@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <RootNamespace>Kitsy.Cnos.Gcp</RootNamespace>
+    <AssemblyName>Kitsy.Cnos.Gcp</AssemblyName>
+
+    <PackageId>Kitsy.Cnos.Gcp</PackageId>
+    <Version>1.11.4</Version>
+    <Authors>Prashant Sinha</Authors>
+    <Company>Kitsy AI</Company>
+    <Description>CNOS C# vault provider for Google Cloud Secret Manager.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kitsyai/cnos</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kitsyai/cnos</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>cnos;configuration;secrets;gcp;google;kitsy</PackageTags>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kitsy.Cnos\Kitsy.Cnos.csproj" />
+    <PackageReference Include="Google.Cloud.SecretManager.V1" Version="3.3.0" />
+  </ItemGroup>
+</Project>

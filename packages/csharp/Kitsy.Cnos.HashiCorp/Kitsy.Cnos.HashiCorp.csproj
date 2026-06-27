@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <RootNamespace>Kitsy.Cnos.HashiCorp</RootNamespace>
+    <AssemblyName>Kitsy.Cnos.HashiCorp</AssemblyName>
+
+    <PackageId>Kitsy.Cnos.HashiCorp</PackageId>
+    <Version>1.11.4</Version>
+    <Authors>Prashant Sinha</Authors>
+    <Company>Kitsy AI</Company>
+    <Description>CNOS C# vault provider for HashiCorp Vault.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kitsyai/cnos</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kitsyai/cnos</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>cnos;configuration;secrets;hashicorp;vault;kitsy</PackageTags>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kitsy.Cnos\Kitsy.Cnos.csproj" />
+    <PackageReference Include="VaultSharp" Version="1.17.4.1" />
+  </ItemGroup>
+</Project>
