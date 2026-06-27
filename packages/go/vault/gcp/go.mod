@@ -1,4 +1,4 @@
-﻿module github.com/kitsyai/cnos/packages/go/vault/gcp
+module github.com/kitsyai/cnos/packages/go/vault/gcp
 
 go 1.25.0
 

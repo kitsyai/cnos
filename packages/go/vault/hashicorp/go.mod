@@ -1,4 +1,4 @@
-﻿module github.com/kitsyai/cnos/packages/go/vault/hashicorp
+module github.com/kitsyai/cnos/packages/go/vault/hashicorp
 
 go 1.24.0
 

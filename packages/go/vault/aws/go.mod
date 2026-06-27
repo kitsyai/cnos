@@ -1,4 +1,4 @@
-﻿module github.com/kitsyai/cnos/packages/go/vault/aws
+module github.com/kitsyai/cnos/packages/go/vault/aws
 
 go 1.24
 

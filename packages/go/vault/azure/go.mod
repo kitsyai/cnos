@@ -1,4 +1,4 @@
-﻿module github.com/kitsyai/cnos/packages/go/vault/azure
+module github.com/kitsyai/cnos/packages/go/vault/azure
 
 go 1.25.0
 

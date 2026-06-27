@@ -1,4 +1,4 @@
-﻿module github.com/kitsyai/cnos/packages/go/vault/firebase
+module github.com/kitsyai/cnos/packages/go/vault/firebase
 
 go 1.25.0
 
