@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>ai.kitsy</groupId>
+  <artifactId>cnos-java</artifactId>
+  <version>1.11.4</version>
+  <name>CNOS Java Core Runtime</name>
+  <description>CNOS Java client runtime â€” projection consumer path</description>
+  <url>https://github.com/kitsyai/cnos/cnos-java</url>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <name>Prashant Sinha</name>
+      <email>pkv.sinha492@gmail.com</email>
+      <organization>Kitsy AI</organization>
+      <organizationUrl>https://kitsy.ai</organizationUrl>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:git://github.com/kitsyai/cnos.git/cnos-java</connection>
+    <developerConnection>scm:git:ssh://github.com/kitsyai/cnos.git/cnos-java</developerConnection>
+    <url>https://github.com/kitsyai/cnos/tree/main/cnos-java</url>
+  </scm>
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.17.0</version>
+      <scope>compile</scope>
+    </dependency>
+  </dependencies>
+</project>
