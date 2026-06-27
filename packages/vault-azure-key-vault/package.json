@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@kitsy/cnos-vault-azure",
   "version": "1.11.4",
   "description": "Azure Key Vault provider for CNOS.",

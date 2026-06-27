@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@kitsy/cnos-core",
   "version": "1.11.4",
   "description": "Core orchestration contracts and runtime primitives for CNOS.",

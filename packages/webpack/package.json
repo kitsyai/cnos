@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@kitsy/cnos-webpack",
   "version": "1.11.4",
   "description": "Webpack integration for CNOS public config injection.",
