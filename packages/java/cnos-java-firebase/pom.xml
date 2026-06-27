@@ -12,6 +12,7 @@
 
   <artifactId>cnos-java-firebase</artifactId>
   <name>CNOS Java Firebase Secrets Provider</name>
+  <description>CNOS Java vault provider for Firebase Secrets (backed by GCP Secret Manager)</description>
 
   <dependencies>
     <dependency>
