@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>ai.kitsy</groupId>
+  <artifactId>cnos-kotlin-parent</artifactId>
+  <version>1.11.4</version>
+  <packaging>pom</packaging>
+  <name>CNOS Kotlin Parent</name>
+
+  <modules>
+    <module>cnos-kotlin</module>
+    <module>cnos-kotlin-aws</module>
+    <module>cnos-kotlin-azure</module>
+    <module>cnos-kotlin-gcp</module>
+    <module>cnos-kotlin-firebase</module>
+    <module>cnos-kotlin-hashicorp</module>
+  </modules>
+
+  <properties>
+    <kotlin.version>1.9.23</kotlin.version>
+    <jackson.version>2.17.0</jackson.version>
+    <junit.version>5.10.2</junit.version>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-stdlib</artifactId>
+        <version>${kotlin.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.module</groupId>
+        <artifactId>jackson-module-kotlin</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${junit.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.jetbrains.kotlin</groupId>
+          <artifactId>kotlin-maven-plugin</artifactId>
+          <version>${kotlin.version}</version>
+          <executions>
+            <execution>
+              <id>compile</id>
+              <goals><goal>compile</goal></goals>
+              <configuration>
+                <sourceDirs><sourceDir>src/main/kotlin</sourceDir></sourceDirs>
+              </configuration>
+            </execution>
+            <execution>
+              <id>test-compile</id>
+              <goals><goal>test-compile</goal></goals>
+              <configuration>
+                <sourceDirs><sourceDir>src/test/kotlin</sourceDir></sourceDirs>
+              </configuration>
+            </execution>
+          </executions>
+          <configuration>
+            <jvmTarget>11</jvmTarget>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.2.5</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

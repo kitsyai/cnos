@@ -4,5 +4,6 @@ packages:
   - '!packages/python'
   - '!packages/csharp'
   - '!packages/rust'
+  - '!packages/kotlin'
   - 'plugins/*'
   - 'examples/*'
