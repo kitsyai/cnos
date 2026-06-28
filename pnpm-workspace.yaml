@@ -3,5 +3,6 @@ packages:
   - '!packages/java'
   - '!packages/python'
   - '!packages/csharp'
+  - '!packages/rust'
   - 'plugins/*'
   - 'examples/*'

@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "cnos",
+    "cnos-aws",
+    "cnos-azure",
+    "cnos-gcp",
+    "cnos-firebase",
+    "cnos-hashicorp",
+    "cnos-tests",
+]
+resolver = "2"
