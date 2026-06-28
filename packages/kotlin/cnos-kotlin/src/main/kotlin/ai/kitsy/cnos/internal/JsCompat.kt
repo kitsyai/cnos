@@ -3,7 +3,7 @@ package ai.kitsy.cnos.internal
 internal object JsCompat {
 
     fun jsStringifyValue(value: Any?): String = when (value) {
-        null -> "null"
+        null -> ""
         is Boolean -> value.toString()
         is Number -> jsNumberString(value)
         is List<*> -> "[${value.joinToString(",") { jsStringifyValue(it) }}]"
@@ -12,7 +12,7 @@ internal object JsCompat {
     }
 
     fun jsLogStringifyValue(value: Any?): String = when (value) {
-        null -> ""
+        null -> "null"
         is String -> value
         else -> jsStringifyValue(value)
     }

@@ -473,6 +473,9 @@ func (runtime *Runtime) populateEntries() error {
 		if _, ok := runtime.entries[sourceKey]; !ok {
 			continue
 		}
+		if strings.HasPrefix(sourceKey, "secret.") {
+			continue
+		}
 
 		publicKey := toLogicalKey("public", key)
 		runtime.entries[publicKey] = &runtimeEntry{

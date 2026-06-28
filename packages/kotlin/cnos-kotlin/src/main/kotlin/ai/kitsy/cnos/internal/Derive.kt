@@ -179,6 +179,8 @@ internal object Derive {
 
     fun uniqueSorted(list: List<String>): List<String> = list.distinct().sorted()
 
+    internal fun allRefs(ast: ExprNode): List<String> = collectRefs(ast).toList()
+
     fun isDerivedValue(value: Any?): Boolean {
         if (value !is String) return false
         val s = value.trim()

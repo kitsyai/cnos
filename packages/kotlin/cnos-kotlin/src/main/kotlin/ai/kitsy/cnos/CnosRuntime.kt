@@ -17,7 +17,7 @@ class CnosRuntime private constructor(
     private val encryptedSecrets: Map<String, Any?>?
 ) {
     private val runtimeProviders = ConcurrentHashMap<String, (String) -> Any?>()
-    private val hydratedSecrets = ConcurrentHashMap<String, Any?>()
+    private val hydratedSecrets = ConcurrentHashMap<String, Any>()
     private val localVaultCache = ConcurrentHashMap<String, Map<String, String>>()
     private val logicalKeyToVault = ConcurrentHashMap<String, String>()
     private val vaults: Map<String, VaultDefinition> = manifest.vaults
@@ -66,6 +66,8 @@ class CnosRuntime private constructor(
         entries.keys.sorted()
             .filter { entries[it]?.namespace == "public" }
             .forEach { key ->
+                val srcKey = entries[key]?.aliasTo ?: key
+                if (srcKey.startsWith("secret.")) return@forEach
                 val (value, found) = readInternal(key, mutableSetOf())
                 if (!found || value == null) return@forEach
                 val subPath = if (key.startsWith("public.")) key.substring(7) else key
@@ -113,7 +115,10 @@ class CnosRuntime private constructor(
             return Pair(null, false)
         }
 
-        if (!entry.aliasTo.isNullOrEmpty()) return readInternal(entry.aliasTo, stack)
+        if (!entry.aliasTo.isNullOrEmpty()) {
+            if (key in stack) throw CnosError("cnos: circular alias for $key")
+            return readInternal(entry.aliasTo!!, (stack + key).toMutableSet())
+        }
 
         if (entry.secretRef != null) return readSecret(entry.key, entry.secretRef)
 
@@ -138,8 +143,7 @@ class CnosRuntime private constructor(
 
     private fun readSecret(key: String, ref: SecretReference): Pair<Any?, Boolean> {
         encryptedSecrets?.get(key)?.let { return Pair(it, true) }
-        hydratedSecrets[key]?.let { return Pair(it, true) }
-        if (hydratedSecrets.containsKey(key)) return Pair(null, true)
+        hydratedSecrets[key]?.let { v -> return if (v === ABSENT_SECRET) Pair(null, true) else Pair(v, true) }
 
         val definitions = secretVaultDefinitions(ref)
         var lastError: Exception? = null
@@ -155,7 +159,7 @@ class CnosRuntime private constructor(
             }
         }
         if (lastError != null) throw if (lastError is CnosError) lastError else CnosError(lastError.message ?: "secret error", lastError)
-        hydratedSecrets[key] = null
+        hydratedSecrets[key] = ABSENT_SECRET
         return Pair(null, true)
     }
 
@@ -267,6 +271,7 @@ class CnosRuntime private constructor(
             var sourceKey = raw
             if (!entries.containsKey(sourceKey)) sourceKey = toLogicalKey("value", raw)
             if (!entries.containsKey(sourceKey)) return@forEach
+            if (sourceKey.startsWith("secret.")) return@forEach
             val publicKey = toLogicalKey("public", raw)
             entries[publicKey] = RuntimeEntry(publicKey, "public", aliasTo = sourceKey, promotedFrom = sourceKey)
         }
@@ -341,6 +346,7 @@ class CnosRuntime private constructor(
     // ================================================================
 
     companion object {
+        private val ABSENT_SECRET = Any()
         private const val PROJECTION_ENV_VAR = "__CNOS_PROJECTION__"
         private const val GRAPH_ENV_VAR = "__CNOS_GRAPH__"
         private const val SECRET_PAYLOAD_ENV_VAR = "__CNOS_SECRET_PAYLOAD__"
@@ -364,7 +370,7 @@ class CnosRuntime private constructor(
             }
 
             env.get(GRAPH_ENV_VAR)?.takeIf { it.isNotEmpty() }?.let {
-                return buildFromProjection(it.toByteArray(), env, secretHome, options.secretVaultProviders)
+                return buildFromGraph(it.toByteArray(), env, secretHome, options.secretVaultProviders)
             }
 
             env.get(PROJECTION_ENV_VAR)?.takeIf { it.isNotEmpty() }?.let {
@@ -395,6 +401,31 @@ class CnosRuntime private constructor(
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
             rt.populateEntries()
             rt.initRuntimeProviders(projection.runtimeNamespaces)
+            rt.prepareDerivedEntries()
+            return rt
+        }
+
+        private fun buildFromGraph(
+            data: ByteArray, env: Environment, secretHome: String,
+            factories: List<SecretVaultProviderFactory>
+        ): CnosRuntime {
+            val graph = GraphParser.parseRuntimeGraph(data)
+            val manifest = GraphParser.bootstrappedManifestFromGraph(graph)
+            val encrypted = decryptSecretPayload(env)
+
+            val rt = CnosRuntime(null, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted)
+            factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
+
+            for (resolved in graph.entries) {
+                val (entry, vaultId) = GraphParser.runtimeEntryFromGraph(resolved)
+                if (vaultId != null) rt.logicalKeyToVault[resolved.key] = vaultId
+                rt.entries[resolved.key] = entry
+            }
+
+            val runtimeNsList = manifest.namespaces.entries
+                .filter { it.value.runtime }
+                .map { it.key }
+            rt.initRuntimeProviders(runtimeNsList)
             rt.prepareDerivedEntries()
             return rt
         }

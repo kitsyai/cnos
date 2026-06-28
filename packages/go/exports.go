@@ -106,6 +106,9 @@ func (runtime *Runtime) ToPublicEnv(options ...ToPublicEnvOptions) (map[string]s
 
 	for _, key := range keys {
 		sourceKey := runtime.resolveProjectedSourceKey(key)
+		if strings.HasPrefix(sourceKey, "secret.") {
+			continue
+		}
 		if source := runtime.entries[sourceKey]; source != nil && source.formula != nil && source.formula.runtimeDependent {
 			value, ok, err := runtime.Read(key)
 			if err != nil {

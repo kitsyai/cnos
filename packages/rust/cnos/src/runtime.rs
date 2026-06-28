@@ -389,6 +389,7 @@ impl CnosRuntime {
                 let fallback = to_logical_key("value", &key);
                 if self.entries.contains_key(&fallback) { fallback } else { continue; }
             };
+            if source_key.starts_with("secret.") { continue; }
             let public_key = to_logical_key("public", &key);
             self.entries.insert(public_key.clone(), RuntimeEntry {
                 key: public_key.clone(),
@@ -550,6 +551,8 @@ impl CnosRuntime {
         pub_keys.sort();
 
         for key in pub_keys {
+            let src = self.entries.get(&key).and_then(|e| e.alias_to.clone()).unwrap_or_else(|| key.clone());
+            if src.starts_with("secret.") { continue; }
             let value = self.read(&key)?;
             let value = match value { Some(v) if !v.is_null() => v, _ => continue };
             let base = key.trim_start_matches("public.");

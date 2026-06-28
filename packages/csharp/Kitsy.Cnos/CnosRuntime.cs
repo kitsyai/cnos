@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -34,10 +35,10 @@ namespace Kitsy.Cnos
         private readonly Dictionary<string, RuntimeEntry> _entries;
         private readonly Dictionary<string, string> _sources;
         private readonly HashSet<string> _runtimeNamespaces;
-        private readonly Dictionary<string, Func<string, object?>> _runtimeProviders;
+        private readonly ConcurrentDictionary<string, Func<string, object?>> _runtimeProviders;
         private readonly Dictionary<string, object?>? _encryptedSecrets;
-        private readonly Dictionary<string, object?> _hydratedSecrets;
-        private readonly Dictionary<string, Dictionary<string, string>> _localVaultCache;
+        private readonly ConcurrentDictionary<string, object?> _hydratedSecrets;
+        private readonly ConcurrentDictionary<string, Dictionary<string, string>> _localVaultCache;
         private readonly Dictionary<string, string> _logicalKeyToVault;
         private readonly Dictionary<string, VaultDefinition> _vaults;
         private readonly Dictionary<string, SecretVaultProviderFactory> _secretFactories;
@@ -66,10 +67,10 @@ namespace Kitsy.Cnos
             _entries = entries;
             _sources = sources;
             _runtimeNamespaces = runtimeNamespaces;
-            _runtimeProviders = runtimeProviders;
+            _runtimeProviders = new ConcurrentDictionary<string, Func<string, object?>>(runtimeProviders, StringComparer.Ordinal);
             _encryptedSecrets = encryptedSecrets;
-            _hydratedSecrets = new Dictionary<string, object?>(StringComparer.Ordinal);
-            _localVaultCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+            _hydratedSecrets = new ConcurrentDictionary<string, object?>(StringComparer.Ordinal);
+            _localVaultCache = new ConcurrentDictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
             _logicalKeyToVault = new Dictionary<string, string>(StringComparer.Ordinal);
             _vaults = vaults;
             _secretFactories = secretFactories;
@@ -217,6 +218,7 @@ namespace Kitsy.Cnos
             foreach (string key in keys)
             {
                 string sourceKey = ResolveProjectedSourceKey(key);
+                if (sourceKey.StartsWith("secret.", StringComparison.Ordinal)) continue;
                 if (_entries.TryGetValue(sourceKey, out var source) &&
                     source?.Formula != null && source.Formula.RuntimeDependent)
                 {
@@ -348,8 +350,8 @@ namespace Kitsy.Cnos
             if (vaultId != null && _localVaultCache.TryGetValue(vaultId, out var vc))
                 savedVaultCache = new Dictionary<string, string>(vc, StringComparer.Ordinal);
 
-            _hydratedSecrets.Remove(key);
-            if (vaultId != null) _localVaultCache.Remove(vaultId);
+            _hydratedSecrets.TryRemove(key, out _);
+            if (vaultId != null) _localVaultCache.TryRemove(vaultId, out _);
 
             try { ReadSecret(key, entry.SecretRef); }
             catch (CnosError)
@@ -358,7 +360,7 @@ namespace Kitsy.Cnos
                 if (vaultId != null)
                 {
                     if (savedVaultCache != null) _localVaultCache[vaultId] = savedVaultCache;
-                    else _localVaultCache.Remove(vaultId);
+                    else _localVaultCache.TryRemove(vaultId, out _);
                 }
                 throw;
             }
@@ -384,7 +386,12 @@ namespace Kitsy.Cnos
             }
 
             if (!string.IsNullOrEmpty(entry.AliasTo))
-                return ReadInternal(entry.AliasTo!, stack);
+            {
+                if (stack.Contains(key))
+                    throw new CnosError($"cnos: circular alias for {key}");
+                var aliasNext = new HashSet<string>(stack, StringComparer.Ordinal) { key };
+                return ReadInternal(entry.AliasTo!, aliasNext);
+            }
 
             if (entry.SecretRef != null)
                 return ReadSecret(key, entry.SecretRef);
@@ -744,6 +751,7 @@ namespace Kitsy.Cnos
                 string sourceKey = key;
                 if (!_entries.ContainsKey(sourceKey)) sourceKey = ToLogicalKey("value", key);
                 if (!_entries.ContainsKey(sourceKey)) continue;
+                if (sourceKey.StartsWith("secret.", StringComparison.Ordinal)) continue;
 
                 string publicKey = ToLogicalKey("public", key);
                 _entries[publicKey] = new RuntimeEntry

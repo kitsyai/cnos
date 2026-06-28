@@ -263,6 +263,7 @@ public final class CnosRuntime {
         for (String key : keys) {
             // Check if source is runtime-dependent (cannot be in public env)
             String sourceKey = resolveProjectedSourceKey(key);
+            if (sourceKey.startsWith("secret.")) continue;
             RuntimeEntry source = entries.get(sourceKey);
             if (source != null && source.getFormula() != null && source.getFormula().isRuntimeDependent()) {
                 Object[] r = readInternal(key, new HashSet<>());
@@ -920,6 +921,7 @@ public final class CnosRuntime {
                 sourceKey = toLogicalKey("value", key);
             }
             if (!entries.containsKey(sourceKey)) continue;
+            if (sourceKey.startsWith("secret.")) continue;
 
             String publicKey = toLogicalKey("public", key);
             entries.put(publicKey, new RuntimeEntry.Builder()
