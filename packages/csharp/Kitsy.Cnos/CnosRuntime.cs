@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Threading;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -35,6 +36,7 @@ namespace Kitsy.Cnos
         private readonly Dictionary<string, RuntimeEntry> _entries;
         private readonly Dictionary<string, string> _sources;
         private readonly HashSet<string> _runtimeNamespaces;
+        private readonly SemaphoreSlim _refreshLock = new SemaphoreSlim(1, 1);
         private readonly ConcurrentDictionary<string, Func<string, object?>> _runtimeProviders;
         private readonly Dictionary<string, object?>? _encryptedSecrets;
         private readonly ConcurrentDictionary<string, object?> _hydratedSecrets;
@@ -318,23 +320,28 @@ namespace Kitsy.Cnos
         /// <summary>Clears all hydrated secret caches and re-warms every secret in the projection.</summary>
         public void RefreshSecrets()
         {
-            var savedHydrated = new Dictionary<string, object?>(_hydratedSecrets, StringComparer.Ordinal);
-            var savedLocal = _localVaultCache.ToDictionary(
-                kv => kv.Key,
-                kv => new Dictionary<string, string>(kv.Value, StringComparer.Ordinal),
-                StringComparer.Ordinal);
-
-            _hydratedSecrets.Clear();
-            _localVaultCache.Clear();
-            try { WarmSecrets(); }
-            catch (CnosError)
+            _refreshLock.Wait();
+            try
             {
+                var savedHydrated = new Dictionary<string, object?>(_hydratedSecrets, StringComparer.Ordinal);
+                var savedLocal = _localVaultCache.ToDictionary(
+                    kv => kv.Key,
+                    kv => new Dictionary<string, string>(kv.Value, StringComparer.Ordinal),
+                    StringComparer.Ordinal);
+
                 _hydratedSecrets.Clear();
-                foreach (var kv in savedHydrated) _hydratedSecrets[kv.Key] = kv.Value;
                 _localVaultCache.Clear();
-                foreach (var kv in savedLocal) _localVaultCache[kv.Key] = kv.Value;
-                throw;
+                try { WarmSecrets(); }
+                catch (CnosError)
+                {
+                    _hydratedSecrets.Clear();
+                    foreach (var kv in savedHydrated) _hydratedSecrets[kv.Key] = kv.Value;
+                    _localVaultCache.Clear();
+                    foreach (var kv in savedLocal) _localVaultCache[kv.Key] = kv.Value;
+                    throw;
+                }
             }
+            finally { _refreshLock.Release(); }
         }
 
         /// <summary>Evicts and re-hydrates a single secret by its sub-path or full logical key.</summary>

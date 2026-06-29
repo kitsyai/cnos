@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use serde_json::Value;
 use crate::error::CnosError;
 use crate::projection::VaultDef;
@@ -40,7 +41,7 @@ pub trait SecretVaultProvider: Send + Sync {
 
 pub struct SecretVaultProviderFactory {
     pub provider: String,
-    pub create: Box<dyn Fn(&str, VaultDefinition) -> Result<Box<dyn SecretVaultProvider>, CnosError> + Send + Sync>,
+    pub create: Arc<dyn Fn(&str, VaultDefinition) -> Result<Box<dyn SecretVaultProvider>, CnosError> + Send + Sync>,
 }
 
 impl SecretVaultProviderFactory {
@@ -48,7 +49,7 @@ impl SecretVaultProviderFactory {
     where
         F: Fn(&str, VaultDefinition) -> Result<Box<dyn SecretVaultProvider>, CnosError> + Send + Sync + 'static,
     {
-        SecretVaultProviderFactory { provider: provider.into(), create: Box::new(create) }
+        SecretVaultProviderFactory { provider: provider.into(), create: Arc::new(create) }
     }
 }
 

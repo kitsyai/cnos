@@ -443,9 +443,9 @@ impl CnosRuntime {
             self.runtime_namespaces.insert(ns.clone());
         }
         if self.runtime_namespaces.contains("process") {
-            let env_clone = clone_env_map(&self.env);
+            let env_snap = self.env.snapshot();
             let mut providers = self.runtime_providers.write().unwrap();
-            providers.insert("process".into(), Box::new(move |path| process_provider(path, &env_clone)));
+            providers.insert("process".into(), Box::new(move |path| process_provider(path, &env_snap)));
         }
     }
 
@@ -851,12 +851,15 @@ impl CnosRuntime {
         let vault_def = vault_def_for_provider(def);
         let auth = self.resolve_vault_auth(vault_id, def)?;
 
-        let mut factories = self.secret_factories.lock().unwrap();
-        let factory = factories.get_mut(&def.provider)
-            .ok_or_else(|| CnosError::VaultError(format!("unsupported vault provider: {}", def.provider)))?;
-
-        let mut provider = (factory.create)(vault_id, vault_def)?;
-        drop(factories);
+        // Clone the Arc so the factories lock is released before calling create.
+        // If create() panics the factories Mutex is not held and remains usable.
+        let create_fn = {
+            let factories = self.secret_factories.lock().unwrap();
+            factories.get(&def.provider)
+                .ok_or_else(|| CnosError::VaultError(format!("unsupported vault provider: {}", def.provider)))?
+                .create.clone()
+        };
+        let mut provider = create_fn(vault_id, vault_def)?;
 
         provider.authenticate(auth)?;
         let values = provider.batch_get(&ref_strings)?;
@@ -1063,14 +1066,10 @@ fn set_nested_value(target: &mut HashMap<String, Value>, path: &[&str], value: V
     }
 }
 
-fn clone_env_map(_env: &CnosEnvironment) -> HashMap<String, String> {
-    std::env::vars().collect()
-}
-
-fn process_provider(path: &str, _env: &HashMap<String, String>) -> Option<Value> {
+fn process_provider(path: &str, env: &HashMap<String, String>) -> Option<Value> {
     let parts: Vec<&str> = path.splitn(2, '.').collect();
     if parts.len() > 1 && parts[0] == "env" {
-        return std::env::var(parts[1]).ok().map(Value::String);
+        return env.get(parts[1]).cloned().map(Value::String);
     }
     match path {
         "cwd" => std::env::current_dir().ok().map(|p| Value::String(p.to_string_lossy().into_owned())),

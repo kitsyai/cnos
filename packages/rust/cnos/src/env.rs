@@ -16,6 +16,13 @@ impl CnosEnvironment {
         }
     }
 
+    pub fn snapshot(&self) -> HashMap<String, String> {
+        match &self.override_map {
+            Some(map) => map.clone(),
+            None => std::env::vars().collect(),
+        }
+    }
+
     pub fn process_env(&self) -> Vec<String> {
         let mut values: HashMap<String, String> = std::env::vars().collect();
         if let Some(overrides) = &self.override_map {

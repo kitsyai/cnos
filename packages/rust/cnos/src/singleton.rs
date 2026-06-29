@@ -31,16 +31,24 @@ pub fn reset_default_runtime() {
 }
 
 pub fn ready(options: Options) -> Result<(), CnosError> {
-    let existing = storage().lock().unwrap().clone();
+    // First check under lock — fast path when already initialized.
+    let existing = { storage().lock().unwrap().clone() };
     if let Some(rt) = existing {
         if !options.secret_vault_providers.is_empty() {
             rt.register_secret_vault_providers(options.secret_vault_providers);
         }
         return rt.warm_secrets();
     }
+
+    // Load without holding the lock (slow I/O).
     let loaded = CnosRuntime::load(options)?;
     loaded.warm_secrets()?;
-    set_default_runtime(loaded);
+
+    // Re-acquire and set only if still uninitialized — prevents double-init races.
+    let mut guard = storage().lock().unwrap();
+    if guard.is_none() {
+        *guard = Some(Arc::new(loaded));
+    }
     Ok(())
 }
 

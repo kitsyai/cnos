@@ -7,7 +7,7 @@
   <parent>
     <groupId>ai.kitsy</groupId>
     <artifactId>cnos-java-parent</artifactId>
-    <version>1.11.4</version>
+    <version>1.12.0</version>
   </parent>
 
   <artifactId>cnos-java-hashicorp</artifactId>
