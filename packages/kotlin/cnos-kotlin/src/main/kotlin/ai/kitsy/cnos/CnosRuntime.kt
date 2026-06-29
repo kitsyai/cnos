@@ -319,7 +319,7 @@ class CnosRuntime private constructor(
         var runtimeDependent = formula.isRuntimeDependent
         val runtimeRefs = formula.runtimeRefs.toMutableList()
 
-        for (ref in formula.deps) {
+        for (ref in (formula.deps + formula.runtimeRefs).distinct()) {
             val ns = namespaceForKey(ref)
             if (ns.isEmpty()) continue
             if (ns in runtimeNamespaces) {

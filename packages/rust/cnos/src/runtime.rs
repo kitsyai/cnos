@@ -60,7 +60,7 @@ impl FormulaCacheCell {
         FormulaCacheCell { cached: AtomicBool::new(false), value: Mutex::new(None) }
     }
     fn get(&self) -> Option<Value> {
-        if self.cached.load(Ordering::Relaxed) {
+        if self.cached.load(Ordering::Acquire) {
             self.value.lock().unwrap().clone()
         } else {
             None

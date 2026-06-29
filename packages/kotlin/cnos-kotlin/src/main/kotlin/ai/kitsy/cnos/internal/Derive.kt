@@ -159,8 +159,8 @@ internal object Derive {
                 if (args.isEmpty()) return false
                 val arg = args[0]
                 if (arg is ExprNode.Ref) {
-                    val (_, found) = resolver(arg.key)
-                    found
+                    val (value, found) = resolver(arg.key)
+                    found && value != null
                 } else {
                     evalNode(arg, resolver) != null
                 }
