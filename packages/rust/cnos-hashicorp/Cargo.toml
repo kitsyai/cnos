@@ -1,12 +1,12 @@
 [package]
 name = "cnos-hashicorp"
-version = "1.12.0"
+version = "1.12.1"
 edition = "2021"
 description = "CNOS HashiCorp Vault provider for Rust"
 license = "MIT"
 repository = "https://github.com/kitsyai/cnos"
 
 [dependencies]
-cnos = { path = "../cnos", version = "1.12.0" }
+cnos = { path = "../cnos", version = "1.12.1" }
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde_json = "1"

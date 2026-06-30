@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-ui",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "Vite-powered React UI for browsing CNOS configuration state.",
   "private": false,
   "type": "module",

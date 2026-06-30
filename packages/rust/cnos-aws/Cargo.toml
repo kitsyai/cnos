@@ -1,13 +1,13 @@
 [package]
 name = "cnos-aws"
-version = "1.12.0"
+version = "1.12.1"
 edition = "2021"
 description = "CNOS AWS Secrets Manager vault provider for Rust"
 license = "MIT"
 repository = "https://github.com/kitsyai/cnos"
 
 [dependencies]
-cnos = { path = "../cnos", version = "1.12.0" }
+cnos = { path = "../cnos", version = "1.12.1" }
 aws-config = "1"
 aws-sdk-secretsmanager = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }

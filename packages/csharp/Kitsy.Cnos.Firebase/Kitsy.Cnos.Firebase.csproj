@@ -7,7 +7,7 @@
     <AssemblyName>Kitsy.Cnos.Firebase</AssemblyName>
 
     <PackageId>Kitsy.Cnos.Firebase</PackageId>
-    <Version>1.12.0</Version>
+    <Version>1.12.1</Version>
     <Authors>Prashant Sinha</Authors>
     <Company>Kitsy AI</Company>
     <Description>CNOS C# vault provider for Firebase Secrets (backed by GCP Secret Manager).</Description>
