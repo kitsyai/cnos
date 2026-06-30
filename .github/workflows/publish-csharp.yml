@@ -19,6 +19,10 @@ jobs:
         with:
           dotnet-version: '8.x'
 
+      - name: Restore NuGet packages
+        working-directory: packages/csharp
+        run: dotnet restore
+
       - name: Pack all packages
         working-directory: packages/csharp
         run: |
@@ -40,7 +44,6 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          dotnet restore
           for PKG in .artifacts/*.nupkg; do
             dotnet nuget push "$PKG" \
               --api-key "$NUGET_API_KEY" \

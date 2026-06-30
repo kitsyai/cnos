@@ -45,6 +45,14 @@ jobs:
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --list-secret-keys --keyid-format LONG
 
+      - name: Set version from tag
+        working-directory: packages/kotlin
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          mvn versions:set -DnewVersion="${VERSION}" -DprocessAllModules \
+            --no-transfer-progress --batch-mode
+          mvn versions:commit --no-transfer-progress --batch-mode
+
       - name: Deploy to Maven Central
         working-directory: packages/kotlin
         env:

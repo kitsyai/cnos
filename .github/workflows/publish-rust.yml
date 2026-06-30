@@ -21,7 +21,10 @@ jobs:
         working-directory: packages/rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p cnos
+        run: |
+          out=$(cargo publish -p cnos 2>&1); rc=$?
+          echo "$out"
+          [[ $rc -eq 0 ]] || echo "$out" | grep -q "already exists" || exit $rc
 
       # crates.io indexes within ~30s; vault plugins depend on the published core
       - name: Wait for core crate to index
@@ -32,8 +35,14 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p cnos-aws      && sleep 20
-          cargo publish -p cnos-azure    && sleep 20
-          cargo publish -p cnos-gcp      && sleep 20
-          cargo publish -p cnos-firebase && sleep 20
-          cargo publish -p cnos-hashicorp
+          publish() {
+            local pkg=$1
+            out=$(cargo publish -p "$pkg" 2>&1); rc=$?
+            echo "$out"
+            [[ $rc -eq 0 ]] || echo "$out" | grep -q "already exists" || exit $rc
+          }
+          publish cnos-aws      && sleep 20
+          publish cnos-azure    && sleep 20
+          publish cnos-gcp      && sleep 20
+          publish cnos-firebase && sleep 20
+          publish cnos-hashicorp
