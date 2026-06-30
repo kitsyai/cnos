@@ -80,6 +80,7 @@
   </dependencyManagement>
 
   <build>
+    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
     <pluginManagement>
       <plugins>
         <plugin>
@@ -118,14 +119,6 @@
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-javadoc-plugin</artifactId>
-          <version>3.7.0</version>
-          <configuration>
-            <failOnError>false</failOnError>
-          </configuration>
-        </plugin>
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-gpg-plugin</artifactId>
           <version>3.2.4</version>
         </plugin>
@@ -156,15 +149,14 @@
                 <id>attach-sources</id>
                 <goals><goal>jar-no-fork</goal></goals>
               </execution>
-            </executions>
-          </plugin>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <executions>
+              <!-- Kotlin has no javadoc tool; supply sources as the javadoc jar.
+                   Maven Central requires the jar to exist and be non-empty. -->
               <execution>
                 <id>attach-javadocs</id>
-                <goals><goal>jar</goal></goals>
+                <goals><goal>jar-no-fork</goal></goals>
+                <configuration>
+                  <classifier>javadoc</classifier>
+                </configuration>
               </execution>
             </executions>
           </plugin>
