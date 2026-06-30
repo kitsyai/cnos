@@ -6,7 +6,7 @@
 
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-kotlin-parent</artifactId>
-  <version>1.12.2</version>
+  <version>${revision}</version>
   <packaging>pom</packaging>
 
   <name>CNOS Kotlin Parent</name>
@@ -45,6 +45,7 @@
   </modules>
 
   <properties>
+    <revision>1.12.3</revision>
     <kotlin.version>1.9.23</kotlin.version>
     <jackson.version>2.17.0</jackson.version>
     <junit.version>5.10.2</junit.version>

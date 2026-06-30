@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vault-azure",
-  "version": "1.12.2",
+  "version": "1.12.3",
   "description": "Azure Key Vault provider for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -25,7 +25,7 @@
     "@azure/keyvault-secrets": "^4.11.2"
   },
   "peerDependencies": {
-    "@kitsy/cnos": "^1.12.2"
+    "@kitsy/cnos": "^1.12.3"
   },
   "devDependencies": {
     "@kitsy/cnos": "workspace:*",

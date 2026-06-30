@@ -1,7 +1,7 @@
 {
   "name": "@kitsy/cnos-vault-testkit",
   "private": true,
-  "version": "1.12.2",
+  "version": "1.12.3",
   "description": "Shared conformance helpers for CNOS secret vault providers.",
   "type": "module",
   "main": "./dist/index.cjs",

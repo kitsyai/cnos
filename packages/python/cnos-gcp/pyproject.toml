@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cnos-gcp"
-version = "1.12.2"
+version = "1.12.3"
 description = "CNOS GCP Secret Manager vault provider"
 requires-python = ">=3.8"
 dependencies = [

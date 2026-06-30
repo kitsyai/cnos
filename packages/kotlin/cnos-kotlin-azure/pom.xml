@@ -7,7 +7,7 @@
   <parent>
     <groupId>ai.kitsy</groupId>
     <artifactId>cnos-kotlin-parent</artifactId>
-    <version>1.12.1</version>
+    <version>${revision}</version>
   </parent>
 
   <artifactId>cnos-kotlin-azure</artifactId>
@@ -31,7 +31,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-identity</artifactId>
-      <version>1.12.1</version>
+      <version>${revision}</version>
     </dependency>
   </dependencies>
 

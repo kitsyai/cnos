@@ -45,20 +45,14 @@ jobs:
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --list-secret-keys --keyid-format LONG
 
-      - name: Set version from tag
-        working-directory: packages/java
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          mvn versions:set -DnewVersion="${VERSION}" -DprocessAllModules \
-            --no-transfer-progress --batch-mode
-          mvn versions:commit --no-transfer-progress --batch-mode
-
       - name: Deploy to Maven Central
         working-directory: packages/java
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
           mvn clean deploy -P release \
+            -Drevision="${VERSION}" \
             -Dgpg.passphrase="${GPG_PASSPHRASE}" \
             --no-transfer-progress \
             --batch-mode

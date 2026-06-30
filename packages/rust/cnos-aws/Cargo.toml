@@ -1,6 +1,6 @@
 [package]
 name = "cnos-aws"
-version = "1.12.2"
+version = "1.12.3"
 edition = "2021"
 description = "CNOS AWS Secrets Manager vault provider for Rust"
 license = "MIT"
