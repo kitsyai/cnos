@@ -6,7 +6,7 @@
 
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-java-parent</artifactId>
-  <version>1.12.1</version>
+  <version>1.12.2</version>
   <packaging>pom</packaging>
 
   <name>CNOS Java Parent</name>
@@ -89,7 +89,7 @@
       <dependency>
         <groupId>com.azure</groupId>
         <artifactId>azure-identity</artifactId>
-        <version>1.12.1</version>
+        <version>1.12.2</version>
       </dependency>
       <dependency>
         <groupId>org.junit.jupiter</groupId>

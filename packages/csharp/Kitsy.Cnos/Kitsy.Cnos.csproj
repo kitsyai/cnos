@@ -7,10 +7,10 @@
     <AssemblyName>Kitsy.Cnos</AssemblyName>
 
     <PackageId>Kitsy.Cnos</PackageId>
-    <Version>1.12.1</Version>
+    <Version>1.12.2</Version>
     <Authors>Prashant Sinha</Authors>
     <Company>Kitsy AI</Company>
-    <Description>CNOS C# client runtime — consumes a server projection and provides typed read APIs for value, secret, meta, and public namespaces.</Description>
+    <Description>CNOS C# client runtime â€” consumes a server projection and provides typed read APIs for value, secret, meta, and public namespaces.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/kitsyai/cnos</PackageProjectUrl>
     <RepositoryUrl>https://github.com/kitsyai/cnos</RepositoryUrl>

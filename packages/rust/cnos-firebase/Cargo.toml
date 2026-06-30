@@ -1,12 +1,12 @@
 [package]
 name = "cnos-firebase"
-version = "1.12.1"
+version = "1.12.2"
 edition = "2021"
 description = "CNOS Firebase Secrets vault provider for Rust (wraps GCP)"
 license = "MIT"
 repository = "https://github.com/kitsyai/cnos"
 
 [dependencies]
-cnos = { path = "../cnos", version = "1.12.1" }
-cnos-gcp = { path = "../cnos-gcp", version = "1.12.1" }
+cnos = { path = "../cnos", version = "1.12.2" }
+cnos-gcp = { path = "../cnos-gcp", version = "1.12.2" }
 serde_json = "1"

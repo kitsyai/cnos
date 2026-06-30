@@ -1,13 +1,13 @@
 [package]
 name = "cnos-azure"
-version = "1.12.1"
+version = "1.12.2"
 edition = "2021"
 description = "CNOS Azure Key Vault provider for Rust"
 license = "MIT"
 repository = "https://github.com/kitsyai/cnos"
 
 [dependencies]
-cnos = { path = "../cnos", version = "1.12.1" }
+cnos = { path = "../cnos", version = "1.12.2" }
 azure_core = "1.0"
 azure_security_keyvault_secrets = "1.0"
 azure_identity = "1.0"

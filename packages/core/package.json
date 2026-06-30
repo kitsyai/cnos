@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-core",
-  "version": "1.12.1",
+  "version": "1.12.2",
   "description": "Core orchestration contracts and runtime primitives for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
