@@ -30,26 +30,32 @@ jobs:
         include:
           - local_path: packages/php/cnos
             split_repo: kitsyai/cnos-php
+            repo_name: cnos-php
             packagist_package: kitsy/cnos
 
           - local_path: packages/php/cnos-aws
             split_repo: kitsyai/cnos-php-aws
+            repo_name: cnos-php-aws
             packagist_package: kitsy/cnos-aws
 
           - local_path: packages/php/cnos-azure
             split_repo: kitsyai/cnos-php-azure
+            repo_name: cnos-php-azure
             packagist_package: kitsy/cnos-azure
 
           - local_path: packages/php/cnos-gcp
             split_repo: kitsyai/cnos-php-gcp
+            repo_name: cnos-php-gcp
             packagist_package: kitsy/cnos-gcp
 
           - local_path: packages/php/cnos-firebase
             split_repo: kitsyai/cnos-php-firebase
+            repo_name: cnos-php-firebase
             packagist_package: kitsy/cnos-firebase
 
           - local_path: packages/php/cnos-hashicorp
             split_repo: kitsyai/cnos-php-hashicorp
+            repo_name: cnos-php-hashicorp
             packagist_package: kitsy/cnos-hashicorp
 
     steps:
@@ -71,7 +77,7 @@ jobs:
           branch: main
           package_directory: ${{ matrix.local_path }}
           repository_organization: kitsyai
-          repository_name: ${{ matrix.split_repo == 'kitsyai/cnos-php' && 'cnos-php' || matrix.split_repo }}
+          repository_name: ${{ matrix.repo_name }}
           user_email: github-actions[bot]@users.noreply.github.com
           user_name: github-actions[bot]
         env:
