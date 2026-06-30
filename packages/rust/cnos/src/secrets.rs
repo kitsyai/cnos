@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use aes_gcm::aead::{Aead, KeyInit};
 use base64::Engine;
@@ -9,7 +9,7 @@ use crate::env::CnosEnvironment;
 use crate::error::CnosError;
 use crate::projection::VaultDef;
 use crate::vault::{
-    default_vault_method, get_vault_passphrase_env_var, get_vault_session_key_env_var, normalize_vault_token,
+    get_vault_passphrase_env_var, get_vault_session_key_env_var, normalize_vault_token,
 };
 
 const KEY_LENGTH: usize = 32;
@@ -181,7 +181,6 @@ fn derive_local_vault_key(passphrase: &str, vault: &str, meta: &LocalVaultMeta) 
 }
 
 fn pbkdf2_sha512(password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8]) {
-    use hmac::Hmac;
     use sha2::Sha512;
     pbkdf2::pbkdf2_hmac::<Sha512>(password, salt, iterations, out);
 }

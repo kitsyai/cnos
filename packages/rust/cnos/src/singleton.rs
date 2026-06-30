@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use crate::error::CnosError;
-use crate::runtime::{CnosRuntime, Options, ToEnvOptions, ToPublicEnvOptions};
+use crate::runtime::{CnosRuntime, Options, ToPublicEnvOptions};
 use serde_json::Value;
 use std::collections::HashMap;
 

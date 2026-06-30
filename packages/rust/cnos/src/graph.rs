@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use crate::derive::{is_derived_value, parse_raw_derived_value};
 use crate::error::CnosError;
-use crate::manifest::{BootstrappedManifest, NamespaceDef, RuntimeNamespaceDef, bootstrapped_manifest_from_projection, default_frameworks, default_namespace_defs};
-use crate::runtime::{RuntimeEntry, RuntimeProvenance, to_logical_key};
-use crate::projection::VaultDef;
+use crate::manifest::{BootstrappedManifest, RuntimeNamespaceDef, default_frameworks, default_namespace_defs};
+use crate::runtime::{RuntimeEntry, RuntimeProvenance};
 
 #[derive(Debug, Deserialize)]
 pub struct RuntimeGraph {

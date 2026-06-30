@@ -4,25 +4,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::Value;
 
 use crate::derive::{
-    evaluate_derived_formula, parse_derived_formula, parse_raw_derived_value,
-    is_derived_value, unique_sorted_strings, ParsedFormula,
+    evaluate_derived_formula, parse_derived_formula,
+    unique_sorted_strings, ParsedFormula,
 };
-use crate::discover::{expand_home_path, find_projection_path, resolve_path_from_working_dir};
+use crate::discover::{find_projection_path, resolve_path_from_working_dir};
 use crate::env::CnosEnvironment;
 use crate::error::CnosError;
 use crate::jscompat::{js_stringify_value, js_log_stringify_value, node_arch, node_platform};
-use crate::manifest::{bootstrapped_manifest_from_projection, BootstrappedManifest, NamespaceDef};
+use crate::manifest::{bootstrapped_manifest_from_projection, BootstrappedManifest};
 use crate::projection::{
     parse_projection, SecretRefRaw, ServerProjection,
-    GRAPH_ENV_VAR, PROJECTION_ENV_VAR, SECRET_PAYLOAD_ENV_VAR, SESSION_KEY_ENV_VAR,
+    GRAPH_ENV_VAR, PROJECTION_ENV_VAR,
 };
 use crate::secrets::{decrypt_secret_payload_from_env, read_local_vault_secrets, resolve_secret_home};
 use crate::vault::{
-    default_vault_method, get_vault_passphrase_env_var, get_vault_session_key_env_var,
-    normalize_vault_token, vault_def_for_provider, SecretVaultProvider, SecretVaultProviderFactory,
-    VaultAuthConfig, VaultDefinition,
+    default_vault_method, get_vault_passphrase_env_var,
+    vault_def_for_provider, SecretVaultProviderFactory,
+    VaultAuthConfig,
 };
-use crate::projection::VaultDef;
 
 // ---- Options ----
 
@@ -108,6 +107,7 @@ pub struct ToPublicEnvOptions {
 
 // ---- Runtime ----
 
+#[allow(dead_code)]
 pub struct CnosRuntime {
     projection: ServerProjection,
     manifest: BootstrappedManifest,
