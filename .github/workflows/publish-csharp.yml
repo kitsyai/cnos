@@ -1,0 +1,49 @@
+name: Publish — C# (NuGet)
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: publish-csharp-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Pack all packages
+        working-directory: packages/csharp
+        run: |
+          mkdir -p .artifacts
+          PROJECTS=(
+            Kitsy.Cnos/Kitsy.Cnos.csproj
+            Kitsy.Cnos.Aws/Kitsy.Cnos.Aws.csproj
+            Kitsy.Cnos.Azure/Kitsy.Cnos.Azure.csproj
+            Kitsy.Cnos.Gcp/Kitsy.Cnos.Gcp.csproj
+            Kitsy.Cnos.Firebase/Kitsy.Cnos.Firebase.csproj
+            Kitsy.Cnos.HashiCorp/Kitsy.Cnos.HashiCorp.csproj
+          )
+          for PROJ in "${PROJECTS[@]}"; do
+            dotnet pack "$PROJ" -c Release -o .artifacts/ --no-restore
+          done
+
+      - name: Push to NuGet.org
+        working-directory: packages/csharp
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet restore
+          for PKG in .artifacts/*.nupkg; do
+            dotnet nuget push "$PKG" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done

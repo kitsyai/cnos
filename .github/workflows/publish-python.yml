@@ -1,0 +1,38 @@
+name: Publish — Python (PyPI)
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: publish-python-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build and publish all packages
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          PACKAGES=(cnos cnos-aws cnos-azure cnos-gcp cnos-firebase cnos-hashicorp)
+          for PKG in "${PACKAGES[@]}"; do
+            echo "=== $PKG ==="
+            cd "packages/python/$PKG"
+            rm -rf dist/
+            python -m build
+            twine upload dist/*
+            cd -
+          done

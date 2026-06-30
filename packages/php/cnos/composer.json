@@ -1,0 +1,29 @@
+{
+    "name": "kitsy/cnos",
+    "description": "CNOS PHP runtime client — reads server projections and resolves config, secrets, and derived values.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/kitsyai/cnos",
+    "authors": [{"name": "Prashant Sinha"}],
+    "require": {
+        "php": ">=8.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Kitsy\\Cnos\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Kitsy\\Cnos\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit tests/"
+    },
+    "keywords": ["cnos", "configuration", "secrets", "kitsy"],
+    "minimum-stability": "stable"
+}

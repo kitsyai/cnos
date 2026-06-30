@@ -1,0 +1,91 @@
+name: Publish — Node.js (npm)
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: publish-node-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Core packages — must publish before dependents
+      - name: Publish @kitsy/cnos
+        run: pnpm --filter @kitsy/cnos publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-cli
+        run: pnpm --filter @kitsy/cnos-cli publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-ui
+        run: pnpm --filter @kitsy/cnos-ui publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Framework integrations
+      - name: Publish @kitsy/cnos-vite
+        run: pnpm --filter @kitsy/cnos-vite publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-next
+        run: pnpm --filter @kitsy/cnos-next publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-webpack
+        run: pnpm --filter @kitsy/cnos-webpack publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-docs
+        run: pnpm --filter @kitsy/cnos-docs publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Vault plugins
+      - name: Publish @kitsy/cnos-vault-gcp
+        run: pnpm --filter @kitsy/cnos-vault-gcp publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-vault-firebase
+        run: pnpm --filter @kitsy/cnos-vault-firebase publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-vault-aws
+        run: pnpm --filter @kitsy/cnos-vault-aws publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-vault-hashicorp
+        run: pnpm --filter @kitsy/cnos-vault-hashicorp publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-vault-azure
+        run: pnpm --filter @kitsy/cnos-vault-azure publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

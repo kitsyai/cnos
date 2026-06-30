@@ -1,0 +1,23 @@
+{
+    "name": "kitsy/cnos-hashicorp",
+    "description": "CNOS PHP vault provider for HashiCorp Vault.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/kitsyai/cnos",
+    "authors": [{"name": "Prashant Sinha"}],
+    "require": {
+        "php": ">=8.0",
+        "kitsy/cnos": "^1.12.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Kitsy\\Cnos\\HashiCorp\\": "src/"
+        }
+    },
+    "keywords": ["cnos", "secrets", "hashicorp", "vault", "kitsy"],
+    "minimum-stability": "stable"
+}

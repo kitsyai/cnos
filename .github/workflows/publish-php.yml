@@ -1,0 +1,91 @@
+name: Publish — PHP (Packagist via monorepo split)
+
+# Packagist requires each package to be its own GitHub repo.
+# This workflow splits each packages/php/cnos* subdirectory into a separate
+# read-only mirror repo (kitsyai/cnos-php, kitsyai/cnos-php-aws, …) and
+# notifies Packagist to sync.
+#
+# One-time setup:
+#   1. Create the target repos on github.com/kitsyai:
+#        cnos-php, cnos-php-aws, cnos-php-azure, cnos-php-gcp,
+#        cnos-php-firebase, cnos-php-hashicorp
+#   2. Register each on packagist.org pointing to the matching repo.
+#   3. Add secret MONOREPO_SPLIT_TOKEN (a PAT with `repo` scope) to this repo.
+#   4. Add secrets PACKAGIST_USERNAME and PACKAGIST_API_TOKEN.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: publish-php-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - local_path: packages/php/cnos
+            split_repo: kitsyai/cnos-php
+            packagist_package: kitsy/cnos
+
+          - local_path: packages/php/cnos-aws
+            split_repo: kitsyai/cnos-php-aws
+            packagist_package: kitsy/cnos-aws
+
+          - local_path: packages/php/cnos-azure
+            split_repo: kitsyai/cnos-php-azure
+            packagist_package: kitsy/cnos-azure
+
+          - local_path: packages/php/cnos-gcp
+            split_repo: kitsyai/cnos-php-gcp
+            packagist_package: kitsy/cnos-gcp
+
+          - local_path: packages/php/cnos-firebase
+            split_repo: kitsyai/cnos-php-firebase
+            packagist_package: kitsy/cnos-firebase
+
+          - local_path: packages/php/cnos-hashicorp
+            split_repo: kitsyai/cnos-php-hashicorp
+            packagist_package: kitsy/cnos-hashicorp
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --strict --working-dir="${{ matrix.local_path }}"
+
+      - name: Split and push to mirror repo
+        uses: danharrin/monorepo-split-github-action@v2.3.0
+        with:
+          branch: main
+          package_directory: ${{ matrix.local_path }}
+          repository_organization: kitsyai
+          repository_name: ${{ matrix.split_repo == 'kitsyai/cnos-php' && 'cnos-php' || matrix.split_repo }}
+          user_email: github-actions[bot]@users.noreply.github.com
+          user_name: github-actions[bot]
+        env:
+          GITHUB_TOKEN: ${{ secrets.MONOREPO_SPLIT_TOKEN }}
+
+      - name: Notify Packagist
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+          PACKAGIST_PACKAGE: ${{ matrix.packagist_package }}
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H 'content-type: application/json' \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}" \
+            -d "{\"repository\":{\"url\":\"https://github.com/${{ matrix.split_repo }}\"}}")
+          echo "${{ matrix.packagist_package }}: HTTP ${HTTP_STATUS}"

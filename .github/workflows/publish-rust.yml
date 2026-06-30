@@ -1,0 +1,39 @@
+name: Publish — Rust (crates.io)
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: publish-rust-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish core crate
+        working-directory: packages/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p cnos
+
+      # crates.io indexes within ~30s; vault plugins depend on the published core
+      - name: Wait for core crate to index
+        run: sleep 35
+
+      - name: Publish vault plugins
+        working-directory: packages/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p cnos-aws      && sleep 20
+          cargo publish -p cnos-azure    && sleep 20
+          cargo publish -p cnos-gcp      && sleep 20
+          cargo publish -p cnos-firebase && sleep 20
+          cargo publish -p cnos-hashicorp
