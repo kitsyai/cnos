@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-java-gcp</artifactId>
-  <version>1.11.4</version>
+  <version>1.12.0</version>
   <name>CNOS Java GCP Secret Manager Provider</name>
   <description>Parent POM for CNOS Java client runtime modules</description>
   <url>https://github.com/kitsyai/cnos/cnos-java-gcp</url>
@@ -31,7 +31,7 @@
     <dependency>
       <groupId>ai.kitsy</groupId>
       <artifactId>cnos-java</artifactId>
-      <version>1.11.4</version>
+      <version>1.12.0</version>
       <scope>compile</scope>
     </dependency>
     <dependency>

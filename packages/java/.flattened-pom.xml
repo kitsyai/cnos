@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-java-parent</artifactId>
-  <version>1.11.4</version>
+  <version>1.12.0</version>
   <packaging>pom</packaging>
   <name>CNOS Java Parent</name>
   <description>Parent POM for CNOS Java client runtime modules</description>

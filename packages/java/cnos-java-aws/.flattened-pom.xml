@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-java-aws</artifactId>
-  <version>1.11.4</version>
+  <version>1.12.0</version>
   <name>CNOS Java AWS Secrets Manager Provider</name>
   <description>Parent POM for CNOS Java client runtime modules</description>
   <url>https://github.com/kitsyai/cnos/cnos-java-aws</url>
@@ -31,7 +31,7 @@
     <dependency>
       <groupId>ai.kitsy</groupId>
       <artifactId>cnos-java</artifactId>
-      <version>1.11.4</version>
+      <version>1.12.0</version>
       <scope>compile</scope>
     </dependency>
     <dependency>

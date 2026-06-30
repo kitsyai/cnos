@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-java</artifactId>
-  <version>1.11.4</version>
+  <version>1.12.0</version>
   <name>CNOS Java Core Runtime</name>
   <description>CNOS Java client runtime â€” projection consumer path</description>
   <url>https://github.com/kitsyai/cnos/cnos-java</url>

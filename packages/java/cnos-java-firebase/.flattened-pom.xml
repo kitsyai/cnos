@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>ai.kitsy</groupId>
   <artifactId>cnos-java-firebase</artifactId>
-  <version>1.11.4</version>
+  <version>1.12.0</version>
   <name>CNOS Java Firebase Secrets Provider</name>
   <description>CNOS Java vault provider for Firebase Secrets (backed by GCP Secret Manager)</description>
   <url>https://github.com/kitsyai/cnos/cnos-java-firebase</url>
@@ -31,13 +31,13 @@
     <dependency>
       <groupId>ai.kitsy</groupId>
       <artifactId>cnos-java</artifactId>
-      <version>1.11.4</version>
+      <version>1.12.0</version>
       <scope>compile</scope>
     </dependency>
     <dependency>
       <groupId>ai.kitsy</groupId>
       <artifactId>cnos-java-gcp</artifactId>
-      <version>1.11.4</version>
+      <version>1.12.0</version>
       <scope>compile</scope>
     </dependency>
   </dependencies>
