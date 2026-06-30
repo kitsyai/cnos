@@ -88,7 +88,6 @@ impl SecretVaultProvider for GcpSecretManagerProvider {
 }
 
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    use std::io::Read;
     // Standard base64 decoding
     let s = s.trim();
     let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

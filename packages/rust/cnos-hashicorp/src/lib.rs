@@ -9,7 +9,7 @@ pub struct HashiCorpVaultProvider {
 }
 
 impl HashiCorpVaultProvider {
-    pub fn new(vault_id: impl Into<String>, definition: &VaultDefinition) -> Self {
+    pub fn new(_vault_id: impl Into<String>, definition: &VaultDefinition) -> Self {
         let cfg = &definition.auth.config;
         let address = cfg.get("address")
             .or_else(|| cfg.get("url"))

@@ -3,6 +3,7 @@ use cnos::{CnosError, SecretVaultProvider, SecretVaultProviderFactory, VaultAuth
 use serde_json::Value;
 
 pub struct AwsSecretsManagerProvider {
+    #[allow(dead_code)]
     vault_id: String,
     region: Option<String>,
 }
@@ -38,14 +39,14 @@ impl SecretVaultProvider for AwsSecretsManagerProvider {
     fn batch_get(&self, refs: &[String]) -> Result<HashMap<String, Value>, CnosError> {
         self.block_on(async {
             let config = if let Some(ref region) = self.region {
-                aws_config::from_env()
+                aws_config::defaults(aws_config::BehaviorVersion::latest())
                     .region(aws_config::meta::region::RegionProviderChain::first_try(
                         aws_sdk_secretsmanager::config::Region::new(region.clone())
                     ))
                     .load()
                     .await
             } else {
-                aws_config::load_from_env().await
+                aws_config::defaults(aws_config::BehaviorVersion::latest()).load().await
             };
             let client = aws_sdk_secretsmanager::Client::new(&config);
 
@@ -75,7 +76,5 @@ impl SecretVaultProvider for AwsSecretsManagerProvider {
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    use std::fmt::Write;
-    let encoded = data.iter().map(|b| format!("{:02x}", b)).collect::<String>();
-    encoded
+    data.iter().map(|b| format!("{:02x}", b)).collect()
 }
