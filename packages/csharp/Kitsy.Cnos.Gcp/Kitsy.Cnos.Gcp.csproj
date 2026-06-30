@@ -22,6 +22,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kitsy.Cnos\Kitsy.Cnos.csproj" />
-    <PackageReference Include="Google.Cloud.SecretManager.V1" Version="3.3.0" />
+    <PackageReference Include="Google.Cloud.SecretManager.V1" Version="2.7.0" />
   </ItemGroup>
 </Project>

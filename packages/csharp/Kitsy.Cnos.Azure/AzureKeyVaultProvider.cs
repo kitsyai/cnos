@@ -28,7 +28,7 @@ namespace Kitsy.Cnos.Azure
             url ??= _vaultUrl;
 
             string? token = auth.Token;
-            Azure.Core.TokenCredential credential = !string.IsNullOrEmpty(token)
+            global::Azure.Core.TokenCredential credential = !string.IsNullOrEmpty(token)
                 ? new ClientSecretCredential(
                     auth.Config?.TryGetValue("tenantId", out object? t) == true ? t?.ToString() ?? "" : "",
                     auth.Config?.TryGetValue("clientId", out object? c) == true ? c?.ToString() ?? "" : "",
