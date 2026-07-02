@@ -45,7 +45,7 @@
   </modules>
 
   <properties>
-    <revision>1.13.0</revision>
+    <revision>1.14.0</revision>
     <kotlin.version>1.9.23</kotlin.version>
     <jackson.version>2.17.0</jackson.version>
     <junit.version>5.10.2</junit.version>

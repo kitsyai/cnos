@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cnos-azure"
-version = "1.13.0"
+version = "1.14.0"
 description = "CNOS Azure Key Vault provider"
 requires-python = ">=3.8"
 dependencies = [

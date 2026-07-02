@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cnos-firebase"
-version = "1.13.0"
+version = "1.14.0"
 description = "CNOS Firebase Secrets provider (thin wrapper over cnos-gcp)"
 requires-python = ">=3.8"
 dependencies = [

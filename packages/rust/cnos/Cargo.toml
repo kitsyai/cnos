@@ -1,6 +1,6 @@
 [package]
 name = "cnos"
-version = "1.13.0"
+version = "1.14.0"
 edition = "2021"
 rust-version = "1.70"
 description = "CNOS Rust client runtime â€” consumes a server projection and provides typed read APIs"
