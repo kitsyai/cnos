@@ -45,6 +45,7 @@ namespace Kitsy.Cnos
         private readonly Dictionary<string, VaultDefinition> _vaults;
         private readonly Dictionary<string, SecretVaultProviderFactory> _secretFactories;
         private readonly Dictionary<string, string> _parsedArgs;
+        private readonly Dictionary<string, object?> _fileOverrides;
 
         private CnosRuntime(
             ServerProjection? projection,
@@ -60,7 +61,8 @@ namespace Kitsy.Cnos
             Dictionary<string, object?>? encryptedSecrets,
             Dictionary<string, VaultDefinition> vaults,
             Dictionary<string, SecretVaultProviderFactory> secretFactories,
-            Dictionary<string, string>? parsedArgs = null)
+            Dictionary<string, string>? parsedArgs = null,
+            Dictionary<string, object?>? fileOverrides = null)
         {
             _projection = projection;
             _manifest = manifest;
@@ -79,6 +81,7 @@ namespace Kitsy.Cnos
             _vaults = vaults;
             _secretFactories = secretFactories;
             _parsedArgs = parsedArgs ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            _fileOverrides = fileOverrides ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         }
 
         // ============================================================
@@ -153,10 +156,19 @@ namespace Kitsy.Cnos
                 var stripped = key.Substring("value.".Length);
                 if (_projection.Overrides.TryGetValue(stripped, out var spec))
                 {
-                    var (cnosVal, cnosFound) = ReadInternal(key, new HashSet<string>(StringComparer.Ordinal));
+                    // File override participates as the "cnos" source.
+                    var (cnosVal, cnosFound) = FileOrCnos(key);
                     return ApplyOverride(spec, cnosVal, cnosFound, _parsedArgs, _env);
                 }
             }
+            // No OverrideSpec: file then CNOS.
+            if (_fileOverrides.TryGetValue(key, out var fv)) return (fv, true);
+            return ReadInternal(key, new HashSet<string>(StringComparer.Ordinal));
+        }
+
+        private (object? Value, bool Found) FileOrCnos(string key)
+        {
+            if (_fileOverrides.TryGetValue(key, out var fv)) return (fv, true);
             return ReadInternal(key, new HashSet<string>(StringComparer.Ordinal));
         }
 
@@ -676,6 +688,7 @@ namespace Kitsy.Cnos
             var encryptedSecrets = DecryptSecretPayloadFromEnv(env);
             var manifest = BootstrappedManifestFromProjection(projection);
 
+            var parsedArgs0 = ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray());
             var rt = new CnosRuntime(
                 projection, manifest, "manifest-default",
                 NewImplicitWorkspaceState(projection.Workspace),
@@ -687,7 +700,8 @@ namespace Kitsy.Cnos
                 encryptedSecrets,
                 projection.Vaults ?? new Dictionary<string, VaultDefinition>(),
                 BuildFactoryMap(factories),
-                ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray()));
+                parsedArgs0,
+                LoadOverrideFile(DetectOverrideFilePath(parsedArgs0, env)));
 
             rt.PopulateEntries();
             rt.InitializeRuntimeProviders(projection.RuntimeNamespaces ?? new List<string>());
@@ -714,6 +728,7 @@ namespace Kitsy.Cnos
             var entries = new Dictionary<string, RuntimeEntry>(StringComparer.Ordinal);
             var sources = new Dictionary<string, string>(StringComparer.Ordinal);
 
+            var parsedArgs1 = ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray());
             var rt = new CnosRuntime(
                 null, manifest, graph.ProfileSource, ws,
                 env, secretHome,
@@ -723,7 +738,8 @@ namespace Kitsy.Cnos
                 encryptedSecrets,
                 new Dictionary<string, VaultDefinition>(),
                 BuildFactoryMap(factories),
-                ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray()));
+                parsedArgs1,
+                LoadOverrideFile(DetectOverrideFilePath(parsedArgs1, env)));
 
             foreach (var resolved in graph.Entries)
             {
@@ -1294,6 +1310,78 @@ namespace Kitsy.Cnos
                 else { result[arg] = "true"; i++; }
             }
             return result;
+        }
+
+        private static string? DetectOverrideFilePath(Dictionary<string, string> parsedArgs, CnosEnvironment env)
+        {
+            if (parsedArgs.TryGetValue("--cnos-override", out var v) && !string.IsNullOrEmpty(v))
+                return v;
+            var envVal = env.Get("CNOS_OVERRIDE_FILE");
+            return string.IsNullOrEmpty(envVal) ? null : envVal;
+        }
+
+        private static Dictionary<string, object?> LoadOverrideFile(string? path)
+        {
+            var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (string.IsNullOrEmpty(path)) return result;
+            string text;
+            try { text = System.IO.File.ReadAllText(path!); }
+            catch { return result; }
+            var ext = System.IO.Path.GetExtension(path!).TrimStart('.').ToLowerInvariant();
+            if (ext == "json")
+            {
+                try
+                {
+                    var doc = System.Text.Json.JsonDocument.Parse(text);
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                        result[prop.Name] = JsonElementToObject(prop.Value);
+                }
+                catch { }
+                return result;
+            }
+            // .properties / .env fallback
+            return ParsePropertiesOverride(text);
+        }
+
+        private static object? JsonElementToObject(System.Text.Json.JsonElement el) => el.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.True => (object)true,
+            System.Text.Json.JsonValueKind.False => false,
+            System.Text.Json.JsonValueKind.Null => null,
+            System.Text.Json.JsonValueKind.String => el.GetString(),
+            System.Text.Json.JsonValueKind.Number =>
+                el.TryGetInt64(out long l) ? (object)l : el.GetDouble(),
+            _ => el.GetRawText(),
+        };
+
+        private static Dictionary<string, object?> ParsePropertiesOverride(string text)
+        {
+            var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var line in text.Split('\n'))
+            {
+                var trimmed = line.TrimEnd('\r').Trim();
+                if (string.IsNullOrEmpty(trimmed) || trimmed[0] == '#' || trimmed[0] == ';') continue;
+                var eq = trimmed.IndexOf('=');
+                if (eq < 0) continue;
+                var key = trimmed.Substring(0, eq).Trim();
+                var raw = trimmed.Substring(eq + 1).Trim();
+                if (string.IsNullOrEmpty(key)) continue;
+                result[key] = CoercePropertyValue(raw);
+            }
+            return result;
+        }
+
+        private static object? CoercePropertyValue(string raw)
+        {
+            if (raw == "true") return true;
+            if (raw == "false") return false;
+            if (raw == "null" || raw == "") return null;
+            if ((raw.StartsWith("\"") && raw.EndsWith("\"")) || (raw.StartsWith("'") && raw.EndsWith("'")))
+                return raw.Substring(1, raw.Length - 2);
+            if (double.TryParse(raw, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var d))
+                return d;
+            return raw;
         }
 
         private static object? CoerceOverrideValue(string raw, string? type)

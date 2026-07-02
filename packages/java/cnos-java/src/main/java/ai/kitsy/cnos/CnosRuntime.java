@@ -49,6 +49,7 @@ public final class CnosRuntime {
     private final Map<String, VaultDefinition> vaults;
     private final Map<String, SecretVaultProviderFactory> secretFactories;
     private final Map<String, String> parsedArgs;
+    private final Map<String, Object> fileOverrides;
 
     // --- Constructor ---
     private CnosRuntime(Builder b) {
@@ -70,6 +71,7 @@ public final class CnosRuntime {
         this.vaults = b.vaults;
         this.secretFactories = b.secretFactories;
         this.parsedArgs = b.parsedArgs != null ? b.parsedArgs : Collections.emptyMap();
+        this.fileOverrides = b.fileOverrides != null ? b.fileOverrides : Collections.emptyMap();
     }
 
     // ================================================================
@@ -162,15 +164,27 @@ public final class CnosRuntime {
             String stripped = key.substring("value.".length());
             ServerProjection.OverrideSpec spec = projection.getOverrides().get(stripped);
             if (spec != null) {
-                Object[] cnos = readInternal(key, new HashSet<>());
+                // File override participates as the "cnos" source.
+                Object[] cnos = fileOrCnos(key);
                 Object cnosVal = cnos[0];
                 boolean cnosFound = (Boolean) cnos[1];
                 return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env);
             }
         }
+        // No OverrideSpec: file then CNOS.
+        if (fileOverrides.containsKey(key)) {
+            return Optional.ofNullable(fileOverrides.get(key));
+        }
         Object[] result = readInternal(key, new HashSet<>());
         boolean found = (Boolean) result[1];
         return found ? Optional.ofNullable(result[0]) : Optional.empty();
+    }
+
+    private Object[] fileOrCnos(String key) throws CnosError {
+        if (fileOverrides.containsKey(key)) {
+            return new Object[]{fileOverrides.get(key), Boolean.TRUE};
+        }
+        return readInternal(key, new HashSet<>());
     }
 
     /**
@@ -838,6 +852,7 @@ public final class CnosRuntime {
         Map<String, Object> encryptedSecrets = decryptSecretPayloadFromEnv(env);
         BootstrappedManifest manifest = bootstrappedManifestFromProjection(projection);
 
+        Map<String, String> parsedArgs0 = parseCliArgs(getProcessArgs());
         Builder b = new Builder()
                 .projection(projection)
                 .manifest(manifest)
@@ -848,7 +863,8 @@ public final class CnosRuntime {
                 .secretHome(secretHome)
                 .encryptedSecrets(encryptedSecrets)
                 .factories(factories)
-                .parsedArgs(parseCliArgs(getProcessArgs()));
+                .parsedArgs(parsedArgs0)
+                .fileOverrides(loadOverrideFile(detectOverrideFilePath(parsedArgs0, env)));
 
         CnosRuntime runtime = b.build();
         runtime.populateEntries();
@@ -868,6 +884,7 @@ public final class CnosRuntime {
                 graph.getWorkspace().getWorkspaceSource(),
                 new ArrayList<>(graph.getWorkspace().getWorkspaceChain()));
 
+        Map<String, String> parsedArgs1 = parseCliArgs(getProcessArgs());
         Builder b = new Builder()
                 .projection(null)
                 .manifest(manifest)
@@ -878,7 +895,8 @@ public final class CnosRuntime {
                 .secretHome(secretHome)
                 .encryptedSecrets(encryptedSecrets)
                 .factories(factories)
-                .parsedArgs(parseCliArgs(getProcessArgs()));
+                .parsedArgs(parsedArgs1)
+                .fileOverrides(loadOverrideFile(detectOverrideFilePath(parsedArgs1, env)));
 
         CnosRuntime runtime = b.build();
 
@@ -1414,6 +1432,65 @@ public final class CnosRuntime {
         return result;
     }
 
+    private static String detectOverrideFilePath(Map<String, String> parsedArgs, Environment env) {
+        String flagVal = parsedArgs.get("--cnos-override");
+        if (flagVal != null && !flagVal.isEmpty()) return flagVal;
+        Optional<String> envVal = env.get("CNOS_OVERRIDE_FILE");
+        return envVal.isPresent() && !envVal.get().isEmpty() ? envVal.get() : null;
+    }
+
+    private static Map<String, Object> loadOverrideFile(String path) {
+        if (path == null || path.isEmpty()) return Collections.emptyMap();
+        String text;
+        try {
+            text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return Collections.emptyMap();
+        }
+        String ext = path.contains(".") ? path.substring(path.lastIndexOf('.') + 1).toLowerCase() : "";
+        if ("json".equals(ext)) {
+            try {
+                Map<?, ?> raw = new ObjectMapper().readValue(text, Map.class);
+                Map<String, Object> result = new HashMap<>();
+                for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                    result.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+                return result;
+            } catch (Exception e) {
+                return Collections.emptyMap();
+            }
+        }
+        return parsePropertiesOverride(text);
+    }
+
+    private static Map<String, Object> parsePropertiesOverride(String text) {
+        Map<String, Object> result = new HashMap<>();
+        for (String line : text.split("\n", -1)) {
+            String trimmed = line.replace("\r", "").trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";")) continue;
+            int eq = trimmed.indexOf('=');
+            if (eq < 0) continue;
+            String key = trimmed.substring(0, eq).trim();
+            String raw = trimmed.substring(eq + 1).trim();
+            if (key.isEmpty()) continue;
+            result.put(key, coercePropertyValue(raw));
+        }
+        return result;
+    }
+
+    private static Object coercePropertyValue(String raw) {
+        if ("true".equals(raw)) return Boolean.TRUE;
+        if ("false".equals(raw)) return Boolean.FALSE;
+        if ("null".equals(raw) || raw.isEmpty()) return null;
+        if ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))) {
+            return raw.substring(1, raw.length() - 1);
+        }
+        try { return Long.parseLong(raw); } catch (NumberFormatException ignored) {}
+        try { return Double.parseDouble(raw); } catch (NumberFormatException ignored) {}
+        return raw;
+    }
+
     private static Object coerceOverrideValue(String raw, String type) {
         if ("number".equals(type)) {
             try { return Double.parseDouble(raw); } catch (NumberFormatException e) { return raw; }
@@ -1493,6 +1570,7 @@ public final class CnosRuntime {
         Map<String, VaultDefinition> vaults;
         Map<String, SecretVaultProviderFactory> secretFactories = new HashMap<>();
         Map<String, String> parsedArgs;
+        Map<String, Object> fileOverrides;
 
         Builder projection(ServerProjection p) { this.projection = p; return this; }
         Builder manifest(BootstrappedManifest m) { this.manifest = m; return this; }
@@ -1503,6 +1581,7 @@ public final class CnosRuntime {
         Builder secretHome(String h) { this.secretHome = h; return this; }
         Builder encryptedSecrets(Map<String, Object> s) { this.encryptedSecrets = s; return this; }
         Builder parsedArgs(Map<String, String> a) { this.parsedArgs = a; return this; }
+        Builder fileOverrides(Map<String, Object> fo) { this.fileOverrides = fo; return this; }
         Builder factories(List<SecretVaultProviderFactory> f) {
             if (f != null) {
                 for (SecretVaultProviderFactory factory : f) {

@@ -122,6 +122,12 @@ export interface CnosCreateOptions {
   plugins?: CnosPlugin[];
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
+  /**
+   * Path to a bulk override file (JSON, YAML, or properties).
+   * Keys are full logical CNOS keys (e.g. `value.server.port`).
+   * Can also be set via `--cnos-override=<path>` in `cliArgs` or the `CNOS_OVERRIDE_FILE` env var.
+   */
+  overrideFile?: string;
   /** Additional secret vault provider factories, usually supplied by provider packages. */
   secretVaultProviders?: SecretVaultProviderFactory[];
 }

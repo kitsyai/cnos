@@ -15,7 +15,8 @@ class CnosRuntime private constructor(
     private val entries: MutableMap<String, RuntimeEntry>,
     private val runtimeNamespaces: MutableSet<String>,
     private val encryptedSecrets: Map<String, Any?>?,
-    private val parsedArgs: Map<String, String> = emptyMap()
+    private val parsedArgs: Map<String, String> = emptyMap(),
+    private val fileOverrides: Map<String, Any?> = emptyMap()
 ) {
     private val runtimeProviders = ConcurrentHashMap<String, (String) -> Any?>()
     private val hydratedSecrets = ConcurrentHashMap<String, Any>()
@@ -35,12 +36,20 @@ class CnosRuntime private constructor(
             val stripped = key.removePrefix("value.")
             val spec = projection.overrides[stripped]
             if (spec != null) {
-                val (cnosVal, cnosFound) = readInternal(key, mutableSetOf())
+                // File override participates as the "cnos" source.
+                val (cnosVal, cnosFound) = fileOrCnos(key)
                 return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env)
             }
         }
+        // No OverrideSpec: file then CNOS.
+        if (fileOverrides.containsKey(key)) return Optional.ofNullable(fileOverrides[key])
         val (value, found) = readInternal(key, mutableSetOf())
         return if (found) Optional.ofNullable(value) else Optional.empty()
+    }
+
+    private fun fileOrCnos(key: String): Pair<Any?, Boolean> {
+        if (fileOverrides.containsKey(key)) return Pair(fileOverrides[key], true)
+        return readInternal(key, mutableSetOf())
     }
 
     fun require(key: String): Any {
@@ -428,8 +437,9 @@ class CnosRuntime private constructor(
             val manifest = BootstrappedManifest.fromProjection(projection)
             val encrypted = decryptSecretPayload(env)
 
+            val pa0 = parseCliArgs(getProcessArgv())
             val rt = CnosRuntime(projection, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
-                parseCliArgs(getProcessArgv()))
+                pa0, loadOverrideFile(detectOverrideFilePath(pa0, env)))
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
             rt.populateEntries()
             rt.initRuntimeProviders(projection.runtimeNamespaces)
@@ -445,8 +455,9 @@ class CnosRuntime private constructor(
             val manifest = GraphParser.bootstrappedManifestFromGraph(graph)
             val encrypted = decryptSecretPayload(env)
 
+            val pa1 = parseCliArgs(getProcessArgv())
             val rt = CnosRuntime(null, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
-                parseCliArgs(getProcessArgv()))
+                pa1, loadOverrideFile(detectOverrideFilePath(pa1, env)))
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
 
             for (resolved in graph.entries) {
@@ -556,6 +567,54 @@ class CnosRuntime private constructor(
                 } else { result[arg] = "true"; i++ }
             }
             return result
+        }
+
+        private fun detectOverrideFilePath(parsedArgs: Map<String, String>, env: Environment): String? {
+            val flagVal = parsedArgs["--cnos-override"]
+            if (!flagVal.isNullOrEmpty()) return flagVal
+            val envVal = env.get("CNOS_OVERRIDE_FILE")
+            return if (!envVal.isNullOrEmpty()) envVal else null
+        }
+
+        private fun loadOverrideFile(path: String?): Map<String, Any?> {
+            if (path.isNullOrEmpty()) return emptyMap()
+            val text = try {
+                java.io.File(path).readText(Charsets.UTF_8)
+            } catch (_: Exception) {
+                return emptyMap()
+            }
+            val ext = path.substringAfterLast('.', "").lowercase()
+            if (ext == "json") {
+                return try {
+                    val raw = jacksonObjectMapper().readValue<Map<String, Any?>>(text)
+                    raw
+                } catch (_: Exception) { emptyMap() }
+            }
+            return parsePropertiesOverride(text)
+        }
+
+        private fun parsePropertiesOverride(text: String): Map<String, Any?> {
+            val result = mutableMapOf<String, Any?>()
+            for (line in text.lines()) {
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || trimmed.startsWith('#') || trimmed.startsWith(';')) continue
+                val eq = trimmed.indexOf('=')
+                if (eq < 0) continue
+                val key = trimmed.substring(0, eq).trim()
+                val raw = trimmed.substring(eq + 1).trim()
+                if (key.isEmpty()) continue
+                result[key] = coercePropertyValue(raw)
+            }
+            return result
+        }
+
+        private fun coercePropertyValue(raw: String): Any? = when {
+            raw == "true" -> true
+            raw == "false" -> false
+            raw == "null" || raw.isEmpty() -> null
+            (raw.startsWith('"') && raw.endsWith('"')) ||
+                    (raw.startsWith('\'') && raw.endsWith('\'')) -> raw.substring(1, raw.length - 1)
+            else -> raw.toLongOrNull() ?: raw.toDoubleOrNull() ?: raw
         }
 
         private val defaultPriority = listOf("arg", "env", "cnos")

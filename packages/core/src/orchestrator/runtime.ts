@@ -12,7 +12,14 @@ import { createDefaultRuntimeProviders } from '../runtime/runtimeProviders.js';
 import { toServerProjection } from '../runtime/toServerProjection.js';
 import { toEnv } from '../runtime/toEnv.js';
 import { toPublicEnv } from '../runtime/toPublicEnv.js';
-import { buildOverrideMap, parseCliArgs, resolveOverride } from '../runtime/overrideResolver.js';
+import {
+  buildOverrideMap,
+  CNOS_OVERRIDE_FILE_ENV,
+  CNOS_OVERRIDE_FLAG,
+  loadOverrideFile,
+  parseCliArgs,
+  resolveOverride,
+} from '../runtime/overrideResolver.js';
 import { toLogicalKey } from '../utils/path.js';
 import { isSecretReference } from '../utils/secretStore.js';
 
@@ -25,11 +32,17 @@ export function createRuntime(
   cnosVersion = '0.0.0-dev',
   secretVaultProviders: SecretVaultProviderFactory[] = [],
   cliArgs?: string[],
+  overrideFile?: string,
 ): CnosRuntime {
   const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
   const overrideMap = buildOverrideMap(manifest.schema);
   const argsMap = parseCliArgs(cliArgs ?? process.argv.slice(2));
+  const resolvedOverrideFile =
+    overrideFile ?? argsMap.get(CNOS_OVERRIDE_FLAG) ?? processEnv[CNOS_OVERRIDE_FILE_ENV] ?? undefined;
+  const fileOverrides: Map<string, unknown> = resolvedOverrideFile
+    ? loadOverrideFile(resolvedOverrideFile)
+    : new Map();
   let activeSecretCache = secretCache;
 
   function resolveProjectedSourceKey(key: string): string {
@@ -129,9 +142,17 @@ export function createRuntime(
       const strippedKey = key.slice('value.'.length);
       const spec = overrideMap.get(strippedKey);
       if (spec) {
-        return resolveOverride(spec, () => readLogicalKeyCore(key), argsMap, processEnv) as T | undefined;
+        // File override participates as the "cnos" source: if the file has a value,
+        // it supersedes the CNOS graph value but still loses to arg/env.
+        return resolveOverride(spec, () => {
+          const fv = fileOverrides.get(key);
+          return fv !== undefined ? fv : readLogicalKeyCore(key);
+        }, argsMap, processEnv) as T | undefined;
       }
     }
+    // No OverrideSpec — file then CNOS
+    const fv = fileOverrides.get(key);
+    if (fv !== undefined) return fv as T;
     return readLogicalKeyCore(key);
   }
 

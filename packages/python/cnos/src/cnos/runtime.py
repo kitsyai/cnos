@@ -303,6 +303,7 @@ class CnosRuntime:
         vaults: Dict[str, VaultDefinition],
         secret_factories: Dict[str, SecretVaultProviderFactory],
         parsed_args: Optional[Dict[str, str]] = None,
+        file_overrides: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._projection = projection
         self._manifest = manifest
@@ -322,6 +323,7 @@ class CnosRuntime:
         self._vaults = vaults
         self._secret_factories = secret_factories
         self._parsed_args: Dict[str, str] = parsed_args if parsed_args is not None else {}
+        self._file_overrides: Dict[str, Any] = file_overrides if file_overrides is not None else {}
 
     # -----------------------------------------------------------------------
     # Public API
@@ -336,8 +338,15 @@ class CnosRuntime:
             stripped_key = key[len("value."):]
             spec = self._projection.overrides.get(stripped_key)
             if spec is not None:
-                cnos_val, cnos_found = self._read_internal(key, set())
+                cnos_val, cnos_found = self._file_or_cnos(key)
                 return _apply_override(spec, cnos_val, cnos_found, self._parsed_args, self._env)
+        if key in self._file_overrides:
+            return self._file_overrides[key], True
+        return self._read_internal(key, set())
+
+    def _file_or_cnos(self, key: str) -> Tuple[Any, bool]:
+        if key in self._file_overrides:
+            return self._file_overrides[key], True
         return self._read_internal(key, set())
 
     def require(self, key: str) -> Any:
@@ -1087,6 +1096,7 @@ def new_runtime(
         vaults=dict(manifest["vaults"]),
         secret_factories=_secret_vault_factory_map(factories),
         parsed_args=_parse_cli_args(sys.argv[1:]),
+        file_overrides=_load_override_file(_detect_override_file_path(sys.argv[1:], env)),
     )
     runtime._populate_entries()
     runtime._initialize_runtime_providers(projection.runtime_namespaces)
@@ -1143,6 +1153,7 @@ def new_runtime_from_graph(
         logical_key_to_vault={},
         vaults=dict(manifest["vaults"]),
         secret_factories=_secret_vault_factory_map(factories),
+        file_overrides=_load_override_file(_detect_override_file_path(sys.argv[1:], env)),
     )
 
     for resolved in graph.entries:
@@ -1156,3 +1167,72 @@ def new_runtime_from_graph(
     runtime._initialize_runtime_providers(runtime_namespaces)
     runtime._prepare_derived_entries()
     return runtime
+
+
+def _detect_override_file_path(argv: List[str], env: Environment) -> Optional[str]:
+    parsed = _parse_cli_args(argv)
+    path = parsed.get("--cnos-override")
+    if path:
+        return path
+    v, found = env.get("CNOS_OVERRIDE_FILE")
+    if found and v:
+        return v
+    return None
+
+
+def _load_override_file(path: Optional[str]) -> Dict[str, Any]:
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        raise RuntimeError(f'cnos: cannot read override file "{path}": {e}') from e
+
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+
+    if ext == "json":
+        try:
+            return dict(json.loads(text))
+        except Exception as e:
+            raise RuntimeError(f'cnos: cannot parse JSON override file "{path}": {e}') from e
+
+    # .properties / .env / anything else — key=value lines
+    return dict(_parse_override_properties(text))
+
+
+def _parse_override_properties(text: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+            continue
+        eq = stripped.find("=")
+        if eq == -1:
+            continue
+        key = stripped[:eq].strip()
+        raw = stripped[eq + 1:].strip()
+        if not key:
+            continue
+        result[key] = _coerce_property_value(raw)
+    return result
+
+
+def _coerce_property_value(raw: str) -> Any:
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    if raw in ("null", ""):
+        return None
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        return raw[1:-1]
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    return raw

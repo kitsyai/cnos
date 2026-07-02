@@ -37,6 +37,11 @@ export interface HelpDocument {
   commands: HelpCommand[];
   integrations: HelpIntegration[];
   examples: string[];
+  /**
+   * Well-known flags that CNOS runtimes pick up from the application process argv,
+   * independent of the `cnos` CLI itself. Documented here for discoverability.
+   */
+  runtimeFlags?: HelpOption[];
 }
 
 const GLOBAL_OPTIONS: HelpOption[] = [
@@ -1258,6 +1263,17 @@ export const HELP_DOCUMENT: HelpDocument = {
     'cnos export env --public --framework vite',
     'cnos export env --public --framework next',
     'cnos help-ai --format json',
+  ],
+  runtimeFlags: [
+    {
+      flag: '--cnos-override=<path>',
+      description:
+        'Load a bulk override file at application startup. Supported formats: JSON (.json), YAML (.yaml/.yml, Node.js only), and Java-style properties (.properties, .env). ' +
+        'Keys must be full logical CNOS keys (e.g. "value.server.port", "secret.db.password"). ' +
+        'Priority: OverrideSpec(arg) > OverrideSpec(env) > override file > CNOS resolved value. ' +
+        'Env-var alternative: CNOS_OVERRIDE_FILE=<path>. ' +
+        'Supported in all 8 runtimes (JSON + properties) and additionally YAML in the Node.js runtime.',
+    },
   ],
 };
 

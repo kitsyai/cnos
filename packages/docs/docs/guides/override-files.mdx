@@ -1,0 +1,134 @@
+---
+title: Override Files
+description: Apply bulk config overrides at application startup with a single file flag.
+---
+
+# Override Files
+
+For projects with many config keys, you can supply a **bulk override file** that CNOS loads at process startup. Every entry in the file takes precedence over the CNOS-resolved value, making it ideal for local development, staging spot-fixes, and test harnesses.
+
+## Quick start
+
+Create an override file with full logical key paths as keys:
+
+```json title="local.override.json"
+{
+  "value.server.port": 9090,
+  "value.db.host": "localhost",
+  "secret.db.password": "localdev"
+}
+```
+
+Point CNOS at it when you start your application:
+
+```bash
+node server.js --cnos-override=local.override.json
+```
+
+Or set the environment variable instead (useful in Docker/CI):
+
+```bash
+CNOS_OVERRIDE_FILE=local.override.json node server.js
+```
+
+## Supported formats
+
+| Extension | Supported in |
+|-----------|-------------|
+| `.json` | All 8 runtimes |
+| `.yaml`, `.yml` | Node.js / TypeScript only |
+| `.properties`, `.env` | All 8 runtimes |
+
+All other extensions are treated as properties format.
+
+### JSON
+
+Keys are full logical CNOS keys. Values are natively typed.
+
+```json
+{
+  "value.server.port": 9090,
+  "value.feature.dark_mode": true,
+  "value.db.host": "localhost"
+}
+```
+
+### YAML (Node.js / TypeScript runtime only)
+
+```yaml
+value.server.port: 9090
+value.feature.dark_mode: true
+value.db.host: localhost
+```
+
+### Properties / .env
+
+Keys are full logical CNOS keys. Values are strings and are auto-coerced:
+- `true` / `false` → boolean
+- Bare numbers → number
+- Everything else → string
+- Surrounding quotes (`"..."` or `'...'`) are stripped
+
+```properties
+# Local development overrides
+value.server.port=9090
+value.db.host=localhost
+value.feature.dark_mode=true
+secret.db.password=localdev
+```
+
+## Priority order
+
+```
+CLI arg (OverrideSpec) > env var (OverrideSpec) > override file > CNOS resolved value
+```
+
+Schema-level `env` and `arg` mappings from `ConfigSpecRule` always win. The override file sits between those and the CNOS graph value.
+
+This means you can use both schema-level env/arg overrides **and** an override file — the env/arg specs still take priority.
+
+## Programmatic use (Node.js)
+
+Pass the path via `CnosCreateOptions.overrideFile`:
+
+```ts
+import { createCnos } from '@kitsy/cnos';
+
+const cnos = await createCnos({
+  overrideFile: process.env.CNOS_OVERRIDE_FILE,
+});
+```
+
+## Security notes
+
+- Override files can contain plaintext secret values — **do not commit them to version control**.
+- Add override files to `.gitignore`:
+  ```gitignore
+  *.override.json
+  *.override.yaml
+  *.override.properties
+  local.overrides.*
+  ```
+- The `--cnos-override` flag is **not** a passphrase and does not require strict mode protection. The file path itself is not sensitive.
+- In production, prefer proper vault integration over override files. Override files are a developer ergonomics tool.
+
+## Language runtimes
+
+The flag and env var are supported in all 8 CNOS runtimes:
+
+| Runtime | JSON | YAML | Properties |
+|---------|------|------|-----------|
+| Node.js / TypeScript | ✓ | ✓ | ✓ |
+| Go | ✓ | — | ✓ |
+| Python | ✓ | — | ✓ |
+| Rust | ✓ | — | ✓ |
+| C# | ✓ | — | ✓ |
+| Java | ✓ | — | ✓ |
+| Kotlin | ✓ | — | ✓ |
+| PHP | ✓ | — | ✓ |
+
+## See also
+
+- [Schema-level env/arg overrides](/guides/schema-overrides) — per-key `env` and `arg` mappings in `ConfigSpecRule`
+- [Profiles](/guides/profiles) — the standard mechanism for environment-specific config
+- [Secrets](/guides/secrets) — vault-backed secret management

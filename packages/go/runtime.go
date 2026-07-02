@@ -47,7 +47,8 @@ type Runtime struct {
 	logicalKeyToVault map[string]string
 	vaults            map[string]vaultDefinition
 	secretFactories   map[string]SecretVaultProviderFactory
-	parsedArgs        map[string]string
+	parsedArgs    map[string]string
+	fileOverrides map[string]any
 }
 
 type runtimeProvenance struct {
@@ -135,13 +136,25 @@ func (runtime *Runtime) Read(key string) (any, bool, error) {
 	if strings.HasPrefix(key, "value.") && len(runtime.projection.Overrides) > 0 {
 		strippedKey := strings.TrimPrefix(key, "value.")
 		if spec, ok := runtime.projection.Overrides[strippedKey]; ok {
-			cnosVal, cnosFound, err := runtime.readInternal(key, map[string]bool{})
+			// File override participates as the "cnos" source.
+			cnosVal, cnosFound, err := runtime.fileOrCnos(key)
 			if err != nil {
 				return nil, false, err
 			}
 			result, resultFound := applyOverride(spec, cnosVal, cnosFound, runtime.parsedArgs, runtime.env)
 			return result, resultFound, nil
 		}
+	}
+	// No OverrideSpec: file then CNOS.
+	if v, ok := runtime.fileOverrides[key]; ok {
+		return v, true, nil
+	}
+	return runtime.readInternal(key, map[string]bool{})
+}
+
+func (runtime *Runtime) fileOrCnos(key string) (any, bool, error) {
+	if v, ok := runtime.fileOverrides[key]; ok {
+		return v, true, nil
 	}
 	return runtime.readInternal(key, map[string]bool{})
 }
@@ -311,7 +324,8 @@ func newRuntime(source []byte, env environment, secretHome string, factories []S
 		logicalKeyToVault: map[string]string{},
 		vaults:            manifest.Vaults,
 		secretFactories:   secretVaultFactoryMap(factories),
-		parsedArgs:        parseCliArgs(os.Args[1:]),
+		parsedArgs:    parseCliArgs(os.Args[1:]),
+		fileOverrides: loadOverrideFile(parseCliArgs(os.Args[1:])["--cnos-override"], os.Getenv("CNOS_OVERRIDE_FILE")),
 	}
 
 	if err := runtime.populateEntries(); err != nil {
@@ -353,7 +367,8 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string, fact
 		logicalKeyToVault: map[string]string{},
 		vaults:            manifest.Vaults,
 		secretFactories:   secretVaultFactoryMap(factories),
-		parsedArgs:        parseCliArgs(os.Args[1:]),
+		parsedArgs:    parseCliArgs(os.Args[1:]),
+		fileOverrides: loadOverrideFile(parseCliArgs(os.Args[1:])["--cnos-override"], os.Getenv("CNOS_OVERRIDE_FILE")),
 	}
 
 	for _, resolved := range graph.Entries {
@@ -1028,4 +1043,68 @@ func (runtime *Runtime) warmSecrets() error {
 		}
 	}
 	return nil
+}
+
+func loadOverrideFile(flagPath, envPath string) map[string]any {
+	path := flagPath
+	if path == "" {
+		path = envPath
+	}
+	if path == "" {
+		return map[string]any{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]any{}
+	}
+	text := string(data)
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".json" {
+		var obj map[string]any
+		if jsonErr := json.Unmarshal(data, &obj); jsonErr == nil {
+			return obj
+		}
+		return map[string]any{}
+	}
+	return parseOverrideProperties(text)
+}
+
+func parseOverrideProperties(text string) map[string]any {
+	result := map[string]any{}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		eq := strings.IndexByte(trimmed, '=')
+		if eq == -1 {
+			continue
+		}
+		key := strings.TrimSpace(trimmed[:eq])
+		raw := strings.TrimSpace(trimmed[eq+1:])
+		if key == "" {
+			continue
+		}
+		result[key] = coercePropertyValue(raw)
+	}
+	return result
+}
+
+func coercePropertyValue(raw string) any {
+	switch raw {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null", "":
+		return nil
+	}
+	if (strings.HasPrefix(raw, `"`) && strings.HasSuffix(raw, `"`)) ||
+		(strings.HasPrefix(raw, `'`) && strings.HasSuffix(raw, `'`)) {
+		return raw[1 : len(raw)-1]
+	}
+	if f, err := strconv.ParseFloat(raw, 64); err == nil {
+		return f
+	}
+	return raw
 }

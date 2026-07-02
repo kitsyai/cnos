@@ -128,6 +128,7 @@ pub struct CnosRuntime {
     logical_key_to_vault: HashMap<String, String>,
     secret_factories: Mutex<HashMap<String, SecretVaultProviderFactory>>,
     parsed_args: HashMap<String, String>,
+    file_overrides: HashMap<String, Value>,
 }
 
 unsafe impl Send for CnosRuntime {}
@@ -213,6 +214,10 @@ impl CnosRuntime {
             secret_factories: Mutex::new(factory_map),
             projection,
             parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
+            file_overrides: load_override_file(
+                std::env::args().skip(1).collect::<Vec<_>>(),
+                &std::env::var("CNOS_OVERRIDE_FILE").unwrap_or_default(),
+            ),
         };
 
         rt.populate_entries()?;
@@ -283,6 +288,10 @@ impl CnosRuntime {
             secret_factories: Mutex::new(factory_map),
             projection: dummy_proj,
             parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
+            file_overrides: load_override_file(
+                std::env::args().skip(1).collect::<Vec<_>>(),
+                &std::env::var("CNOS_OVERRIDE_FILE").unwrap_or_default(),
+            ),
         };
 
         for resolved in graph.entries {
@@ -513,9 +522,21 @@ impl CnosRuntime {
         if key.starts_with("value.") && !self.projection.overrides.is_empty() {
             let stripped = &key["value.".len()..];
             if let Some(spec) = self.projection.overrides.get(stripped) {
-                let cnos_val = self.read_internal(key, &HashSet::new())?;
+                // File override participates as the "cnos" source.
+                let cnos_val = self.file_or_cnos(key)?;
                 return Ok(apply_override(spec, cnos_val, &self.parsed_args, &self.env));
             }
+        }
+        // No OverrideSpec: file then CNOS.
+        if let Some(fv) = self.file_overrides.get(key) {
+            return Ok(Some(fv.clone()));
+        }
+        self.read_internal(key, &HashSet::new())
+    }
+
+    fn file_or_cnos(&self, key: &str) -> Result<Option<Value>, CnosError> {
+        if let Some(fv) = self.file_overrides.get(key) {
+            return Ok(Some(fv.clone()));
         }
         self.read_internal(key, &HashSet::new())
     }
@@ -1236,4 +1257,77 @@ fn apply_override(
         }
     }
     cnos_val
+}
+
+fn load_override_file(args: Vec<String>, env_path: &str) -> HashMap<String, Value> {
+    let path = args
+        .iter()
+        .find_map(|a| {
+            if a.starts_with("--cnos-override=") {
+                Some(a["--cnos-override=".len()..].to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| if !env_path.is_empty() { Some(env_path.to_string()) } else { None });
+
+    let path = match path {
+        Some(p) => p,
+        None => return HashMap::new(),
+    };
+
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return HashMap::new(),
+    };
+
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    if ext == "json" {
+        if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&text) {
+            return map.into_iter().collect();
+        }
+        return HashMap::new();
+    }
+
+    parse_override_properties_rs(&text)
+}
+
+fn parse_override_properties_rs(text: &str) -> HashMap<String, Value> {
+    let mut result = HashMap::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+        if let Some(eq) = trimmed.find('=') {
+            let key = trimmed[..eq].trim();
+            let raw = trimmed[eq + 1..].trim();
+            if !key.is_empty() {
+                result.insert(key.to_string(), coerce_property_value_rs(raw));
+            }
+        }
+    }
+    result
+}
+
+fn coerce_property_value_rs(raw: &str) -> Value {
+    match raw {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        "null" | "" => Value::Null,
+        _ => {
+            if (raw.starts_with('"') && raw.ends_with('"'))
+                || (raw.starts_with('\'') && raw.ends_with('\''))
+            {
+                return Value::String(raw[1..raw.len() - 1].to_string());
+            }
+            if let Ok(n) = raw.parse::<f64>() {
+                if let Some(int) = serde_json::Number::from_f64(n) {
+                    return Value::Number(int);
+                }
+            }
+            Value::String(raw.to_string())
+        }
+    }
 }

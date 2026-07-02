@@ -188,5 +188,6 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     options.cnosVersion,
     options.secretVaultProviders,
     options.cliArgs,
+    options.overrideFile,
   );
 }

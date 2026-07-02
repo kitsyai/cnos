@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { parseYaml } from '../utils/yaml.js';
 import type { ConfigSpecMap, ConfigSpecValueType, OverridePrioritySource, OverrideSpec } from '../types/spec.js';
 
 const DEFAULT_PRIORITY: OverridePrioritySource[] = ['arg', 'env', 'cnos'];
+
+/** CLI flag name that points to a bulk override file. */
+export const CNOS_OVERRIDE_FLAG = '--cnos-override';
+/** Environment variable name that points to a bulk override file (used when CLI args are not available). */
+export const CNOS_OVERRIDE_FILE_ENV = 'CNOS_OVERRIDE_FILE';
 
 /**
  * Parses a raw argv array into a flag→value map.
@@ -89,6 +96,75 @@ export function resolveOverride(
   }
 
   return cnosValueFn();
+}
+
+/**
+ * Parses a `.properties` / `.env` style text block into a logical-key → value map.
+ * Lines starting with `#` or `;` are comments. Values are auto-coerced:
+ *   `true`/`false` → boolean, bare numbers → number, everything else → string.
+ */
+export function parseOverrideProperties(text: string): Map<string, unknown> {
+  const result = new Map<string, unknown>();
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith(';')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const raw = trimmed.slice(eq + 1).trim();
+    if (!key) continue;
+    result.set(key, coercePropertyValue(raw));
+  }
+  return result;
+}
+
+function coercePropertyValue(raw: string): unknown {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null') return null;
+  // Strip surrounding quotes
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    return raw.slice(1, -1);
+  }
+  const n = Number(raw);
+  if (raw !== '' && !Number.isNaN(n)) return n;
+  return raw;
+}
+
+/**
+ * Loads and parses a CNOS override file.
+ * Format is detected by extension: `.json`, `.yaml`/`.yml`, or anything else is treated as properties.
+ * Keys must be full logical CNOS keys (e.g. `value.server.port`, `secret.db.password`).
+ */
+export function loadOverrideFile(filePath: string): Map<string, unknown> {
+  let text: string;
+  try {
+    text = readFileSync(filePath, 'utf8');
+  } catch (e) {
+    throw new Error(`cnos: cannot read override file "${filePath}": ${(e as Error).message}`);
+  }
+
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+
+  if (ext === 'json') {
+    try {
+      const obj = JSON.parse(text) as Record<string, unknown>;
+      return new Map(Object.entries(obj));
+    } catch (e) {
+      throw new Error(`cnos: cannot parse JSON override file "${filePath}": ${(e as Error).message}`);
+    }
+  }
+
+  if (ext === 'yaml' || ext === 'yml') {
+    try {
+      const obj = parseYaml<Record<string, unknown>>(text);
+      return new Map(Object.entries(obj ?? {}));
+    } catch (e) {
+      throw new Error(`cnos: cannot parse YAML override file "${filePath}": ${(e as Error).message}`);
+    }
+  }
+
+  return parseOverrideProperties(text);
 }
 
 /** Builds the override map from the manifest schema (keyed by stripped value key). */
