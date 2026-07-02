@@ -533,6 +533,35 @@ impl CnosRuntime {
         self.read(&to_logical_key("public", path))
     }
 
+    /// Returns the value at path as a JSON object or array.
+    /// If the value is a string it is parsed with `serde_json::from_str`.
+    pub fn json(&self, path: &str) -> Result<Option<Value>, CnosError> {
+        let raw = self.value(path)?;
+        match raw {
+            None => Ok(None),
+            Some(Value::String(s)) => {
+                serde_json::from_str::<Value>(&s)
+                    .map(Some)
+                    .map_err(|e| CnosError::Other(format!("cnos: JSON value at {path:?} is not valid JSON: {e}")))
+            }
+            Some(v) => Ok(Some(v)),
+        }
+    }
+
+    /// Returns the value at path as a PEM string, normalising literal `\n` to real newlines.
+    /// Checks `value.*` first, then `secret.*`.
+    pub fn pem(&self, path: &str) -> Result<Option<String>, CnosError> {
+        let raw = match self.value(path)? {
+            Some(v) => Some(v),
+            None => self.secret(path)?,
+        };
+        match raw {
+            None => Ok(None),
+            Some(Value::String(s)) => Ok(Some(s.replace("\\n", "\n"))),
+            Some(_) => Err(CnosError::Other(format!("cnos: PEM value at {path:?} is not a string"))),
+        }
+    }
+
     pub fn to_object(&self) -> Result<HashMap<String, Value>, CnosError> {
         self.to_namespace_object("")
     }

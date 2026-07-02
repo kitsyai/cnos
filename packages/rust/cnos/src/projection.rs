@@ -86,6 +86,8 @@ pub struct ServerProjection {
     pub public_keys: Vec<String>,
     #[serde(rename = "runtimeNamespaces", default)]
     pub runtime_namespaces: Vec<String>,
+    #[serde(rename = "valueTypes", default)]
+    pub value_types: HashMap<String, String>,
     pub meta: ProjectionMeta,
 }
 

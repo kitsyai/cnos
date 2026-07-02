@@ -54,6 +54,7 @@ export * from './discovery/cache/cacheMetadata.js';
 export * from './discovery/cache/cachePaths.js';
 export * from './utils/deepMerge.js';
 export * from './utils/envNaming.js';
+export * from './utils/fileRef.js';
 export * from './utils/flatten.js';
 export * from './utils/path.js';
 export * from './utils/secretStore.js';

@@ -1,7 +1,10 @@
 export type ConfigSpecValueType = 'string' | 'number' | 'boolean' | 'object' | 'array';
 
+export type ConfigSpecFormat = 'richtext' | 'pem';
+
 export interface ConfigSpecRule {
   type?: ConfigSpecValueType;
+  format?: ConfigSpecFormat;
   required?: boolean;
   enum?: unknown[];
   pattern?: string;

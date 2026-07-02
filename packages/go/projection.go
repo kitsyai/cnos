@@ -43,6 +43,7 @@ type ServerProjection struct {
 	Vaults            map[string]vaultDefinition `json:"vaults,omitempty"`
 	PublicKeys        []string                   `json:"publicKeys"`
 	RuntimeNamespaces []string                   `json:"runtimeNamespaces"`
+	ValueTypes        map[string]string          `json:"valueTypes,omitempty"`
 	Meta              ProjectionMeta             `json:"meta"`
 }
 

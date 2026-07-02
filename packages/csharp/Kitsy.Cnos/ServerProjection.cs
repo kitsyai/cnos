@@ -41,6 +41,9 @@ namespace Kitsy.Cnos
         [JsonPropertyName("runtimeNamespaces")]
         public List<string> RuntimeNamespaces { get; set; } = new();
 
+        [JsonPropertyName("valueTypes")]
+        public Dictionary<string, string>? ValueTypes { get; set; }
+
         [JsonPropertyName("meta")]
         public ProjectionMeta Meta { get; set; } = new();
 

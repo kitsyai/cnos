@@ -173,6 +173,33 @@ namespace Kitsy.Cnos
         /// <summary>Reads a <c>public.*</c> key by sub-path.</summary>
         public (object? Value, bool Found) Public(string path) => Read(ToLogicalKey("public", path));
 
+        /// <summary>Returns the value at path as a dictionary or list. Parses string values with JsonSerializer.</summary>
+        public (object? Value, bool Found) Json(string path)
+        {
+            var (raw, found) = Value(path);
+            if (!found) return (null, false);
+            if (raw is string s)
+            {
+                try
+                {
+                    var parsed = JsonSerializer.Deserialize<object>(s);
+                    return (parsed, parsed != null);
+                }
+                catch { return (null, false); }
+            }
+            return (raw, true);
+        }
+
+        /// <summary>Returns the value at path as a PEM string, normalising literal \n sequences to real newlines.
+        /// Checks value.* first, then secret.*.</summary>
+        public (string? Value, bool Found) Pem(string path)
+        {
+            var (raw, found) = Value(path);
+            if (!found) (raw, found) = Secret(path);
+            if (!found || raw is not string s) return (null, false);
+            return (s.Replace("\\n", "\n"), true);
+        }
+
         /// <summary>Returns all resolved config values as a flat dictionary keyed by full logical key.</summary>
         public Dictionary<string, object?> ToObject() => ToNamespaceObject("");
 

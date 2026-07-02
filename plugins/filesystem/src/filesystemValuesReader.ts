@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import type { ConfigEntry, LoaderPlugin } from '@kitsy/cnos-core';
 
-import { collectFilesystemLayerFiles, yamlObjectToEntries } from './helpers.js';
+import { collectFilesystemLayerFiles, resolveFileReferences, yamlObjectToEntries } from './helpers.js';
 
 export function filesystemValuesReader(filePath: string, document: string, workspaceId = 'default'): ConfigEntry[] {
   return yamlObjectToEntries(document, filePath, 'value', 'filesystem-values', workspaceId);
@@ -56,7 +56,7 @@ export function createFilesystemValuesPlugin(): LoaderPlugin {
         }
       }
 
-      return entries;
+      return resolveFileReferences(entries, context.manifestRoot);
     },
   };
 }

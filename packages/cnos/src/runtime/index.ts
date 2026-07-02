@@ -58,6 +58,10 @@ export interface CnosSingleton {
   value<T = unknown>(path: string): T | undefined;
   secret<T = unknown>(path: string): T | undefined;
   meta<T = unknown>(path: string): T | undefined;
+  /** Returns the value at path as a plain object/array. Parses string values with JSON.parse. */
+  json<T extends Record<string, unknown> | unknown[] = Record<string, unknown>>(path: string): T | undefined;
+  /** Returns the value at path as a PEM string, normalizing literal \n sequences to real newlines. */
+  pem(path: string): string | undefined;
   inspect(key: LogicalKey): ReturnType<CnosRuntime['inspect']>;
   toNamespace(namespace: string): ReturnType<CnosRuntime['toNamespace']>;
   toEnv(options?: Parameters<CnosRuntime['toEnv']>[0]): ReturnType<CnosRuntime['toEnv']>;
@@ -1112,6 +1116,19 @@ const cnos = Object.assign(
     },
     meta<T = unknown>(path: string): T | undefined {
       return getRuntimeOrThrow().meta(path);
+    },
+    json<T extends Record<string, unknown> | unknown[] = Record<string, unknown>>(path: string): T | undefined {
+      const raw = getRuntimeOrThrow().value(path);
+      if (raw === undefined) return undefined;
+      if (typeof raw === 'string') {
+        try { return JSON.parse(raw) as T; } catch { return undefined; }
+      }
+      return raw as T;
+    },
+    pem(path: string): string | undefined {
+      const raw = getRuntimeOrThrow().value<string>(path) ?? getRuntimeOrThrow().secret<string>(path);
+      if (typeof raw !== 'string') return undefined;
+      return raw.replace(/\\n/g, '\n');
     },
     inspect(key: LogicalKey) {
       return getRuntimeOrThrow().inspect(key);

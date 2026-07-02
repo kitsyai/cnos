@@ -198,6 +198,8 @@ export interface ServerProjection {
   vaults?: Record<string, ProjectedVaultDefinition>;
   publicKeys: string[];
   runtimeNamespaces: string[];
+  /** Optional format hints for value entries — e.g. { "myapp.public_key": "pem" } */
+  valueTypes?: Record<string, string>;
   meta: {
     workspace: string;
     profile: string;

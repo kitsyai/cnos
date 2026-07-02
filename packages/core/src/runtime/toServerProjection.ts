@@ -175,6 +175,7 @@ export function toServerProjection(
   const values: Record<string, unknown> = {};
   const derived: ServerProjection['derived'] = {};
   const secretRefs: ServerProjection['secretRefs'] = {};
+  const valueTypes: Record<string, string> = {};
   const referencedVaultIds = new Set<string>();
   const namespaces = new Set<string>();
   const runtimeNamespaces = new Set<string>();
@@ -221,7 +222,12 @@ export function toServerProjection(
       }
 
       const value = helpers.read ? helpers.read(key) : entry.value;
-      values[stripValuePrefix(key)] = value;
+      const strippedKey = stripValuePrefix(key);
+      values[strippedKey] = value;
+      const schemaFormat = manifest.schema[key]?.format ?? manifest.schema[strippedKey]?.format;
+      if (schemaFormat) {
+        valueTypes[strippedKey] = schemaFormat;
+      }
       continue;
     }
 
@@ -268,6 +274,7 @@ export function toServerProjection(
     ...(vaults ? { vaults } : {}),
     publicKeys,
     runtimeNamespaces: Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right)),
+    ...(Object.keys(valueTypes).length > 0 ? { valueTypes: stableSortObject(valueTypes) as Record<string, string> } : {}),
     meta: {
       workspace: graph.workspace.workspaceId,
       profile: graph.profile,

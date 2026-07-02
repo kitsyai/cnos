@@ -190,6 +190,22 @@ export function applySchemaRules(
       }
     }
 
+    if (rule.format === 'pem') {
+      if (typeof coercedValue !== 'string') {
+        issues.push({
+          code: 'schema.format',
+          key,
+          message: `Config key ${key} must be a string for format 'pem'`,
+        });
+      } else if (!/-----BEGIN [^-]+-----/.test(coercedValue)) {
+        issues.push({
+          code: 'schema.format',
+          key,
+          message: `Config key ${key} does not appear to be a valid PEM-encoded value (missing -----BEGIN ... ----- header)`,
+        });
+      }
+    }
+
     nextEntries.set(key, nextResolvedEntry);
   }
 

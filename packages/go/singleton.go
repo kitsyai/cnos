@@ -117,6 +117,26 @@ func Public(path string) (any, bool, error) {
 	return runtime.Public(path)
 }
 
+// JSON returns the value at path as a map[string]any or []any via the default runtime.
+// String values are JSON-parsed first.
+func JSON(path string) (any, bool, error) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return nil, false, err
+	}
+	return runtime.JSON(path)
+}
+
+// PEM returns the value at path as a PEM string via the default runtime,
+// normalising literal \n sequences to real newlines.
+func PEM(path string) (string, bool, error) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return "", false, err
+	}
+	return runtime.PEM(path)
+}
+
 func Inspect(key string) (InspectResult, error) {
 	runtime, err := DefaultRuntime()
 	if err != nil {

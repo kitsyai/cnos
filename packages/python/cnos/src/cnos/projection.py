@@ -51,6 +51,7 @@ class ServerProjection:
     vaults: Dict[str, VaultDefinition] = field(default_factory=dict)
     public_keys: List[str] = field(default_factory=list)
     runtime_namespaces: List[str] = field(default_factory=list)
+    value_types: Dict[str, str] = field(default_factory=dict)
     meta: ProjectionMeta = field(default_factory=ProjectionMeta)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -66,6 +67,7 @@ class ServerProjection:
             "vaults": {k: v.to_dict() for k, v in self.vaults.items()},
             "publicKeys": self.public_keys,
             "runtimeNamespaces": self.runtime_namespaces,
+            **({"valueTypes": self.value_types} if self.value_types else {}),
             "meta": self.meta.to_dict(),
         }
 
@@ -147,5 +149,6 @@ def parse_projection(data: bytes) -> ServerProjection:
         vaults=vaults,
         public_keys=list(public_keys),
         runtime_namespaces=list(raw.get("runtimeNamespaces") or []),
+        value_types=dict(raw.get("valueTypes") or {}),
         meta=meta,
     )

@@ -95,6 +95,34 @@ class CnosRuntime
         return $this->read($this->toLogicalKey('public', $path));
     }
 
+    /**
+     * Returns the value at $path as an array/map, parsing string values with json_decode.
+     * @return array{mixed, bool}
+     */
+    public function json(string $path): array
+    {
+        [$raw, $found] = $this->value($path);
+        if (!$found) return [null, false];
+        if (is_string($raw)) {
+            $parsed = json_decode($raw, true);
+            return $parsed !== null ? [$parsed, true] : [null, false];
+        }
+        return [$raw, true];
+    }
+
+    /**
+     * Returns the value at $path as a PEM string, normalising literal \n to real newlines.
+     * Checks value.* first, then secret.*.
+     * @return array{string|null, bool}
+     */
+    public function pem(string $path): array
+    {
+        [$raw, $found] = $this->value($path);
+        if (!$found) [$raw, $found] = $this->secret($path);
+        if (!$found || !is_string($raw)) return [null, false];
+        return [str_replace('\\n', "\n", $raw), true];
+    }
+
     public function registerSecretVaultProviders(SecretVaultProviderFactory ...$factories): void
     {
         foreach ($factories as $f) {

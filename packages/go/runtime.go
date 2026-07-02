@@ -1,6 +1,7 @@
 package cnos
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -157,6 +158,43 @@ func (runtime *Runtime) Meta(path string) (any, bool, error) {
 
 func (runtime *Runtime) Public(path string) (any, bool, error) {
 	return runtime.Read(toLogicalKey("public", path))
+}
+
+// JSON returns the value at path as a map[string]any or []any.
+// If the value is a string it is JSON-parsed first.
+func (runtime *Runtime) JSON(path string) (any, bool, error) {
+	raw, ok, err := runtime.Value(path)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if s, isStr := raw.(string); isStr {
+		var parsed any
+		if jsonErr := json.Unmarshal([]byte(s), &parsed); jsonErr != nil {
+			return nil, false, fmt.Errorf("cnos: JSON value at %q is not valid JSON: %w", path, jsonErr)
+		}
+		return parsed, true, nil
+	}
+	return raw, true, nil
+}
+
+// PEM returns the value at path as a PEM string, normalising literal \n sequences to real newlines.
+// Checks both value.* and secret.* namespaces.
+func (runtime *Runtime) PEM(path string) (string, bool, error) {
+	raw, ok, err := runtime.Value(path)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		raw, ok, err = runtime.Secret(path)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+	}
+	s, isStr := raw.(string)
+	if !isStr {
+		return "", false, fmt.Errorf("cnos: PEM value at %q is not a string", path)
+	}
+	return strings.ReplaceAll(s, `\n`, "\n"), true, nil
 }
 
 func (runtime *Runtime) RegisterRuntimeProvider(namespace string, provider RuntimeProvider) error {

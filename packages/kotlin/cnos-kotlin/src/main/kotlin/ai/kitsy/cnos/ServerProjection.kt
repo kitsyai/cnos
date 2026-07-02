@@ -62,6 +62,7 @@ data class ServerProjection(
     @JsonProperty("publicKeys") val publicKeys: List<String> = emptyList(),
     @JsonProperty("runtimeNamespaces") val runtimeNamespaces: List<String> = emptyList(),
     @JsonProperty("vaults") val vaults: Map<String, VaultDefinition> = emptyMap(),
+    @JsonProperty("valueTypes") val valueTypes: Map<String, String> = emptyMap(),
     @JsonProperty("meta") val meta: ProjectionMeta = ProjectionMeta()
 ) {
     companion object {

@@ -50,6 +50,28 @@ class CnosRuntime private constructor(
     fun meta(path: String): Optional<Any> = read(toLogicalKey("meta", path))
     fun publicKey(path: String): Optional<Any> = read(toLogicalKey("public", path))
 
+    /** Returns the value at path as a map or list, parsing string values as JSON. */
+    fun json(path: String): Optional<Any> {
+        val raw = value(path)
+        if (raw.isEmpty) return Optional.empty()
+        if (raw.get() is String) {
+            return try {
+                Optional.ofNullable(jacksonObjectMapper().readValue<Any>(raw.get() as String))
+            } catch (e: Exception) {
+                Optional.empty()
+            }
+        }
+        return raw
+    }
+
+    /** Returns the value at path as a PEM string, normalising literal \n to real newlines.
+     * Checks value.* first, then secret.*. */
+    fun pem(path: String): Optional<String> {
+        val raw = value(path).let { if (it.isPresent) it else secret(path) }
+        if (raw.isEmpty || raw.get() !is String) return Optional.empty()
+        return Optional.of((raw.get() as String).replace("\\n", "\n"))
+    }
+
     fun format(message: String): String {
         val templateRe = Regex("""\$\{([^}]+)}""")
         return templateRe.replace(message) { mr ->

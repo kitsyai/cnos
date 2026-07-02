@@ -13,6 +13,7 @@ class ServerProjection
      * @param array<string, VaultDefinition> $vaults
      * @param string[]                      $publicKeys
      * @param string[]                      $runtimeNamespaces
+     * @param array<string, string>         $valueTypes
      */
     public function __construct(
         public readonly int            $version,
@@ -27,6 +28,7 @@ class ServerProjection
         public readonly array          $publicKeys,
         public readonly array          $runtimeNamespaces,
         public readonly ProjectionMeta $meta,
+        public readonly array          $valueTypes = [],
     ) {}
 
     public static function parse(string $json): self
@@ -97,6 +99,7 @@ class ServerProjection
             publicKeys:        array_values((array) $publicKeys),
             runtimeNamespaces: array_values((array) ($raw['runtimeNamespaces'] ?? [])),
             meta:              ProjectionMeta::fromArray($metaRaw),
+            valueTypes:        (array) ($raw['valueTypes'] ?? []),
         );
     }
 }

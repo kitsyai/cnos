@@ -200,6 +200,33 @@ public final class CnosRuntime {
     }
 
     /**
+     * Returns the value at path as a map or list, parsing string values as JSON.
+     */
+    public Optional<Object> json(String path) throws CnosError {
+        Optional<Object> raw = value(path);
+        if (raw.isEmpty()) return Optional.empty();
+        if (raw.get() instanceof String) {
+            try {
+                return Optional.of(new ObjectMapper().readValue((String) raw.get(), Object.class));
+            } catch (Exception e) {
+                return Optional.empty();
+            }
+        }
+        return raw;
+    }
+
+    /**
+     * Returns the value at path as a PEM string, normalising literal \n sequences to real newlines.
+     * Checks value.* first, then secret.*.
+     */
+    public Optional<String> pem(String path) throws CnosError {
+        Optional<Object> raw = value(path);
+        if (raw.isEmpty()) raw = secret(path);
+        if (raw.isEmpty() || !(raw.get() instanceof String)) return Optional.empty();
+        return Optional.of(((String) raw.get()).replace("\\n", "\n"));
+    }
+
+    /**
      * Returns all resolved config values as a nested map, keyed by full logical key path.
      */
     public Map<String, Object> toObject() throws CnosError {

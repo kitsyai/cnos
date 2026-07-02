@@ -1,18 +1,19 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
   CnosManifestError,
   isDerivedValue,
+  isFileReference,
+  isSecretReference,
   parseYaml,
   readLocalSecret,
   resolveSecretPassphrase,
   resolveSecretStoreRoot,
-  type SecretReference,
-  isSecretReference,
   toPortablePath,
   type ConfigEntry,
   type NamespaceName,
+  type SecretReference,
   type WorkspaceRoot,
 } from '@kitsy/cnos-core';
 
@@ -134,11 +135,8 @@ export function yamlObjectToEntries(
 ): ConfigEntry[] {
   const parsed = assertObjectDocument(parseYaml<unknown>(document), filePath);
   const flattened = flattenConfigObject(parsed, {
-    ...(namespace === 'secret'
-      ? {
-          stopAtLeaf: isSecretReference,
-        }
-      : {}),
+    stopAtLeaf: (value) =>
+      isFileReference(value) || (namespace === 'secret' && isSecretReference(value)),
   });
 
   return Object.entries(flattened).map(([key, value]) => ({
@@ -201,4 +199,33 @@ export function toSecretReferenceMetadata(value: unknown): Record<string, unknow
   return {
     secretRef: value satisfies SecretReference,
   };
+}
+
+async function resolveFileRef(fileRef: string, manifestRoot: string): Promise<unknown> {
+  const base = path.dirname(manifestRoot);
+  const resolved = path.resolve(base, fileRef);
+  const content = await readFile(resolved, 'utf8');
+  const ext = path.extname(fileRef).toLowerCase();
+
+  if (ext === '.json') {
+    return JSON.parse(content) as unknown;
+  }
+
+  return content;
+}
+
+export async function resolveFileReferences(
+  entries: ConfigEntry[],
+  manifestRoot: string,
+): Promise<ConfigEntry[]> {
+  return Promise.all(
+    entries.map(async (entry) => {
+      if (!isFileReference(entry.value)) {
+        return entry;
+      }
+
+      const resolved = await resolveFileRef(entry.value.$file, manifestRoot);
+      return { ...entry, value: resolved };
+    }),
+  );
 }

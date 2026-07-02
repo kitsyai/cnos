@@ -355,6 +355,29 @@ class CnosRuntime:
     def public(self, path: str) -> Tuple[Any, bool]:
         return self.read(_to_logical_key("public", path))
 
+    def json(self, path: str) -> Tuple[Any, bool]:
+        """Returns the value at path as a dict/list. Parses string values with json.loads."""
+        import json as _json
+        raw, ok = self.value(path)
+        if not ok:
+            return None, False
+        if isinstance(raw, str):
+            try:
+                return _json.loads(raw), True
+            except _json.JSONDecodeError:
+                return None, False
+        return raw, True
+
+    def pem(self, path: str) -> Tuple[str, bool]:
+        """Returns the value at path as a PEM string, normalising literal \\n to real newlines.
+        Checks value.* first, then secret.*."""
+        raw, ok = self.value(path)
+        if not ok:
+            raw, ok = self.secret(path)
+        if not ok or not isinstance(raw, str):
+            return "", False
+        return raw.replace("\\n", "\n"), True
+
     def register_runtime_provider(self, namespace: str, provider: RuntimeProvider) -> None:
         if namespace == "process":
             raise CnosError(f'cnos: cannot override built-in runtime namespace "process"')

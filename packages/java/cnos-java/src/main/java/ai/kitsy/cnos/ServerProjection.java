@@ -52,6 +52,9 @@ public final class ServerProjection {
     @JsonProperty("runtimeNamespaces")
     private final List<String> runtimeNamespaces;
 
+    @JsonProperty("valueTypes")
+    private final Map<String, String> valueTypes;
+
     @JsonProperty("meta")
     private final Meta meta;
 
@@ -68,6 +71,7 @@ public final class ServerProjection {
             @JsonProperty("vaults") Map<String, VaultDefinition> vaults,
             @JsonProperty("publicKeys") List<String> publicKeys,
             @JsonProperty("runtimeNamespaces") List<String> runtimeNamespaces,
+            @JsonProperty("valueTypes") Map<String, String> valueTypes,
             @JsonProperty("meta") Meta meta) {
         this.version = version;
         this.workspace = workspace;
@@ -81,6 +85,7 @@ public final class ServerProjection {
         this.publicKeys = publicKeys != null ? Collections.unmodifiableList(publicKeys) : Collections.emptyList();
         this.runtimeNamespaces = runtimeNamespaces != null
                 ? Collections.unmodifiableList(runtimeNamespaces) : Collections.emptyList();
+        this.valueTypes = valueTypes != null ? Collections.unmodifiableMap(valueTypes) : Collections.emptyMap();
         this.meta = meta;
     }
 
@@ -162,6 +167,7 @@ public final class ServerProjection {
     public Map<String, VaultDefinition> getVaults() { return vaults; }
     public List<String> getPublicKeys() { return publicKeys; }
     public List<String> getRuntimeNamespaces() { return runtimeNamespaces; }
+    public Map<String, String> getValueTypes() { return valueTypes; }
     public Meta getMeta() { return meta; }
 
     /**
