@@ -14,9 +14,9 @@ import { toEnv } from '../runtime/toEnv.js';
 import { toPublicEnv } from '../runtime/toPublicEnv.js';
 import {
   buildOverrideMap,
-  CNOS_OVERRIDE_FILE_ENV,
-  CNOS_OVERRIDE_FLAG,
-  loadOverrideFile,
+  CNOS_PATCH_FILE_ENV,
+  CNOS_PATCH_FLAG,
+  loadPatchFile,
   parseCliArgs,
   resolveOverride,
 } from '../runtime/overrideResolver.js';
@@ -32,16 +32,16 @@ export function createRuntime(
   cnosVersion = '0.0.0-dev',
   secretVaultProviders: SecretVaultProviderFactory[] = [],
   cliArgs?: string[],
-  overrideFile?: string,
+  patchFile?: string,
 ): CnosRuntime {
   const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
   const overrideMap = buildOverrideMap(manifest.schema);
   const argsMap = parseCliArgs(cliArgs ?? process.argv.slice(2));
-  const resolvedOverrideFile =
-    overrideFile ?? argsMap.get(CNOS_OVERRIDE_FLAG) ?? processEnv[CNOS_OVERRIDE_FILE_ENV] ?? undefined;
-  const fileOverrides: Map<string, unknown> = resolvedOverrideFile
-    ? loadOverrideFile(resolvedOverrideFile)
+  const resolvedPatchFile =
+    patchFile ?? argsMap.get(CNOS_PATCH_FLAG) ?? processEnv[CNOS_PATCH_FILE_ENV] ?? undefined;
+  const patchValues: Map<string, unknown> = resolvedPatchFile
+    ? loadPatchFile(resolvedPatchFile)
     : new Map();
   let activeSecretCache = secretCache;
 
@@ -142,17 +142,17 @@ export function createRuntime(
       const strippedKey = key.slice('value.'.length);
       const spec = overrideMap.get(strippedKey);
       if (spec) {
-        // File override participates as the "cnos" source: if the file has a value,
+        // Patch file participates as the "cnos" source: if the file has a value,
         // it supersedes the CNOS graph value but still loses to arg/env.
         return resolveOverride(spec, () => {
-          const fv = fileOverrides.get(key);
-          return fv !== undefined ? fv : readLogicalKeyCore(key);
-        }, argsMap, processEnv) as T | undefined;
+          const pv = patchValues.get(key);
+          return pv !== undefined ? pv : readLogicalKeyCore(key);
+        }, argsMap, processEnv, key) as T | undefined;
       }
     }
-    // No OverrideSpec — file then CNOS
-    const fv = fileOverrides.get(key);
-    if (fv !== undefined) return fv as T;
+    // No OverrideSpec — patch then CNOS
+    const pv = patchValues.get(key);
+    if (pv !== undefined) return pv as T;
     return readLogicalKeyCore(key);
   }
 

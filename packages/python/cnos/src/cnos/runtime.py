@@ -1023,20 +1023,22 @@ def _parse_cli_args(args: List[str]) -> Dict[str, str]:
     return result
 
 
-def _coerce_override_value(raw: str, typ: Optional[str]) -> Any:
+def _coerce_override_value(raw: str, typ: Optional[str]) -> Tuple[Any, bool]:
+    if not raw:
+        return None, False
     if typ == "number":
         try:
-            return float(raw)
+            return float(raw), True
         except ValueError:
-            return raw
+            return None, False
     if typ == "boolean":
-        return raw in ("true", "1", "yes")
+        return raw in ("true", "1", "yes"), True
     if typ in ("object", "array"):
         try:
-            return json.loads(raw)
+            return json.loads(raw), True
         except (json.JSONDecodeError, ValueError):
-            return raw
-    return raw
+            return None, False
+    return raw, True
 
 
 def _apply_override(
@@ -1051,12 +1053,32 @@ def _apply_override(
         if source == "arg":
             for flag in spec.arg:
                 if flag in parsed_args:
-                    return _coerce_override_value(parsed_args[flag], spec.type), True
+                    val = parsed_args[flag]
+                    if not val:
+                        print(f'cnos [warn]: arg "{flag}" has empty value — skipping override', file=sys.stderr)
+                        continue
+                    result, valid = _coerce_override_value(val, spec.type)
+                    if not valid:
+                        print(
+                            f'cnos [warn]: arg "{flag}" value "{val}" cannot be coerced to '
+                            f'{spec.type or "string"} — skipping override',
+                            file=sys.stderr,
+                        )
+                        continue
+                    return result, True
         elif source == "env":
             for var_name in spec.env:
                 val, found = env.get(var_name)
                 if found and val:
-                    return _coerce_override_value(val, spec.type), True
+                    result, valid = _coerce_override_value(val, spec.type)
+                    if not valid:
+                        print(
+                            f'cnos [warn]: env "{var_name}" value "{val}" cannot be coerced to '
+                            f'{spec.type or "string"} — skipping override',
+                            file=sys.stderr,
+                        )
+                        continue
+                    return result, True
         elif source == "cnos":
             if cnos_found:
                 return cnos_val, True
@@ -1096,7 +1118,7 @@ def new_runtime(
         vaults=dict(manifest["vaults"]),
         secret_factories=_secret_vault_factory_map(factories),
         parsed_args=_parse_cli_args(sys.argv[1:]),
-        file_overrides=_load_override_file(_detect_override_file_path(sys.argv[1:], env)),
+        file_overrides=_load_patch_file(_detect_patch_path(sys.argv[1:], env)),
     )
     runtime._populate_entries()
     runtime._initialize_runtime_providers(projection.runtime_namespaces)
@@ -1153,7 +1175,7 @@ def new_runtime_from_graph(
         logical_key_to_vault={},
         vaults=dict(manifest["vaults"]),
         secret_factories=_secret_vault_factory_map(factories),
-        file_overrides=_load_override_file(_detect_override_file_path(sys.argv[1:], env)),
+        file_overrides=_load_patch_file(_detect_patch_path(sys.argv[1:], env)),
     )
 
     for resolved in graph.entries:
@@ -1169,25 +1191,25 @@ def new_runtime_from_graph(
     return runtime
 
 
-def _detect_override_file_path(argv: List[str], env: Environment) -> Optional[str]:
+def _detect_patch_path(argv: List[str], env: Environment) -> Optional[str]:
     parsed = _parse_cli_args(argv)
-    path = parsed.get("--cnos-override")
+    path = parsed.get("--cnos-patch")
     if path:
         return path
-    v, found = env.get("CNOS_OVERRIDE_FILE")
+    v, found = env.get("CNOS_PATCH_FILE")
     if found and v:
         return v
     return None
 
 
-def _load_override_file(path: Optional[str]) -> Dict[str, Any]:
+def _load_patch_file(path: Optional[str]) -> Dict[str, Any]:
     if not path:
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
     except OSError as e:
-        raise RuntimeError(f'cnos: cannot read override file "{path}": {e}') from e
+        raise RuntimeError(f'cnos: cannot read patch file "{path}": {e}') from e
 
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
 
@@ -1195,13 +1217,13 @@ def _load_override_file(path: Optional[str]) -> Dict[str, Any]:
         try:
             return dict(json.loads(text))
         except Exception as e:
-            raise RuntimeError(f'cnos: cannot parse JSON override file "{path}": {e}') from e
+            raise RuntimeError(f'cnos: cannot parse JSON patch file "{path}": {e}') from e
 
     # .properties / .env / anything else — key=value lines
-    return dict(_parse_override_properties(text))
+    return dict(_parse_patch_properties(text))
 
 
-def _parse_override_properties(text: str) -> Dict[str, Any]:
+def _parse_patch_properties(text: str) -> Dict[str, Any]:
     result: Dict[str, Any] = {}
     for line in text.splitlines():
         stripped = line.strip()
@@ -1213,6 +1235,9 @@ def _parse_override_properties(text: str) -> Dict[str, Any]:
         key = stripped[:eq].strip()
         raw = stripped[eq + 1:].strip()
         if not key:
+            continue
+        if not raw:
+            print(f'cnos [warn]: patch file key "{key}" has empty value — skipping', file=sys.stderr)
             continue
         result[key] = _coerce_property_value(raw)
     return result

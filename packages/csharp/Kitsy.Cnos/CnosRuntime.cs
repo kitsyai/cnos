@@ -158,7 +158,7 @@ namespace Kitsy.Cnos
                 {
                     // File override participates as the "cnos" source.
                     var (cnosVal, cnosFound) = FileOrCnos(key);
-                    return ApplyOverride(spec, cnosVal, cnosFound, _parsedArgs, _env);
+                    return ApplyOverride(spec, cnosVal, cnosFound, _parsedArgs, _env, key);
                 }
             }
             // No OverrideSpec: file then CNOS.
@@ -701,7 +701,7 @@ namespace Kitsy.Cnos
                 projection.Vaults ?? new Dictionary<string, VaultDefinition>(),
                 BuildFactoryMap(factories),
                 parsedArgs0,
-                LoadOverrideFile(DetectOverrideFilePath(parsedArgs0, env)));
+                LoadPatchFile(DetectPatchPath(parsedArgs0, env)));
 
             rt.PopulateEntries();
             rt.InitializeRuntimeProviders(projection.RuntimeNamespaces ?? new List<string>());
@@ -739,7 +739,7 @@ namespace Kitsy.Cnos
                 new Dictionary<string, VaultDefinition>(),
                 BuildFactoryMap(factories),
                 parsedArgs1,
-                LoadOverrideFile(DetectOverrideFilePath(parsedArgs1, env)));
+                LoadPatchFile(DetectPatchPath(parsedArgs1, env)));
 
             foreach (var resolved in graph.Entries)
             {
@@ -1312,15 +1312,15 @@ namespace Kitsy.Cnos
             return result;
         }
 
-        private static string? DetectOverrideFilePath(Dictionary<string, string> parsedArgs, CnosEnvironment env)
+        private static string? DetectPatchPath(Dictionary<string, string> parsedArgs, CnosEnvironment env)
         {
-            if (parsedArgs.TryGetValue("--cnos-override", out var v) && !string.IsNullOrEmpty(v))
+            if (parsedArgs.TryGetValue("--cnos-patch", out var v) && !string.IsNullOrEmpty(v))
                 return v;
-            var envVal = env.Get("CNOS_OVERRIDE_FILE");
+            var envVal = env.Get("CNOS_PATCH_FILE");
             return string.IsNullOrEmpty(envVal) ? null : envVal;
         }
 
-        private static Dictionary<string, object?> LoadOverrideFile(string? path)
+        private static Dictionary<string, object?> LoadPatchFile(string? path)
         {
             var result = new Dictionary<string, object?>(StringComparer.Ordinal);
             if (string.IsNullOrEmpty(path)) return result;
@@ -1340,7 +1340,7 @@ namespace Kitsy.Cnos
                 return result;
             }
             // .properties / .env fallback
-            return ParsePropertiesOverride(text);
+            return ParsePatchProperties(text);
         }
 
         private static object? JsonElementToObject(System.Text.Json.JsonElement el) => el.ValueKind switch
@@ -1354,7 +1354,7 @@ namespace Kitsy.Cnos
             _ => el.GetRawText(),
         };
 
-        private static Dictionary<string, object?> ParsePropertiesOverride(string text)
+        private static Dictionary<string, object?> ParsePatchProperties(string text)
         {
             var result = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var line in text.Split('\n'))
@@ -1366,6 +1366,11 @@ namespace Kitsy.Cnos
                 var key = trimmed.Substring(0, eq).Trim();
                 var raw = trimmed.Substring(eq + 1).Trim();
                 if (string.IsNullOrEmpty(key)) continue;
+                if (string.IsNullOrEmpty(raw))
+                {
+                    Console.Error.WriteLine($"cnos [warn]: patch file key \"{key}\" has empty value — skipping");
+                    continue;
+                }
                 result[key] = CoercePropertyValue(raw);
             }
             return result;
@@ -1375,7 +1380,7 @@ namespace Kitsy.Cnos
         {
             if (raw == "true") return true;
             if (raw == "false") return false;
-            if (raw == "null" || raw == "") return null;
+            if (raw == "null") return null;
             if ((raw.StartsWith("\"") && raw.EndsWith("\"")) || (raw.StartsWith("'") && raw.EndsWith("'")))
                 return raw.Substring(1, raw.Length - 2);
             if (double.TryParse(raw, System.Globalization.NumberStyles.Any,
@@ -1384,16 +1389,28 @@ namespace Kitsy.Cnos
             return raw;
         }
 
-        private static object? CoerceOverrideValue(string raw, string? type)
+        private readonly struct CoercionResult { public readonly object? Value; public readonly bool Valid;
+            public CoercionResult(object? v, bool ok) { Value = v; Valid = ok; } }
+
+        private static CoercionResult CoerceOverrideValue(string raw, string? type)
         {
+            if (string.IsNullOrEmpty(raw)) return new CoercionResult(null, false);
             return type switch
             {
                 "number" => double.TryParse(raw, System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out var d) ? (object?)d : raw,
-                "boolean" => raw == "true" || raw == "1" || raw == "yes",
-                "object" or "array" => System.Text.Json.JsonSerializer.Deserialize<object>(raw),
-                _ => raw,
+                    System.Globalization.CultureInfo.InvariantCulture, out var d)
+                    ? new CoercionResult(d, true) : new CoercionResult(null, false),
+                "boolean" => new CoercionResult(raw == "true" || raw == "1" || raw == "yes", true),
+                "object" or "array" => TryParseJson(raw, out var obj)
+                    ? new CoercionResult(obj, true) : new CoercionResult(null, false),
+                _ => new CoercionResult(raw, true),
             };
+        }
+
+        private static bool TryParseJson(string raw, out object? result)
+        {
+            try { result = System.Text.Json.JsonSerializer.Deserialize<object>(raw); return true; }
+            catch { result = null; return false; }
         }
 
         private static readonly string[] _defaultPriority = { "arg", "env", "cnos" };
@@ -1403,26 +1420,47 @@ namespace Kitsy.Cnos
             object? cnosVal,
             bool cnosFound,
             Dictionary<string, string> parsedArgs,
-            CnosEnvironment env)
+            CnosEnvironment env,
+            string key = "")
         {
             var priority = (spec.Priority != null && spec.Priority.Count > 0)
                 ? (IEnumerable<string>)spec.Priority
                 : _defaultPriority;
+            var keyLabel = string.IsNullOrEmpty(key) ? "" : $" for \"{key}\"";
             foreach (var source in priority)
             {
                 if (source == "arg")
                 {
                     foreach (var flag in spec.Arg ?? new List<string>())
-                        if (parsedArgs.TryGetValue(flag, out var v))
-                            return (CoerceOverrideValue(v, spec.Type), true);
+                    {
+                        if (!parsedArgs.TryGetValue(flag, out var v)) continue;
+                        if (string.IsNullOrEmpty(v))
+                        {
+                            Console.Error.WriteLine($"cnos [warn]: arg \"{flag}\" has empty value — skipping override{keyLabel}");
+                            continue;
+                        }
+                        var r = CoerceOverrideValue(v, spec.Type);
+                        if (!r.Valid)
+                        {
+                            Console.Error.WriteLine($"cnos [warn]: arg \"{flag}\" value \"{v}\" cannot be coerced to {spec.Type ?? "string"} — skipping override{keyLabel}");
+                            continue;
+                        }
+                        return (r.Value, true);
+                    }
                 }
                 else if (source == "env")
                 {
                     foreach (var varName in spec.Env ?? new List<string>())
                     {
                         var v = env.Get(varName);
-                        if (!string.IsNullOrEmpty(v))
-                            return (CoerceOverrideValue(v, spec.Type), true);
+                        if (string.IsNullOrEmpty(v)) continue;
+                        var r = CoerceOverrideValue(v!, spec.Type);
+                        if (!r.Valid)
+                        {
+                            Console.Error.WriteLine($"cnos [warn]: env \"{varName}\" value \"{v}\" cannot be coerced to {spec.Type ?? "string"} — skipping override{keyLabel}");
+                            continue;
+                        }
+                        return (r.Value, true);
                     }
                 }
                 else if (source == "cnos")

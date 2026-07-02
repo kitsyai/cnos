@@ -168,7 +168,7 @@ public final class CnosRuntime {
                 Object[] cnos = fileOrCnos(key);
                 Object cnosVal = cnos[0];
                 boolean cnosFound = (Boolean) cnos[1];
-                return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env);
+                return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env, key);
             }
         }
         // No OverrideSpec: file then CNOS.
@@ -864,7 +864,7 @@ public final class CnosRuntime {
                 .encryptedSecrets(encryptedSecrets)
                 .factories(factories)
                 .parsedArgs(parsedArgs0)
-                .fileOverrides(loadOverrideFile(detectOverrideFilePath(parsedArgs0, env)));
+                .fileOverrides(loadPatchFile(detectPatchPath(parsedArgs0, env)));
 
         CnosRuntime runtime = b.build();
         runtime.populateEntries();
@@ -896,7 +896,7 @@ public final class CnosRuntime {
                 .encryptedSecrets(encryptedSecrets)
                 .factories(factories)
                 .parsedArgs(parsedArgs1)
-                .fileOverrides(loadOverrideFile(detectOverrideFilePath(parsedArgs1, env)));
+                .fileOverrides(loadPatchFile(detectPatchPath(parsedArgs1, env)));
 
         CnosRuntime runtime = b.build();
 
@@ -1432,14 +1432,14 @@ public final class CnosRuntime {
         return result;
     }
 
-    private static String detectOverrideFilePath(Map<String, String> parsedArgs, Environment env) {
-        String flagVal = parsedArgs.get("--cnos-override");
+    private static String detectPatchPath(Map<String, String> parsedArgs, Environment env) {
+        String flagVal = parsedArgs.get("--cnos-patch");
         if (flagVal != null && !flagVal.isEmpty()) return flagVal;
-        Optional<String> envVal = env.get("CNOS_OVERRIDE_FILE");
+        Optional<String> envVal = env.get("CNOS_PATCH_FILE");
         return envVal.isPresent() && !envVal.get().isEmpty() ? envVal.get() : null;
     }
 
-    private static Map<String, Object> loadOverrideFile(String path) {
+    private static Map<String, Object> loadPatchFile(String path) {
         if (path == null || path.isEmpty()) return Collections.emptyMap();
         String text;
         try {
@@ -1461,10 +1461,10 @@ public final class CnosRuntime {
                 return Collections.emptyMap();
             }
         }
-        return parsePropertiesOverride(text);
+        return parsePatchProperties(text);
     }
 
-    private static Map<String, Object> parsePropertiesOverride(String text) {
+    private static Map<String, Object> parsePatchProperties(String text) {
         Map<String, Object> result = new HashMap<>();
         for (String line : text.split("\n", -1)) {
             String trimmed = line.replace("\r", "").trim();
@@ -1474,6 +1474,10 @@ public final class CnosRuntime {
             String key = trimmed.substring(0, eq).trim();
             String raw = trimmed.substring(eq + 1).trim();
             if (key.isEmpty()) continue;
+            if (raw.isEmpty()) {
+                System.err.println("cnos [warn]: patch file key \"" + key + "\" has empty value — skipping");
+                continue;
+            }
             result.put(key, coercePropertyValue(raw));
         }
         return result;
@@ -1482,7 +1486,7 @@ public final class CnosRuntime {
     private static Object coercePropertyValue(String raw) {
         if ("true".equals(raw)) return Boolean.TRUE;
         if ("false".equals(raw)) return Boolean.FALSE;
-        if ("null".equals(raw) || raw.isEmpty()) return null;
+        if ("null".equals(raw)) return null;
         if ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))) {
             return raw.substring(1, raw.length() - 1);
         }
@@ -1491,38 +1495,62 @@ public final class CnosRuntime {
         return raw;
     }
 
-    private static Object coerceOverrideValue(String raw, String type) {
+    private static final class CoercionResult {
+        final Object value; final boolean valid;
+        CoercionResult(Object v, boolean ok) { value = v; valid = ok; }
+    }
+
+    private static CoercionResult coerceOverrideValue(String raw, String type) {
+        if (raw == null || raw.isEmpty()) return new CoercionResult(null, false);
         if ("number".equals(type)) {
-            try { return Double.parseDouble(raw); } catch (NumberFormatException e) { return raw; }
+            try { return new CoercionResult(Double.parseDouble(raw), true); }
+            catch (NumberFormatException e) { return new CoercionResult(null, false); }
         }
         if ("boolean".equals(type)) {
-            return "true".equals(raw) || "1".equals(raw) || "yes".equals(raw);
+            return new CoercionResult("true".equals(raw) || "1".equals(raw) || "yes".equals(raw), true);
         }
         if ("object".equals(type) || "array".equals(type)) {
-            try {
-                return new ObjectMapper().readValue(raw, Object.class);
-            } catch (Exception e) { return raw; }
+            try { return new CoercionResult(new ObjectMapper().readValue(raw, Object.class), true); }
+            catch (Exception e) { return new CoercionResult(null, false); }
         }
-        return raw;
+        return new CoercionResult(raw, true);
     }
 
     private static Optional<Object> applyOverride(
             ServerProjection.OverrideSpec spec,
             Object cnosVal, boolean cnosFound,
             Map<String, String> parsedArgs,
-            Environment env) {
+            Environment env,
+            String key) {
         List<String> priority = spec.getPriority() != null && !spec.getPriority().isEmpty()
                 ? spec.getPriority() : DEFAULT_PRIORITY;
+        String keyLabel = (key != null && !key.isEmpty()) ? " for \"" + key + "\"" : "";
         for (String source : priority) {
             if ("arg".equals(source)) {
                 for (String flag : spec.getArg()) {
                     String v = parsedArgs.get(flag);
-                    if (v != null) return Optional.ofNullable(coerceOverrideValue(v, spec.getType()));
+                    if (v == null) continue;
+                    if (v.isEmpty()) {
+                        System.err.println("cnos [warn]: arg \"" + flag + "\" has empty value — skipping override" + keyLabel);
+                        continue;
+                    }
+                    CoercionResult r = coerceOverrideValue(v, spec.getType());
+                    if (!r.valid) {
+                        System.err.println("cnos [warn]: arg \"" + flag + "\" value \"" + v + "\" cannot be coerced to " + (spec.getType() != null ? spec.getType() : "string") + " — skipping override" + keyLabel);
+                        continue;
+                    }
+                    return Optional.ofNullable(r.value);
                 }
             } else if ("env".equals(source)) {
                 for (String varName : spec.getEnv()) {
                     Optional<String> v = env.get(varName);
-                    if (v.isPresent() && !v.get().isEmpty()) return Optional.ofNullable(coerceOverrideValue(v.get(), spec.getType()));
+                    if (!v.isPresent() || v.get().isEmpty()) continue;
+                    CoercionResult r = coerceOverrideValue(v.get(), spec.getType());
+                    if (!r.valid) {
+                        System.err.println("cnos [warn]: env \"" + varName + "\" value \"" + v.get() + "\" cannot be coerced to " + (spec.getType() != null ? spec.getType() : "string") + " — skipping override" + keyLabel);
+                        continue;
+                    }
+                    return Optional.ofNullable(r.value);
                 }
             } else if ("cnos".equals(source)) {
                 if (cnosFound) return Optional.ofNullable(cnosVal);

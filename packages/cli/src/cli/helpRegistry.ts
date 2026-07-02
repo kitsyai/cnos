@@ -1266,12 +1266,13 @@ export const HELP_DOCUMENT: HelpDocument = {
   ],
   runtimeFlags: [
     {
-      flag: '--cnos-override=<path>',
+      flag: '--cnos-patch=<path>',
       description:
-        'Load a bulk override file at application startup. Supported formats: JSON (.json), YAML (.yaml/.yml, Node.js only), and Java-style properties (.properties, .env). ' +
+        'Load a bulk patch file at application startup. Supported formats: JSON (.json), YAML (.yaml/.yml, Node.js only), and Java-style properties (.properties, .env). ' +
         'Keys must be full logical CNOS keys (e.g. "value.server.port", "secret.db.password"). ' +
-        'Priority: OverrideSpec(arg) > OverrideSpec(env) > override file > CNOS resolved value. ' +
-        'Env-var alternative: CNOS_OVERRIDE_FILE=<path>. ' +
+        'Priority: OverrideSpec(arg) > OverrideSpec(env) > patch file > CNOS resolved value. ' +
+        'Empty or type-mismatched values emit a warning to stderr and fall through to the next source. ' +
+        'Env-var alternative: CNOS_PATCH_FILE=<path>. ' +
         'Supported in all 8 runtimes (JSON + properties) and additionally YAML in the Node.js runtime.',
     },
   ],

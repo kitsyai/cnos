@@ -214,9 +214,9 @@ impl CnosRuntime {
             secret_factories: Mutex::new(factory_map),
             projection,
             parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
-            file_overrides: load_override_file(
+            file_overrides: load_patch_file(
                 std::env::args().skip(1).collect::<Vec<_>>(),
-                &std::env::var("CNOS_OVERRIDE_FILE").unwrap_or_default(),
+                &std::env::var("CNOS_PATCH_FILE").unwrap_or_default(),
             ),
         };
 
@@ -288,9 +288,9 @@ impl CnosRuntime {
             secret_factories: Mutex::new(factory_map),
             projection: dummy_proj,
             parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
-            file_overrides: load_override_file(
+            file_overrides: load_patch_file(
                 std::env::args().skip(1).collect::<Vec<_>>(),
-                &std::env::var("CNOS_OVERRIDE_FILE").unwrap_or_default(),
+                &std::env::var("CNOS_PATCH_FILE").unwrap_or_default(),
             ),
         };
 
@@ -524,7 +524,7 @@ impl CnosRuntime {
             if let Some(spec) = self.projection.overrides.get(stripped) {
                 // File override participates as the "cnos" source.
                 let cnos_val = self.file_or_cnos(key)?;
-                return Ok(apply_override(spec, cnos_val, &self.parsed_args, &self.env));
+                return Ok(apply_override(spec, cnos_val, &self.parsed_args, &self.env, key));
             }
         }
         // No OverrideSpec: file then CNOS.
@@ -1217,12 +1217,15 @@ fn parse_cli_args(args: Vec<String>) -> HashMap<String, String> {
     result
 }
 
-fn coerce_override_value(raw: &str, typ: &str) -> Value {
+fn coerce_override_value(raw: &str, typ: &str) -> Option<Value> {
+    if raw.is_empty() {
+        return None;
+    }
     match typ {
-        "number" => raw.parse::<f64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.to_string())),
-        "boolean" => Value::Bool(raw == "true" || raw == "1" || raw == "yes"),
-        "object" | "array" => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string())),
-        _ => Value::String(raw.to_string()),
+        "number" => raw.parse::<f64>().map(Value::from).ok().map(Some).unwrap_or(None),
+        "boolean" => Some(Value::Bool(raw == "true" || raw == "1" || raw == "yes")),
+        "object" | "array" => serde_json::from_str(raw).ok(),
+        _ => Some(Value::String(raw.to_string())),
     }
 }
 
@@ -1231,22 +1234,40 @@ fn apply_override(
     cnos_val: Option<Value>,
     parsed_args: &HashMap<String, String>,
     env: &CnosEnvironment,
+    key: &str,
 ) -> Option<Value> {
     let default_priority = vec!["arg".to_string(), "env".to_string(), "cnos".to_string()];
     let priority = if spec.priority.is_empty() { &default_priority } else { &spec.priority };
+    let key_label = if key.is_empty() { String::new() } else { format!(" for {key:?}") };
     for source in priority {
         match source.as_str() {
             "arg" => {
                 for flag in &spec.arg {
                     if let Some(val) = parsed_args.get(flag.as_str()) {
-                        return Some(coerce_override_value(val, &spec.value_type));
+                        if val.is_empty() {
+                            eprintln!("cnos [warn]: arg {:?} has empty value — skipping override{}", flag, key_label);
+                            continue;
+                        }
+                        match coerce_override_value(val, &spec.value_type) {
+                            Some(v) => return Some(v),
+                            None => {
+                                eprintln!("cnos [warn]: arg {:?} value {:?} cannot be coerced to {} — skipping override{}", flag, val, spec.value_type, key_label);
+                                continue;
+                            }
+                        }
                     }
                 }
             }
             "env" => {
                 for var_name in &spec.env {
                     if let Some(val) = env.get(var_name).filter(|v| !v.is_empty()) {
-                        return Some(coerce_override_value(&val, &spec.value_type));
+                        match coerce_override_value(&val, &spec.value_type) {
+                            Some(v) => return Some(v),
+                            None => {
+                                eprintln!("cnos [warn]: env {:?} value {:?} cannot be coerced to {} — skipping override{}", var_name, val, spec.value_type, key_label);
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -1259,12 +1280,12 @@ fn apply_override(
     cnos_val
 }
 
-fn load_override_file(args: Vec<String>, env_path: &str) -> HashMap<String, Value> {
+fn load_patch_file(args: Vec<String>, env_path: &str) -> HashMap<String, Value> {
     let path = args
         .iter()
         .find_map(|a| {
-            if a.starts_with("--cnos-override=") {
-                Some(a["--cnos-override=".len()..].to_string())
+            if a.starts_with("--cnos-patch=") {
+                Some(a["--cnos-patch=".len()..].to_string())
             } else {
                 None
             }
@@ -1290,10 +1311,10 @@ fn load_override_file(args: Vec<String>, env_path: &str) -> HashMap<String, Valu
         return HashMap::new();
     }
 
-    parse_override_properties_rs(&text)
+    parse_patch_properties(&text)
 }
 
-fn parse_override_properties_rs(text: &str) -> HashMap<String, Value> {
+fn parse_patch_properties(text: &str) -> HashMap<String, Value> {
     let mut result = HashMap::new();
     for line in text.lines() {
         let trimmed = line.trim();
@@ -1303,9 +1324,14 @@ fn parse_override_properties_rs(text: &str) -> HashMap<String, Value> {
         if let Some(eq) = trimmed.find('=') {
             let key = trimmed[..eq].trim();
             let raw = trimmed[eq + 1..].trim();
-            if !key.is_empty() {
-                result.insert(key.to_string(), coerce_property_value_rs(raw));
+            if key.is_empty() {
+                continue;
             }
+            if raw.is_empty() {
+                eprintln!("cnos [warn]: patch file key {:?} has empty value — skipping", key);
+                continue;
+            }
+            result.insert(key.to_string(), coerce_property_value_rs(raw));
         }
     }
     result

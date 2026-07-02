@@ -38,7 +38,7 @@ class CnosRuntime private constructor(
             if (spec != null) {
                 // File override participates as the "cnos" source.
                 val (cnosVal, cnosFound) = fileOrCnos(key)
-                return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env)
+                return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env, key)
             }
         }
         // No OverrideSpec: file then CNOS.
@@ -439,7 +439,7 @@ class CnosRuntime private constructor(
 
             val pa0 = parseCliArgs(getProcessArgv())
             val rt = CnosRuntime(projection, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
-                pa0, loadOverrideFile(detectOverrideFilePath(pa0, env)))
+                pa0, loadPatchFile(detectPatchPath(pa0, env)))
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
             rt.populateEntries()
             rt.initRuntimeProviders(projection.runtimeNamespaces)
@@ -457,7 +457,7 @@ class CnosRuntime private constructor(
 
             val pa1 = parseCliArgs(getProcessArgv())
             val rt = CnosRuntime(null, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
-                pa1, loadOverrideFile(detectOverrideFilePath(pa1, env)))
+                pa1, loadPatchFile(detectPatchPath(pa1, env)))
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
 
             for (resolved in graph.entries) {
@@ -569,14 +569,14 @@ class CnosRuntime private constructor(
             return result
         }
 
-        private fun detectOverrideFilePath(parsedArgs: Map<String, String>, env: Environment): String? {
-            val flagVal = parsedArgs["--cnos-override"]
+        private fun detectPatchPath(parsedArgs: Map<String, String>, env: Environment): String? {
+            val flagVal = parsedArgs["--cnos-patch"]
             if (!flagVal.isNullOrEmpty()) return flagVal
-            val envVal = env.get("CNOS_OVERRIDE_FILE")
+            val envVal = env.get("CNOS_PATCH_FILE")
             return if (!envVal.isNullOrEmpty()) envVal else null
         }
 
-        private fun loadOverrideFile(path: String?): Map<String, Any?> {
+        private fun loadPatchFile(path: String?): Map<String, Any?> {
             if (path.isNullOrEmpty()) return emptyMap()
             val text = try {
                 java.io.File(path).readText(Charsets.UTF_8)
@@ -586,14 +586,13 @@ class CnosRuntime private constructor(
             val ext = path.substringAfterLast('.', "").lowercase()
             if (ext == "json") {
                 return try {
-                    val raw = jacksonObjectMapper().readValue<Map<String, Any?>>(text)
-                    raw
+                    jacksonObjectMapper().readValue<Map<String, Any?>>(text)
                 } catch (_: Exception) { emptyMap() }
             }
-            return parsePropertiesOverride(text)
+            return parsePatchProperties(text)
         }
 
-        private fun parsePropertiesOverride(text: String): Map<String, Any?> {
+        private fun parsePatchProperties(text: String): Map<String, Any?> {
             val result = mutableMapOf<String, Any?>()
             for (line in text.lines()) {
                 val trimmed = line.trim()
@@ -603,6 +602,10 @@ class CnosRuntime private constructor(
                 val key = trimmed.substring(0, eq).trim()
                 val raw = trimmed.substring(eq + 1).trim()
                 if (key.isEmpty()) continue
+                if (raw.isEmpty()) {
+                    System.err.println("cnos [warn]: patch file key \"$key\" has empty value — skipping")
+                    continue
+                }
                 result[key] = coercePropertyValue(raw)
             }
             return result
@@ -611,7 +614,7 @@ class CnosRuntime private constructor(
         private fun coercePropertyValue(raw: String): Any? = when {
             raw == "true" -> true
             raw == "false" -> false
-            raw == "null" || raw.isEmpty() -> null
+            raw == "null" -> null
             (raw.startsWith('"') && raw.endsWith('"')) ||
                     (raw.startsWith('\'') && raw.endsWith('\'')) -> raw.substring(1, raw.length - 1)
             else -> raw.toLongOrNull() ?: raw.toDoubleOrNull() ?: raw
@@ -619,11 +622,18 @@ class CnosRuntime private constructor(
 
         private val defaultPriority = listOf("arg", "env", "cnos")
 
-        private fun coerceOverrideValue(raw: String, type: String?): Any? = when (type) {
-            "number" -> raw.toDoubleOrNull() ?: raw
-            "boolean" -> raw == "true" || raw == "1" || raw == "yes"
-            "object", "array" -> try { jacksonObjectMapper().readValue(raw, Any::class.java) } catch (_: Exception) { raw }
-            else -> raw
+        private data class CoercionResult(val value: Any?, val valid: Boolean)
+
+        private fun coerceOverrideValue(raw: String, type: String?): CoercionResult {
+            if (raw.isEmpty()) return CoercionResult(null, false)
+            return when (type) {
+                "number" -> raw.toDoubleOrNull()?.let { CoercionResult(it, true) } ?: CoercionResult(null, false)
+                "boolean" -> CoercionResult(raw == "true" || raw == "1" || raw == "yes", true)
+                "object", "array" -> try {
+                    CoercionResult(jacksonObjectMapper().readValue(raw, Any::class.java), true)
+                } catch (_: Exception) { CoercionResult(null, false) }
+                else -> CoercionResult(raw, true)
+            }
         }
 
         private fun applyOverride(
@@ -631,17 +641,35 @@ class CnosRuntime private constructor(
             cnosVal: Any?,
             cnosFound: Boolean,
             parsedArgs: Map<String, String>,
-            env: Environment
+            env: Environment,
+            key: String = ""
         ): Optional<Any> {
             val priority = spec.priority.ifEmpty { defaultPriority }
+            val keyLabel = if (key.isEmpty()) "" else " for \"$key\""
             for (source in priority) {
                 when (source) {
                     "arg" -> spec.arg.forEach { flag ->
-                        parsedArgs[flag]?.let { return Optional.ofNullable(coerceOverrideValue(it, spec.type)) }
+                        val v = parsedArgs[flag] ?: return@forEach
+                        if (v.isEmpty()) {
+                            System.err.println("cnos [warn]: arg \"$flag\" has empty value — skipping override$keyLabel")
+                            return@forEach
+                        }
+                        val r = coerceOverrideValue(v, spec.type)
+                        if (!r.valid) {
+                            System.err.println("cnos [warn]: arg \"$flag\" value \"$v\" cannot be coerced to ${spec.type ?: "string"} — skipping override$keyLabel")
+                            return@forEach
+                        }
+                        return Optional.ofNullable(r.value)
                     }
                     "env" -> spec.env.forEach { varName ->
                         val v = env.get(varName)
-                        if (!v.isNullOrEmpty()) return Optional.ofNullable(coerceOverrideValue(v, spec.type))
+                        if (v.isNullOrEmpty()) return@forEach
+                        val r = coerceOverrideValue(v, spec.type)
+                        if (!r.valid) {
+                            System.err.println("cnos [warn]: env \"$varName\" value \"$v\" cannot be coerced to ${spec.type ?: "string"} — skipping override$keyLabel")
+                            return@forEach
+                        }
+                        return Optional.ofNullable(r.value)
                     }
                     "cnos" -> if (cnosFound) return Optional.ofNullable(cnosVal)
                 }

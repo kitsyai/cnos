@@ -141,7 +141,7 @@ func (runtime *Runtime) Read(key string) (any, bool, error) {
 			if err != nil {
 				return nil, false, err
 			}
-			result, resultFound := applyOverride(spec, cnosVal, cnosFound, runtime.parsedArgs, runtime.env)
+			result, resultFound := applyOverride(spec, cnosVal, cnosFound, runtime.parsedArgs, runtime.env, key)
 			return result, resultFound, nil
 		}
 	}
@@ -325,7 +325,7 @@ func newRuntime(source []byte, env environment, secretHome string, factories []S
 		vaults:            manifest.Vaults,
 		secretFactories:   secretVaultFactoryMap(factories),
 		parsedArgs:    parseCliArgs(os.Args[1:]),
-		fileOverrides: loadOverrideFile(parseCliArgs(os.Args[1:])["--cnos-override"], os.Getenv("CNOS_OVERRIDE_FILE")),
+		fileOverrides: loadPatchFile(parseCliArgs(os.Args[1:])["--cnos-patch"], os.Getenv("CNOS_PATCH_FILE")),
 	}
 
 	if err := runtime.populateEntries(); err != nil {
@@ -368,7 +368,7 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string, fact
 		vaults:            manifest.Vaults,
 		secretFactories:   secretVaultFactoryMap(factories),
 		parsedArgs:    parseCliArgs(os.Args[1:]),
-		fileOverrides: loadOverrideFile(parseCliArgs(os.Args[1:])["--cnos-override"], os.Getenv("CNOS_OVERRIDE_FILE")),
+		fileOverrides: loadPatchFile(parseCliArgs(os.Args[1:])["--cnos-patch"], os.Getenv("CNOS_PATCH_FILE")),
 	}
 
 	for _, resolved := range graph.Entries {
@@ -956,45 +956,71 @@ func parseCliArgs(args []string) map[string]string {
 	return result
 }
 
-func coerceOverrideValue(raw string, typ string) any {
+type coercionResult struct {
+	value any
+	valid bool
+}
+
+func coerceOverrideValue(raw string, typ string) coercionResult {
+	if raw == "" {
+		return coercionResult{valid: false}
+	}
 	switch typ {
 	case "number":
 		if n, err := strconv.ParseFloat(raw, 64); err == nil {
-			return n
+			return coercionResult{value: n, valid: true}
 		}
-		return raw
+		return coercionResult{valid: false}
 	case "boolean":
-		return raw == "true" || raw == "1" || raw == "yes"
+		return coercionResult{value: raw == "true" || raw == "1" || raw == "yes", valid: true}
 	case "object", "array":
 		var v any
 		if err := json.Unmarshal([]byte(raw), &v); err == nil {
-			return v
+			return coercionResult{value: v, valid: true}
 		}
-		return raw
+		return coercionResult{valid: false}
 	default:
-		return raw
+		return coercionResult{value: raw, valid: true}
 	}
 }
 
 var defaultOverridePriority = []string{"arg", "env", "cnos"}
 
-func applyOverride(spec OverrideSpec, cnosVal any, cnosFound bool, parsedArgs map[string]string, env environment) (any, bool) {
+func applyOverride(spec OverrideSpec, cnosVal any, cnosFound bool, parsedArgs map[string]string, env environment, key string) (any, bool) {
 	priority := spec.Priority
 	if len(priority) == 0 {
 		priority = defaultOverridePriority
+	}
+	keyLabel := ""
+	if key != "" {
+		keyLabel = fmt.Sprintf(" for %q", key)
 	}
 	for _, source := range priority {
 		switch source {
 		case "arg":
 			for _, flag := range spec.Arg {
 				if val, ok := parsedArgs[flag]; ok {
-					return coerceOverrideValue(val, spec.Type), true
+					if val == "" {
+						fmt.Fprintf(os.Stderr, "cnos [warn]: arg %q has empty value — skipping override%s\n", flag, keyLabel)
+						continue
+					}
+					r := coerceOverrideValue(val, spec.Type)
+					if !r.valid {
+						fmt.Fprintf(os.Stderr, "cnos [warn]: arg %q value %q cannot be coerced to %s — skipping override%s\n", flag, val, spec.Type, keyLabel)
+						continue
+					}
+					return r.value, true
 				}
 			}
 		case "env":
 			for _, varName := range spec.Env {
 				if val, ok := env.Get(varName); ok && val != "" {
-					return coerceOverrideValue(val, spec.Type), true
+					r := coerceOverrideValue(val, spec.Type)
+					if !r.valid {
+						fmt.Fprintf(os.Stderr, "cnos [warn]: env %q value %q cannot be coerced to %s — skipping override%s\n", varName, val, spec.Type, keyLabel)
+						continue
+					}
+					return r.value, true
 				}
 			}
 		case "cnos":
@@ -1045,7 +1071,7 @@ func (runtime *Runtime) warmSecrets() error {
 	return nil
 }
 
-func loadOverrideFile(flagPath, envPath string) map[string]any {
+func loadPatchFile(flagPath, envPath string) map[string]any {
 	path := flagPath
 	if path == "" {
 		path = envPath
@@ -1066,10 +1092,10 @@ func loadOverrideFile(flagPath, envPath string) map[string]any {
 		}
 		return map[string]any{}
 	}
-	return parseOverrideProperties(text)
+	return parsePatchProperties(text)
 }
 
-func parseOverrideProperties(text string) map[string]any {
+func parsePatchProperties(text string) map[string]any {
 	result := map[string]any{}
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -1083,6 +1109,10 @@ func parseOverrideProperties(text string) map[string]any {
 		key := strings.TrimSpace(trimmed[:eq])
 		raw := strings.TrimSpace(trimmed[eq+1:])
 		if key == "" {
+			continue
+		}
+		if raw == "" {
+			fmt.Fprintf(os.Stderr, "cnos [warn]: patch file key %q has empty value — skipping\n", key)
 			continue
 		}
 		result[key] = coercePropertyValue(raw)

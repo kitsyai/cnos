@@ -4,10 +4,10 @@ import type { ConfigSpecMap, ConfigSpecValueType, OverridePrioritySource, Overri
 
 const DEFAULT_PRIORITY: OverridePrioritySource[] = ['arg', 'env', 'cnos'];
 
-/** CLI flag name that points to a bulk override file. */
-export const CNOS_OVERRIDE_FLAG = '--cnos-override';
-/** Environment variable name that points to a bulk override file (used when CLI args are not available). */
-export const CNOS_OVERRIDE_FILE_ENV = 'CNOS_OVERRIDE_FILE';
+/** CLI flag name that points to a bulk patch file. */
+export const CNOS_PATCH_FLAG = '--cnos-patch';
+/** Environment variable name that points to a bulk patch file (used when CLI args are not available). */
+export const CNOS_PATCH_FILE_ENV = 'CNOS_PATCH_FILE';
 
 /**
  * Parses a raw argv array into a flag→value map.
@@ -46,48 +46,76 @@ export function parseCliArgs(args: string[]): Map<string, string> {
   return result;
 }
 
-function coerceValue(raw: string, type: ConfigSpecValueType | undefined): unknown {
+type CoercionResult = { value: unknown; valid: boolean };
+
+function coerceValue(raw: string, type: ConfigSpecValueType | undefined): CoercionResult {
+  if (raw === '') return { value: undefined, valid: false };
   switch (type) {
     case 'number': {
       const n = Number(raw);
-      return Number.isNaN(n) ? raw : n;
+      if (Number.isNaN(n)) return { value: undefined, valid: false };
+      return { value: n, valid: true };
     }
     case 'boolean':
-      return raw === 'true' || raw === '1' || raw === 'yes';
+      return { value: raw === 'true' || raw === '1' || raw === 'yes', valid: true };
     case 'object':
     case 'array':
       try {
-        return JSON.parse(raw) as unknown;
+        return { value: JSON.parse(raw) as unknown, valid: true };
       } catch {
-        return raw;
+        return { value: undefined, valid: false };
       }
     default:
-      return raw;
+      return { value: raw, valid: true };
   }
 }
 
+const defaultWarn = (msg: string): void => {
+  process.stderr.write(msg + '\n');
+};
+
 /**
  * Applies override resolution for a single key according to its spec.
- * Returns the resolved value or undefined if nothing matched (caller falls back to CNOS value).
+ * Warns to stderr (or the provided warn callback) and falls through to the next priority source
+ * when a value is empty or cannot be coerced to the declared type.
  */
 export function resolveOverride(
   spec: OverrideSpec,
   cnosValueFn: () => unknown,
   argsMap: Map<string, string>,
   env: Record<string, string | undefined>,
+  key = '',
+  warn: (msg: string) => void = defaultWarn,
 ): unknown {
   const priority = spec.priority.length > 0 ? spec.priority : DEFAULT_PRIORITY;
+  const keyLabel = key ? ` for "${key}"` : '';
 
   for (const source of priority) {
     if (source === 'arg') {
       for (const flag of spec.arg) {
         const val = argsMap.get(flag);
-        if (val !== undefined) return coerceValue(val, spec.type);
+        if (val === undefined) continue;
+        if (val === '') {
+          warn(`cnos [warn]: arg "${flag}" has empty value — skipping override${keyLabel}`);
+          continue;
+        }
+        const { value, valid } = coerceValue(val, spec.type);
+        if (!valid) {
+          warn(`cnos [warn]: arg "${flag}" value "${val}" cannot be coerced to ${spec.type ?? 'string'} — skipping override${keyLabel}`);
+          continue;
+        }
+        return value;
       }
     } else if (source === 'env') {
       for (const varName of spec.env) {
         const val = env[varName];
-        if (val !== undefined && val !== '') return coerceValue(val, spec.type);
+        if (val === undefined || val === '') continue;
+        const { value, valid } = coerceValue(val, spec.type);
+        if (!valid) {
+          warn(`cnos [warn]: env "${varName}" value "${val}" cannot be coerced to ${spec.type ?? 'string'} — skipping override${keyLabel}`);
+          continue;
+        }
+        return value;
       }
     } else {
       const cnosVal = cnosValueFn();
@@ -102,8 +130,12 @@ export function resolveOverride(
  * Parses a `.properties` / `.env` style text block into a logical-key → value map.
  * Lines starting with `#` or `;` are comments. Values are auto-coerced:
  *   `true`/`false` → boolean, bare numbers → number, everything else → string.
+ * Lines with an empty value (key=) are skipped with a warning.
  */
-export function parseOverrideProperties(text: string): Map<string, unknown> {
+export function parsePatchProperties(
+  text: string,
+  warn: (msg: string) => void = defaultWarn,
+): Map<string, unknown> {
   const result = new Map<string, unknown>();
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -113,6 +145,10 @@ export function parseOverrideProperties(text: string): Map<string, unknown> {
     const key = trimmed.slice(0, eq).trim();
     const raw = trimmed.slice(eq + 1).trim();
     if (!key) continue;
+    if (raw === '') {
+      warn(`cnos [warn]: patch file key "${key}" has empty value — skipping`);
+      continue;
+    }
     result.set(key, coercePropertyValue(raw));
   }
   return result;
@@ -132,16 +168,16 @@ function coercePropertyValue(raw: string): unknown {
 }
 
 /**
- * Loads and parses a CNOS override file.
+ * Loads and parses a CNOS patch file.
  * Format is detected by extension: `.json`, `.yaml`/`.yml`, or anything else is treated as properties.
  * Keys must be full logical CNOS keys (e.g. `value.server.port`, `secret.db.password`).
  */
-export function loadOverrideFile(filePath: string): Map<string, unknown> {
+export function loadPatchFile(filePath: string): Map<string, unknown> {
   let text: string;
   try {
     text = readFileSync(filePath, 'utf8');
   } catch (e) {
-    throw new Error(`cnos: cannot read override file "${filePath}": ${(e as Error).message}`);
+    throw new Error(`cnos: cannot read patch file "${filePath}": ${(e as Error).message}`);
   }
 
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
@@ -151,7 +187,7 @@ export function loadOverrideFile(filePath: string): Map<string, unknown> {
       const obj = JSON.parse(text) as Record<string, unknown>;
       return new Map(Object.entries(obj));
     } catch (e) {
-      throw new Error(`cnos: cannot parse JSON override file "${filePath}": ${(e as Error).message}`);
+      throw new Error(`cnos: cannot parse JSON patch file "${filePath}": ${(e as Error).message}`);
     }
   }
 
@@ -160,11 +196,11 @@ export function loadOverrideFile(filePath: string): Map<string, unknown> {
       const obj = parseYaml<Record<string, unknown>>(text);
       return new Map(Object.entries(obj ?? {}));
     } catch (e) {
-      throw new Error(`cnos: cannot parse YAML override file "${filePath}": ${(e as Error).message}`);
+      throw new Error(`cnos: cannot parse YAML patch file "${filePath}": ${(e as Error).message}`);
     }
   }
 
-  return parseOverrideProperties(text);
+  return parsePatchProperties(text);
 }
 
 /** Builds the override map from the manifest schema (keyed by stripped value key). */

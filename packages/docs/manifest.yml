@@ -45,8 +45,8 @@ sidebar:
         label: Secrets and Vaults
       - path: guides/vault-providers
         label: Vault Providers
-      - path: guides/override-files
-        label: Override Files
+      - path: guides/patch-files
+        label: Patch Files
       - path: guides/migration
         label: Migrating from .env
       - path: guides/generated-env-files
