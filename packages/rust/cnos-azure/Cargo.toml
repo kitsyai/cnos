@@ -1,6 +1,6 @@
 [package]
 name = "cnos-azure"
-version = "1.12.3"
+version = "1.13.0"
 edition = "2021"
 description = "CNOS Azure Key Vault provider for Rust"
 license = "MIT"

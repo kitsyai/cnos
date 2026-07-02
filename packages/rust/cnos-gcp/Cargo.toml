@@ -1,6 +1,6 @@
 [package]
 name = "cnos-gcp"
-version = "1.12.3"
+version = "1.13.0"
 edition = "2021"
 description = "CNOS GCP Secret Manager vault provider for Rust"
 license = "MIT"
