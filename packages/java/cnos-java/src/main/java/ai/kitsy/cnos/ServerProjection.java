@@ -55,6 +55,9 @@ public final class ServerProjection {
     @JsonProperty("valueTypes")
     private final Map<String, String> valueTypes;
 
+    @JsonProperty("overrides")
+    private final Map<String, OverrideSpec> overrides;
+
     @JsonProperty("meta")
     private final Meta meta;
 
@@ -72,6 +75,7 @@ public final class ServerProjection {
             @JsonProperty("publicKeys") List<String> publicKeys,
             @JsonProperty("runtimeNamespaces") List<String> runtimeNamespaces,
             @JsonProperty("valueTypes") Map<String, String> valueTypes,
+            @JsonProperty("overrides") Map<String, OverrideSpec> overrides,
             @JsonProperty("meta") Meta meta) {
         this.version = version;
         this.workspace = workspace;
@@ -86,6 +90,7 @@ public final class ServerProjection {
         this.runtimeNamespaces = runtimeNamespaces != null
                 ? Collections.unmodifiableList(runtimeNamespaces) : Collections.emptyList();
         this.valueTypes = valueTypes != null ? Collections.unmodifiableMap(valueTypes) : Collections.emptyMap();
+        this.overrides = overrides != null ? Collections.unmodifiableMap(overrides) : Collections.emptyMap();
         this.meta = meta;
     }
 
@@ -150,6 +155,7 @@ public final class ServerProjection {
                 raw.publicKeys,
                 raw.runtimeNamespaces,
                 raw.valueTypes,
+                raw.overrides,
                 raw.meta);
     }
 
@@ -169,7 +175,42 @@ public final class ServerProjection {
     public List<String> getPublicKeys() { return publicKeys; }
     public List<String> getRuntimeNamespaces() { return runtimeNamespaces; }
     public Map<String, String> getValueTypes() { return valueTypes; }
+    public Map<String, OverrideSpec> getOverrides() { return overrides; }
     public Meta getMeta() { return meta; }
+
+    /** Schema-level env/arg override configuration for one config key. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static final class OverrideSpec {
+
+        @JsonProperty("env")
+        private final List<String> env;
+
+        @JsonProperty("arg")
+        private final List<String> arg;
+
+        @JsonProperty("priority")
+        private final List<String> priority;
+
+        @JsonProperty("type")
+        private final String type;
+
+        @JsonCreator
+        public OverrideSpec(
+                @JsonProperty("env") List<String> env,
+                @JsonProperty("arg") List<String> arg,
+                @JsonProperty("priority") List<String> priority,
+                @JsonProperty("type") String type) {
+            this.env = env != null ? Collections.unmodifiableList(env) : Collections.emptyList();
+            this.arg = arg != null ? Collections.unmodifiableList(arg) : Collections.emptyList();
+            this.priority = priority != null ? Collections.unmodifiableList(priority) : Collections.emptyList();
+            this.type = type;
+        }
+
+        public List<String> getEnv() { return env; }
+        public List<String> getArg() { return arg; }
+        public List<String> getPriority() { return priority; }
+        public String getType() { return type; }
+    }
 
     /**
      * Projection metadata block.

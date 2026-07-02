@@ -4,6 +4,7 @@ import type { ProfileSource } from './profile.js';
 import type { SecretCache } from '../secrets/secretCache.js';
 import type { WorkspaceContext } from './workspace.js';
 import type { ProjectedVaultDefinition, SecretReference, SecretVaultProviderFactory } from '../secrets/types.js';
+import type { OverrideSpec } from './spec.js';
 
 export type LogicalKey = string;
 
@@ -200,6 +201,8 @@ export interface ServerProjection {
   runtimeNamespaces: string[];
   /** Optional format hints for value entries — e.g. { "myapp.public_key": "pem" } */
   valueTypes?: Record<string, string>;
+  /** Schema-level env/arg override specs keyed by stripped value key (no "value." prefix). */
+  overrides?: Record<string, OverrideSpec>;
   meta: {
     workspace: string;
     profile: string;

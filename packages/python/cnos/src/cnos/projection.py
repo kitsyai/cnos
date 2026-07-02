@@ -39,6 +39,23 @@ class ProjectionMeta:
 
 
 @dataclass
+class OverrideSpec:
+    env: List[str] = field(default_factory=list)
+    arg: List[str] = field(default_factory=list)
+    priority: List[str] = field(default_factory=list)
+    type: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "OverrideSpec":
+        return cls(
+            env=list(d.get("env") or []),
+            arg=list(d.get("arg") or []),
+            priority=list(d.get("priority") or []),
+            type=d.get("type") or None,
+        )
+
+
+@dataclass
 class ServerProjection:
     version: int = 0
     workspace: str = ""
@@ -52,6 +69,7 @@ class ServerProjection:
     public_keys: List[str] = field(default_factory=list)
     runtime_namespaces: List[str] = field(default_factory=list)
     value_types: Dict[str, str] = field(default_factory=dict)
+    overrides: Dict[str, OverrideSpec] = field(default_factory=dict)
     meta: ProjectionMeta = field(default_factory=ProjectionMeta)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -150,5 +168,6 @@ def parse_projection(data: bytes) -> ServerProjection:
         public_keys=list(public_keys),
         runtime_namespaces=list(raw.get("runtimeNamespaces") or []),
         value_types=dict(raw.get("valueTypes") or {}),
+        overrides={k: OverrideSpec.from_dict(v) for k, v in (raw.get("overrides") or {}).items()},
         meta=meta,
     )

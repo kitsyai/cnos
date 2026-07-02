@@ -31,6 +31,14 @@ type ProjectionMeta struct {
 	Namespaces  []string `json:"namespaces,omitempty"`
 }
 
+// OverrideSpec holds the schema-level env/arg override configuration for one config key.
+type OverrideSpec struct {
+	Env      []string `json:"env"`
+	Arg      []string `json:"arg"`
+	Priority []string `json:"priority"`
+	Type     string   `json:"type,omitempty"`
+}
+
 type ServerProjection struct {
 	Version           int                        `json:"version"`
 	Workspace         string                     `json:"workspace"`
@@ -44,6 +52,7 @@ type ServerProjection struct {
 	PublicKeys        []string                   `json:"publicKeys"`
 	RuntimeNamespaces []string                   `json:"runtimeNamespaces"`
 	ValueTypes        map[string]string          `json:"valueTypes,omitempty"`
+	Overrides         map[string]OverrideSpec    `json:"overrides,omitempty"`
 	Meta              ProjectionMeta             `json:"meta"`
 }
 

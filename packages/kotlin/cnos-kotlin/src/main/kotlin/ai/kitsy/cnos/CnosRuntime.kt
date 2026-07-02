@@ -14,7 +14,8 @@ class CnosRuntime private constructor(
     private val secretHome: String,
     private val entries: MutableMap<String, RuntimeEntry>,
     private val runtimeNamespaces: MutableSet<String>,
-    private val encryptedSecrets: Map<String, Any?>?
+    private val encryptedSecrets: Map<String, Any?>?,
+    private val parsedArgs: Map<String, String> = emptyMap()
 ) {
     private val runtimeProviders = ConcurrentHashMap<String, (String) -> Any?>()
     private val hydratedSecrets = ConcurrentHashMap<String, Any>()
@@ -30,6 +31,14 @@ class CnosRuntime private constructor(
     // ================================================================
 
     fun read(key: String): Optional<Any> {
+        if (key.startsWith("value.") && projection != null && projection.overrides.isNotEmpty()) {
+            val stripped = key.removePrefix("value.")
+            val spec = projection.overrides[stripped]
+            if (spec != null) {
+                val (cnosVal, cnosFound) = readInternal(key, mutableSetOf())
+                return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env)
+            }
+        }
         val (value, found) = readInternal(key, mutableSetOf())
         return if (found) Optional.ofNullable(value) else Optional.empty()
     }
@@ -419,7 +428,8 @@ class CnosRuntime private constructor(
             val manifest = BootstrappedManifest.fromProjection(projection)
             val encrypted = decryptSecretPayload(env)
 
-            val rt = CnosRuntime(projection, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted)
+            val rt = CnosRuntime(projection, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
+                parseCliArgs(getProcessArgv()))
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
             rt.populateEntries()
             rt.initRuntimeProviders(projection.runtimeNamespaces)
@@ -435,7 +445,8 @@ class CnosRuntime private constructor(
             val manifest = GraphParser.bootstrappedManifestFromGraph(graph)
             val encrypted = decryptSecretPayload(env)
 
-            val rt = CnosRuntime(null, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted)
+            val rt = CnosRuntime(null, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
+                parseCliArgs(getProcessArgv()))
             factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
 
             for (resolved in graph.entries) {
@@ -524,6 +535,59 @@ class CnosRuntime private constructor(
                 }
             }
             return sb.toString().trim('_')
+        }
+
+        private fun getProcessArgv(): Array<String> {
+            val prop = System.getProperty("sun.java.command") ?: return emptyArray()
+            val parts = prop.split("\\s+".toRegex())
+            return if (parts.size <= 1) emptyArray() else parts.drop(1).toTypedArray()
+        }
+
+        private fun parseCliArgs(args: Array<String>): Map<String, String> {
+            val result = mutableMapOf<String, String>()
+            var i = 0
+            while (i < args.size) {
+                val arg = args[i]
+                if (!arg.startsWith("-")) { i++; continue }
+                val eq = arg.indexOf('=')
+                if (eq >= 0) { result[arg.substring(0, eq)] = arg.substring(eq + 1); i++; continue }
+                if (i + 1 < args.size && !args[i + 1].startsWith("-")) {
+                    result[arg] = args[i + 1]; i += 2
+                } else { result[arg] = "true"; i++ }
+            }
+            return result
+        }
+
+        private val defaultPriority = listOf("arg", "env", "cnos")
+
+        private fun coerceOverrideValue(raw: String, type: String?): Any? = when (type) {
+            "number" -> raw.toDoubleOrNull() ?: raw
+            "boolean" -> raw == "true" || raw == "1" || raw == "yes"
+            "object", "array" -> try { jacksonObjectMapper().readValue(raw, Any::class.java) } catch (_: Exception) { raw }
+            else -> raw
+        }
+
+        private fun applyOverride(
+            spec: OverrideSpec,
+            cnosVal: Any?,
+            cnosFound: Boolean,
+            parsedArgs: Map<String, String>,
+            env: Environment
+        ): Optional<Any> {
+            val priority = spec.priority.ifEmpty { defaultPriority }
+            for (source in priority) {
+                when (source) {
+                    "arg" -> spec.arg.forEach { flag ->
+                        parsedArgs[flag]?.let { return Optional.ofNullable(coerceOverrideValue(it, spec.type)) }
+                    }
+                    "env" -> spec.env.forEach { varName ->
+                        val v = env.get(varName)
+                        if (!v.isNullOrEmpty()) return Optional.ofNullable(coerceOverrideValue(v, spec.type))
+                    }
+                    "cnos" -> if (cnosFound) return Optional.ofNullable(cnosVal)
+                }
+            }
+            return if (cnosFound) Optional.ofNullable(cnosVal) else Optional.empty()
         }
 
     }

@@ -24,6 +24,8 @@ class CnosRuntime
     private array $secretFactories = [];
     /** @var array<string, VaultDefinition> */
     private array $vaults = [];
+    /** @var array<string, string> */
+    private array $parsedArgs = [];
 
     public function __construct(
         private readonly ServerProjection $projection,
@@ -37,6 +39,7 @@ class CnosRuntime
             }
         }
         $this->vaults = $projection->vaults;
+        $this->parsedArgs = self::parseCliArgs(array_slice($GLOBALS['argv'] ?? [], 1));
         $this->populateEntries();
         $this->initRuntimeNamespaces();
     }
@@ -53,6 +56,14 @@ class CnosRuntime
     /** @return array{mixed, bool} */
     public function read(string $key): array
     {
+        if (str_starts_with($key, 'value.') && !empty($this->projection->overrides)) {
+            $stripped = substr($key, strlen('value.'));
+            $spec = $this->projection->overrides[$stripped] ?? null;
+            if ($spec !== null) {
+                [$cnosVal, $cnosFound] = $this->readInternal($key, []);
+                return self::applyOverride($spec, $cnosVal, $cnosFound, $this->parsedArgs, $this->env);
+            }
+        }
         return $this->readInternal($key, []);
     }
 
@@ -537,5 +548,70 @@ class CnosRuntime
         }
         $val = getenv($key);
         return $val !== false ? $val : null;
+    }
+
+    /** @param string[] $args @return array<string, string> */
+    private static function parseCliArgs(array $args): array
+    {
+        $result = [];
+        $i = 0;
+        while ($i < count($args)) {
+            $arg = $args[$i];
+            if (!str_starts_with($arg, '-')) { $i++; continue; }
+            $eq = strpos($arg, '=');
+            if ($eq !== false) {
+                $result[substr($arg, 0, $eq)] = substr($arg, $eq + 1);
+                $i++;
+                continue;
+            }
+            if (isset($args[$i + 1]) && !str_starts_with($args[$i + 1], '-')) {
+                $result[$arg] = $args[$i + 1];
+                $i += 2;
+            } else {
+                $result[$arg] = 'true';
+                $i++;
+            }
+        }
+        return $result;
+    }
+
+    private static function coerceOverrideValue(string $raw, ?string $type): mixed
+    {
+        return match ($type) {
+            'number'        => is_numeric($raw) ? $raw + 0 : $raw,
+            'boolean'       => in_array($raw, ['true', '1', 'yes'], true),
+            'object', 'array' => json_decode($raw, true) ?? $raw,
+            default         => $raw,
+        };
+    }
+
+    /** @param array<string, string> $parsedArgs @param array<string, mixed> $env @return array{mixed, bool} */
+    private static function applyOverride(
+        OverrideSpec $spec,
+        mixed $cnosVal,
+        bool $cnosFound,
+        array $parsedArgs,
+        array $env
+    ): array {
+        $priority = $spec->priority ?: ['arg', 'env', 'cnos'];
+        foreach ($priority as $source) {
+            if ($source === 'arg') {
+                foreach ($spec->arg as $flag) {
+                    if (isset($parsedArgs[$flag])) {
+                        return [self::coerceOverrideValue($parsedArgs[$flag], $spec->type), true];
+                    }
+                }
+            } elseif ($source === 'env') {
+                foreach ($spec->env as $varName) {
+                    $v = $env[$varName] ?? (getenv($varName) ?: null);
+                    if ($v !== null && $v !== '') {
+                        return [self::coerceOverrideValue((string) $v, $spec->type), true];
+                    }
+                }
+            } elseif ($source === 'cnos') {
+                if ($cnosFound) return [$cnosVal, true];
+            }
+        }
+        return [$cnosVal, $cnosFound];
     }
 }

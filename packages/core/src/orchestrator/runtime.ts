@@ -12,6 +12,7 @@ import { createDefaultRuntimeProviders } from '../runtime/runtimeProviders.js';
 import { toServerProjection } from '../runtime/toServerProjection.js';
 import { toEnv } from '../runtime/toEnv.js';
 import { toPublicEnv } from '../runtime/toPublicEnv.js';
+import { buildOverrideMap, parseCliArgs, resolveOverride } from '../runtime/overrideResolver.js';
 import { toLogicalKey } from '../utils/path.js';
 import { isSecretReference } from '../utils/secretStore.js';
 
@@ -23,9 +24,12 @@ export function createRuntime(
   processEnv: Record<string, string | undefined> = process.env,
   cnosVersion = '0.0.0-dev',
   secretVaultProviders: SecretVaultProviderFactory[] = [],
+  cliArgs?: string[],
 ): CnosRuntime {
   const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
+  const overrideMap = buildOverrideMap(manifest.schema);
+  const argsMap = parseCliArgs(cliArgs ?? process.argv.slice(2));
   let activeSecretCache = secretCache;
 
   function resolveProjectedSourceKey(key: string): string {
@@ -88,7 +92,7 @@ export function createRuntime(
     activeSecretCache = refreshed;
   }
 
-  function readLogicalKey<T = unknown>(key: string): T | undefined {
+  function readLogicalKeyCore<T = unknown>(key: string): T | undefined {
     const resolved = derivedSupport.read(key, (ref) => {
       const entry = graph.entries.get(ref);
 
@@ -118,6 +122,17 @@ export function createRuntime(
     }
 
     return resolveSecretEntryValue(key, entry.value, activeSecretCache) as T | undefined;
+  }
+
+  function readLogicalKey<T = unknown>(key: string): T | undefined {
+    if (key.startsWith('value.') && overrideMap.size > 0) {
+      const strippedKey = key.slice('value.'.length);
+      const spec = overrideMap.get(strippedKey);
+      if (spec) {
+        return resolveOverride(spec, () => readLogicalKeyCore(key), argsMap, processEnv) as T | undefined;
+      }
+    }
+    return readLogicalKeyCore(key);
   }
 
   return {

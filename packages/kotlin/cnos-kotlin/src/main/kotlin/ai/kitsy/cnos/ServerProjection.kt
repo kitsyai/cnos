@@ -42,6 +42,14 @@ data class VaultDefinition(
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
+data class OverrideSpec(
+    @JsonProperty("env") val env: List<String> = emptyList(),
+    @JsonProperty("arg") val arg: List<String> = emptyList(),
+    @JsonProperty("priority") val priority: List<String> = emptyList(),
+    @JsonProperty("type") val type: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class ProjectionMeta(
     @JsonProperty("workspace") val workspace: String = "",
     @JsonProperty("profile") val profile: String = "",
@@ -63,6 +71,7 @@ data class ServerProjection(
     @JsonProperty("runtimeNamespaces") val runtimeNamespaces: List<String> = emptyList(),
     @JsonProperty("vaults") val vaults: Map<String, VaultDefinition> = emptyMap(),
     @JsonProperty("valueTypes") val valueTypes: Map<String, String> = emptyMap(),
+    @JsonProperty("overrides") val overrides: Map<String, OverrideSpec> = emptyMap(),
     @JsonProperty("meta") val meta: ProjectionMeta = ProjectionMeta()
 ) {
     companion object {

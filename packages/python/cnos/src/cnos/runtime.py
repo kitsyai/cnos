@@ -7,6 +7,7 @@ import re
 import sys
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+
 from cnos._internal.entry import RuntimeEntry, RuntimeProvenance
 from cnos.derive import (
     ParsedFormula,
@@ -31,7 +32,7 @@ from cnos.inspect import (
     new_implicit_workspace_state,
 )
 from cnos.jscompat import js_log_stringify_value, js_stringify_value, node_arch, node_platform
-from cnos.projection import ProjectionMeta, ServerProjection, parse_projection
+from cnos.projection import OverrideSpec, ProjectionMeta, ServerProjection, parse_projection
 from cnos.secrets import (
     decrypt_secret_payload_from_env,
     read_local_vault_secrets,
@@ -301,6 +302,7 @@ class CnosRuntime:
         logical_key_to_vault: Dict[str, str],
         vaults: Dict[str, VaultDefinition],
         secret_factories: Dict[str, SecretVaultProviderFactory],
+        parsed_args: Optional[Dict[str, str]] = None,
     ) -> None:
         self._projection = projection
         self._manifest = manifest
@@ -319,6 +321,7 @@ class CnosRuntime:
         self._logical_key_to_vault = logical_key_to_vault
         self._vaults = vaults
         self._secret_factories = secret_factories
+        self._parsed_args: Dict[str, str] = parsed_args if parsed_args is not None else {}
 
     # -----------------------------------------------------------------------
     # Public API
@@ -329,6 +332,12 @@ class CnosRuntime:
 
     def read(self, key: str) -> Tuple[Any, bool]:
         """Returns (value, found). Raises CnosError on error."""
+        if key.startswith("value.") and self._projection.overrides:
+            stripped_key = key[len("value."):]
+            spec = self._projection.overrides.get(stripped_key)
+            if spec is not None:
+                cnos_val, cnos_found = self._read_internal(key, set())
+                return _apply_override(spec, cnos_val, cnos_found, self._parsed_args, self._env)
         return self._read_internal(key, set())
 
     def require(self, key: str) -> Any:
@@ -692,6 +701,7 @@ class CnosRuntime:
             logical_key_to_vault=self._logical_key_to_vault,
             vaults=self._vaults,
             secret_factories=self._secret_factories,
+            parsed_args=self._parsed_args,
         )
         return copy
 
@@ -978,6 +988,72 @@ def _secret_vault_factory_map(
     return result
 
 
+_DEFAULT_OVERRIDE_PRIORITY = ["arg", "env", "cnos"]
+
+
+def _parse_cli_args(args: List[str]) -> Dict[str, str]:
+    """Parse argv-style list into a flag→value map."""
+    result: Dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if not arg.startswith("-"):
+            i += 1
+            continue
+        eq_idx = arg.find("=")
+        if eq_idx != -1:
+            result[arg[:eq_idx]] = arg[eq_idx + 1:]
+            i += 1
+            continue
+        if i + 1 < len(args) and not args[i + 1].startswith("-"):
+            result[arg] = args[i + 1]
+            i += 2
+        else:
+            result[arg] = "true"
+            i += 1
+    return result
+
+
+def _coerce_override_value(raw: str, typ: Optional[str]) -> Any:
+    if typ == "number":
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
+    if typ == "boolean":
+        return raw in ("true", "1", "yes")
+    if typ in ("object", "array"):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw
+    return raw
+
+
+def _apply_override(
+    spec: "OverrideSpec",
+    cnos_val: Any,
+    cnos_found: bool,
+    parsed_args: Dict[str, str],
+    env: "Environment",
+) -> Tuple[Any, bool]:
+    priority = spec.priority if spec.priority else _DEFAULT_OVERRIDE_PRIORITY
+    for source in priority:
+        if source == "arg":
+            for flag in spec.arg:
+                if flag in parsed_args:
+                    return _coerce_override_value(parsed_args[flag], spec.type), True
+        elif source == "env":
+            for var_name in spec.env:
+                val, found = env.get(var_name)
+                if found and val:
+                    return _coerce_override_value(val, spec.type), True
+        elif source == "cnos":
+            if cnos_found:
+                return cnos_val, True
+    return cnos_val, cnos_found
+
+
 # ---------------------------------------------------------------------------
 # Factory functions
 # ---------------------------------------------------------------------------
@@ -1010,6 +1086,7 @@ def new_runtime(
         logical_key_to_vault={},
         vaults=dict(manifest["vaults"]),
         secret_factories=_secret_vault_factory_map(factories),
+        parsed_args=_parse_cli_args(sys.argv[1:]),
     )
     runtime._populate_entries()
     runtime._initialize_runtime_providers(projection.runtime_namespaces)

@@ -44,6 +44,7 @@ namespace Kitsy.Cnos
         private readonly Dictionary<string, string> _logicalKeyToVault;
         private readonly Dictionary<string, VaultDefinition> _vaults;
         private readonly Dictionary<string, SecretVaultProviderFactory> _secretFactories;
+        private readonly Dictionary<string, string> _parsedArgs;
 
         private CnosRuntime(
             ServerProjection? projection,
@@ -58,7 +59,8 @@ namespace Kitsy.Cnos
             Dictionary<string, Func<string, object?>> runtimeProviders,
             Dictionary<string, object?>? encryptedSecrets,
             Dictionary<string, VaultDefinition> vaults,
-            Dictionary<string, SecretVaultProviderFactory> secretFactories)
+            Dictionary<string, SecretVaultProviderFactory> secretFactories,
+            Dictionary<string, string>? parsedArgs = null)
         {
             _projection = projection;
             _manifest = manifest;
@@ -76,6 +78,7 @@ namespace Kitsy.Cnos
             _logicalKeyToVault = new Dictionary<string, string>(StringComparer.Ordinal);
             _vaults = vaults;
             _secretFactories = secretFactories;
+            _parsedArgs = parsedArgs ?? new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
         // ============================================================
@@ -143,6 +146,17 @@ namespace Kitsy.Cnos
         /// <summary>Reads any config key by its logical form (e.g. <c>value.server.port</c>).</summary>
         public (object? Value, bool Found) Read(string key)
         {
+            if (key.StartsWith("value.", StringComparison.Ordinal)
+                && _projection?.Overrides != null
+                && _projection.Overrides.Count > 0)
+            {
+                var stripped = key.Substring("value.".Length);
+                if (_projection.Overrides.TryGetValue(stripped, out var spec))
+                {
+                    var (cnosVal, cnosFound) = ReadInternal(key, new HashSet<string>(StringComparer.Ordinal));
+                    return ApplyOverride(spec, cnosVal, cnosFound, _parsedArgs, _env);
+                }
+            }
             return ReadInternal(key, new HashSet<string>(StringComparer.Ordinal));
         }
 
@@ -672,7 +686,8 @@ namespace Kitsy.Cnos
                 new Dictionary<string, Func<string, object?>>(StringComparer.Ordinal),
                 encryptedSecrets,
                 projection.Vaults ?? new Dictionary<string, VaultDefinition>(),
-                BuildFactoryMap(factories));
+                BuildFactoryMap(factories),
+                ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray()));
 
             rt.PopulateEntries();
             rt.InitializeRuntimeProviders(projection.RuntimeNamespaces ?? new List<string>());
@@ -707,7 +722,8 @@ namespace Kitsy.Cnos
                 new Dictionary<string, Func<string, object?>>(StringComparer.Ordinal),
                 encryptedSecrets,
                 new Dictionary<string, VaultDefinition>(),
-                BuildFactoryMap(factories));
+                BuildFactoryMap(factories),
+                ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray()));
 
             foreach (var resolved in graph.Entries)
             {
@@ -1261,6 +1277,72 @@ namespace Kitsy.Cnos
             foreach (string? v in values)
                 if (!string.IsNullOrWhiteSpace(v)) return v!.Trim();
             return "";
+        }
+
+        private static Dictionary<string, string> ParseCliArgs(string[] args)
+        {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            int i = 0;
+            while (i < args.Length)
+            {
+                var arg = args[i];
+                if (!arg.StartsWith("-", StringComparison.Ordinal)) { i++; continue; }
+                var eq = arg.IndexOf('=');
+                if (eq >= 0) { result[arg.Substring(0, eq)] = arg.Substring(eq + 1); i++; continue; }
+                if (i + 1 < args.Length && !args[i + 1].StartsWith("-", StringComparison.Ordinal))
+                { result[arg] = args[i + 1]; i += 2; }
+                else { result[arg] = "true"; i++; }
+            }
+            return result;
+        }
+
+        private static object? CoerceOverrideValue(string raw, string? type)
+        {
+            return type switch
+            {
+                "number" => double.TryParse(raw, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var d) ? (object?)d : raw,
+                "boolean" => raw == "true" || raw == "1" || raw == "yes",
+                "object" or "array" => System.Text.Json.JsonSerializer.Deserialize<object>(raw),
+                _ => raw,
+            };
+        }
+
+        private static readonly string[] _defaultPriority = { "arg", "env", "cnos" };
+
+        private static (object? Value, bool Found) ApplyOverride(
+            OverrideSpec spec,
+            object? cnosVal,
+            bool cnosFound,
+            Dictionary<string, string> parsedArgs,
+            CnosEnvironment env)
+        {
+            var priority = (spec.Priority != null && spec.Priority.Count > 0)
+                ? (IEnumerable<string>)spec.Priority
+                : _defaultPriority;
+            foreach (var source in priority)
+            {
+                if (source == "arg")
+                {
+                    foreach (var flag in spec.Arg ?? new List<string>())
+                        if (parsedArgs.TryGetValue(flag, out var v))
+                            return (CoerceOverrideValue(v, spec.Type), true);
+                }
+                else if (source == "env")
+                {
+                    foreach (var varName in spec.Env ?? new List<string>())
+                    {
+                        var v = env.Get(varName);
+                        if (!string.IsNullOrEmpty(v))
+                            return (CoerceOverrideValue(v, spec.Type), true);
+                    }
+                }
+                else if (source == "cnos")
+                {
+                    if (cnosFound) return (cnosVal, true);
+                }
+            }
+            return (cnosVal, cnosFound);
         }
 
         // ============================================================

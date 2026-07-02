@@ -127,6 +127,7 @@ pub struct CnosRuntime {
     local_vault_cache: Mutex<HashMap<String, HashMap<String, String>>>,
     logical_key_to_vault: HashMap<String, String>,
     secret_factories: Mutex<HashMap<String, SecretVaultProviderFactory>>,
+    parsed_args: HashMap<String, String>,
 }
 
 unsafe impl Send for CnosRuntime {}
@@ -211,6 +212,7 @@ impl CnosRuntime {
             logical_key_to_vault: HashMap::new(),
             secret_factories: Mutex::new(factory_map),
             projection,
+            parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
         };
 
         rt.populate_entries()?;
@@ -252,6 +254,7 @@ impl CnosRuntime {
             public_keys: vec![],
             runtime_namespaces: vec![],
             value_types: HashMap::new(),
+            overrides: HashMap::new(),
             meta: crate::projection::ProjectionMeta {
                 workspace: workspace_id.clone(),
                 profile: graph.profile.clone(),
@@ -279,6 +282,7 @@ impl CnosRuntime {
             logical_key_to_vault: HashMap::new(),
             secret_factories: Mutex::new(factory_map),
             projection: dummy_proj,
+            parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
         };
 
         for resolved in graph.entries {
@@ -506,6 +510,13 @@ impl CnosRuntime {
     // ---- read API ----
 
     pub fn read(&self, key: &str) -> Result<Option<Value>, CnosError> {
+        if key.starts_with("value.") && !self.projection.overrides.is_empty() {
+            let stripped = &key["value.".len()..];
+            if let Some(spec) = self.projection.overrides.get(stripped) {
+                let cnos_val = self.read_internal(key, &HashSet::new())?;
+                return Ok(apply_override(spec, cnos_val, &self.parsed_args, &self.env));
+            }
+        }
         self.read_internal(key, &HashSet::new())
     }
 
@@ -1161,4 +1172,68 @@ fn visit_derived(
     visiting.remove(key);
     resolved.insert(key.to_string());
     Ok(())
+}
+
+fn parse_cli_args(args: Vec<String>) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if !arg.starts_with('-') { i += 1; continue; }
+        if let Some(eq) = arg.find('=') {
+            result.insert(arg[..eq].to_string(), arg[eq + 1..].to_string());
+            i += 1;
+            continue;
+        }
+        if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+            result.insert(arg.clone(), args[i + 1].clone());
+            i += 2;
+        } else {
+            result.insert(arg.clone(), "true".to_string());
+            i += 1;
+        }
+    }
+    result
+}
+
+fn coerce_override_value(raw: &str, typ: &str) -> Value {
+    match typ {
+        "number" => raw.parse::<f64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.to_string())),
+        "boolean" => Value::Bool(raw == "true" || raw == "1" || raw == "yes"),
+        "object" | "array" => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string())),
+        _ => Value::String(raw.to_string()),
+    }
+}
+
+fn apply_override(
+    spec: &crate::projection::OverrideSpec,
+    cnos_val: Option<Value>,
+    parsed_args: &HashMap<String, String>,
+    env: &CnosEnvironment,
+) -> Option<Value> {
+    let default_priority = vec!["arg".to_string(), "env".to_string(), "cnos".to_string()];
+    let priority = if spec.priority.is_empty() { &default_priority } else { &spec.priority };
+    for source in priority {
+        match source.as_str() {
+            "arg" => {
+                for flag in &spec.arg {
+                    if let Some(val) = parsed_args.get(flag.as_str()) {
+                        return Some(coerce_override_value(val, &spec.value_type));
+                    }
+                }
+            }
+            "env" => {
+                for var_name in &spec.env {
+                    if let Some(val) = env.get(var_name).filter(|v| !v.is_empty()) {
+                        return Some(coerce_override_value(&val, &spec.value_type));
+                    }
+                }
+            }
+            "cnos" => {
+                if cnos_val.is_some() { return cnos_val.clone(); }
+            }
+            _ => {}
+        }
+    }
+    cnos_val
 }

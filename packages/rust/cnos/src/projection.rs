@@ -3,6 +3,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use crate::error::CnosError;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OverrideSpec {
+    #[serde(default)]
+    pub env: Vec<String>,
+    #[serde(default)]
+    pub arg: Vec<String>,
+    #[serde(default)]
+    pub priority: Vec<String>,
+    #[serde(rename = "type", default)]
+    pub value_type: String,
+}
+
 pub const PROJECTION_ENV_VAR: &str = "__CNOS_PROJECTION__";
 pub const SECRET_PAYLOAD_ENV_VAR: &str = "__CNOS_SECRET_PAYLOAD__";
 pub const SESSION_KEY_ENV_VAR: &str = "__CNOS_SESSION_KEY__";
@@ -88,6 +100,8 @@ pub struct ServerProjection {
     pub runtime_namespaces: Vec<String>,
     #[serde(rename = "valueTypes", default)]
     pub value_types: HashMap<String, String>,
+    #[serde(default)]
+    pub overrides: HashMap<String, OverrideSpec>,
     pub meta: ProjectionMeta,
 }
 

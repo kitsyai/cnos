@@ -3,8 +3,11 @@ import { createHash } from 'node:crypto';
 import type { ResolvedGraph, ServerProjection } from '../types/core.js';
 import type { NormalizedManifest, VaultDefinition } from '../types/manifest.js';
 import type { ProjectedVaultDefinition } from '../secrets/types.js';
+import type { OverrideSpec, OverridePrioritySource } from '../types/spec.js';
 import { assertSecretRefVaultProviderCompatible } from '../secrets/providerCompatibility.js';
 import { isSecretReference } from '../utils/secretStore.js';
+
+const DEFAULT_OVERRIDE_PRIORITY: OverridePrioritySource[] = ['arg', 'env', 'cnos'];
 
 function stableSortObject(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
@@ -176,6 +179,7 @@ export function toServerProjection(
   const derived: ServerProjection['derived'] = {};
   const secretRefs: ServerProjection['secretRefs'] = {};
   const valueTypes: Record<string, string> = {};
+  const overrides: Record<string, OverrideSpec> = {};
   const referencedVaultIds = new Set<string>();
   const namespaces = new Set<string>();
   const runtimeNamespaces = new Set<string>();
@@ -224,9 +228,19 @@ export function toServerProjection(
       const value = helpers.read ? helpers.read(key) : entry.value;
       const strippedKey = stripValuePrefix(key);
       values[strippedKey] = value;
-      const schemaFormat = manifest.schema[key]?.format ?? manifest.schema[strippedKey]?.format;
-      if (schemaFormat) {
-        valueTypes[strippedKey] = schemaFormat;
+      const schemaRule = manifest.schema[key] ?? manifest.schema[strippedKey];
+      if (schemaRule?.format) {
+        valueTypes[strippedKey] = schemaRule.format;
+      }
+      const envAliases = schemaRule?.env ? (Array.isArray(schemaRule.env) ? schemaRule.env : [schemaRule.env]) : [];
+      const argAliases = schemaRule?.arg ? (Array.isArray(schemaRule.arg) ? schemaRule.arg : [schemaRule.arg]) : [];
+      if (envAliases.length > 0 || argAliases.length > 0) {
+        overrides[strippedKey] = {
+          env: envAliases,
+          arg: argAliases,
+          priority: schemaRule?.priority ?? DEFAULT_OVERRIDE_PRIORITY,
+          ...(schemaRule?.type ? { type: schemaRule.type } : {}),
+        };
       }
       continue;
     }
@@ -275,6 +289,7 @@ export function toServerProjection(
     publicKeys,
     runtimeNamespaces: Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right)),
     ...(Object.keys(valueTypes).length > 0 ? { valueTypes: stableSortObject(valueTypes) as Record<string, string> } : {}),
+    ...(Object.keys(overrides).length > 0 ? { overrides: stableSortObject(overrides) as Record<string, OverrideSpec> } : {}),
     meta: {
       workspace: graph.workspace.workspaceId,
       profile: graph.profile,

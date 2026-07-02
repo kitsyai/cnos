@@ -1,7 +1,9 @@
 import { CnosManifestError } from '../errors.js';
-import type { ConfigSpecRule, ConfigSpecValueType } from '../types/spec.js';
+import type { ConfigSpecFormat, ConfigSpecRule, ConfigSpecValueType, OverridePrioritySource } from '../types/spec.js';
 
 const ALLOWED_TYPES = new Set<ConfigSpecValueType>(['string', 'number', 'boolean', 'object', 'array']);
+const ALLOWED_FORMATS = new Set<ConfigSpecFormat>(['richtext', 'pem']);
+const ALLOWED_PRIORITY_SOURCES = new Set<OverridePrioritySource>(['arg', 'env', 'cnos']);
 const SECRET_FORBIDDEN_FIELDS = ['default', 'examples', 'enum'] as const;
 
 function hasOwn(target: object, key: string): boolean {
@@ -183,6 +185,57 @@ export function normalizeSpecRule(
   );
   if (normalizedDeprecationMessage !== undefined) {
     normalized.deprecationMessage = normalizedDeprecationMessage;
+  }
+
+  if (candidate.format !== undefined) {
+    if (typeof candidate.format !== 'string' || !ALLOWED_FORMATS.has(candidate.format as ConfigSpecFormat)) {
+      throw new CnosManifestError(`Invalid schema rule for ${logicalKey}: unsupported format "${String(candidate.format)}".`);
+    }
+    normalized.format = candidate.format as ConfigSpecFormat;
+  }
+
+  // env: string | string[] → normalized as string[]
+  if (candidate.env !== undefined) {
+    if (typeof candidate.env === 'string') {
+      const trimmed = candidate.env.trim();
+      if (trimmed) normalized.env = [trimmed];
+    } else if (Array.isArray(candidate.env)) {
+      const envVars = candidate.env
+        .filter((e): e is string => typeof e === 'string')
+        .map((e) => e.trim())
+        .filter(Boolean);
+      if (envVars.length > 0) normalized.env = envVars;
+    } else {
+      throw new CnosManifestError(`Invalid schema rule for ${logicalKey}: "env" must be a string or string array.`);
+    }
+  }
+
+  // arg: string | string[] → normalized as string[]
+  if (candidate.arg !== undefined) {
+    if (typeof candidate.arg === 'string') {
+      const trimmed = candidate.arg.trim();
+      if (trimmed) normalized.arg = [trimmed];
+    } else if (Array.isArray(candidate.arg)) {
+      const args = candidate.arg
+        .filter((a): a is string => typeof a === 'string')
+        .map((a) => a.trim())
+        .filter(Boolean);
+      if (args.length > 0) normalized.arg = args;
+    } else {
+      throw new CnosManifestError(`Invalid schema rule for ${logicalKey}: "arg" must be a string or string array.`);
+    }
+  }
+
+  if (candidate.priority !== undefined) {
+    if (!Array.isArray(candidate.priority)) {
+      throw new CnosManifestError(`Invalid schema rule for ${logicalKey}: "priority" must be an array.`);
+    }
+    const sources = candidate.priority as unknown[];
+    const invalid = sources.find((s) => typeof s !== 'string' || !ALLOWED_PRIORITY_SOURCES.has(s as OverridePrioritySource));
+    if (invalid !== undefined) {
+      throw new CnosManifestError(`Invalid schema rule for ${logicalKey}: "priority" entries must be "arg", "env", or "cnos".`);
+    }
+    normalized.priority = sources as OverridePrioritySource[];
   }
 
   return normalized;

@@ -44,6 +44,9 @@ namespace Kitsy.Cnos
         [JsonPropertyName("valueTypes")]
         public Dictionary<string, string>? ValueTypes { get; set; }
 
+        [JsonPropertyName("overrides")]
+        public Dictionary<string, OverrideSpec>? Overrides { get; set; }
+
         [JsonPropertyName("meta")]
         public ProjectionMeta Meta { get; set; } = new();
 
@@ -105,6 +108,22 @@ namespace Kitsy.Cnos
 
             return p;
         }
+    }
+
+    /// <summary>Schema-level env/arg override configuration for a single config key.</summary>
+    public sealed class OverrideSpec
+    {
+        [JsonPropertyName("env")]
+        public List<string> Env { get; set; } = new();
+
+        [JsonPropertyName("arg")]
+        public List<string> Arg { get; set; } = new();
+
+        [JsonPropertyName("priority")]
+        public List<string> Priority { get; set; } = new();
+
+        [JsonPropertyName("type")]
+        public string? Type { get; set; }
     }
 
     public sealed class ProjectionMeta

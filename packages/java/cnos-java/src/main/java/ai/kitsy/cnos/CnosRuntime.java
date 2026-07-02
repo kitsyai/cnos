@@ -48,6 +48,7 @@ public final class CnosRuntime {
     private final Map<String, String> logicalKeyToVault;
     private final Map<String, VaultDefinition> vaults;
     private final Map<String, SecretVaultProviderFactory> secretFactories;
+    private final Map<String, String> parsedArgs;
 
     // --- Constructor ---
     private CnosRuntime(Builder b) {
@@ -68,6 +69,7 @@ public final class CnosRuntime {
         this.logicalKeyToVault = b.logicalKeyToVault;
         this.vaults = b.vaults;
         this.secretFactories = b.secretFactories;
+        this.parsedArgs = b.parsedArgs != null ? b.parsedArgs : Collections.emptyMap();
     }
 
     // ================================================================
@@ -155,6 +157,17 @@ public final class CnosRuntime {
      * @throws CnosError on derived formula or secret hydration failure
      */
     public Optional<Object> read(String key) throws CnosError {
+        if (key.startsWith("value.") && projection != null
+                && !projection.getOverrides().isEmpty()) {
+            String stripped = key.substring("value.".length());
+            ServerProjection.OverrideSpec spec = projection.getOverrides().get(stripped);
+            if (spec != null) {
+                Object[] cnos = readInternal(key, new HashSet<>());
+                Object cnosVal = cnos[0];
+                boolean cnosFound = (Boolean) cnos[1];
+                return applyOverride(spec, cnosVal, cnosFound, parsedArgs, env);
+            }
+        }
         Object[] result = readInternal(key, new HashSet<>());
         boolean found = (Boolean) result[1];
         return found ? Optional.ofNullable(result[0]) : Optional.empty();
@@ -834,7 +847,8 @@ public final class CnosRuntime {
                 .env(env)
                 .secretHome(secretHome)
                 .encryptedSecrets(encryptedSecrets)
-                .factories(factories);
+                .factories(factories)
+                .parsedArgs(parseCliArgs(getProcessArgs()));
 
         CnosRuntime runtime = b.build();
         runtime.populateEntries();
@@ -863,7 +877,8 @@ public final class CnosRuntime {
                 .env(env)
                 .secretHome(secretHome)
                 .encryptedSecrets(encryptedSecrets)
-                .factories(factories);
+                .factories(factories)
+                .parsedArgs(parseCliArgs(getProcessArgs()));
 
         CnosRuntime runtime = b.build();
 
@@ -1357,6 +1372,89 @@ public final class CnosRuntime {
     }
 
     // ================================================================
+    // Override resolution helpers
+    // ================================================================
+
+    private static final List<String> DEFAULT_PRIORITY = java.util.Arrays.asList("arg", "env", "cnos");
+
+    private static String[] getProcessArgs() {
+        // Sun/HotSpot: sun.java.command holds class + args; use ManagementFactory for the actual app args
+        // The safest portable approach is the RuntimeMXBean input args (JVM flags), but those are JVM args.
+        // For application args we rely on a system property set by the caller, or return empty.
+        String argsProp = System.getProperty("sun.java.command");
+        if (argsProp == null || argsProp.isEmpty()) return new String[0];
+        // sun.java.command is "mainClass arg1 arg2 ..." — strip the class name
+        String[] parts = argsProp.split("\\s+", -1);
+        if (parts.length <= 1) return new String[0];
+        String[] result = new String[parts.length - 1];
+        System.arraycopy(parts, 1, result, 0, result.length);
+        return result;
+    }
+
+    private static Map<String, String> parseCliArgs(String[] args) {
+        Map<String, String> result = new HashMap<>();
+        int i = 0;
+        while (i < args.length) {
+            String arg = args[i];
+            if (!arg.startsWith("-")) { i++; continue; }
+            int eq = arg.indexOf('=');
+            if (eq >= 0) {
+                result.put(arg.substring(0, eq), arg.substring(eq + 1));
+                i++;
+                continue;
+            }
+            if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
+                result.put(arg, args[i + 1]);
+                i += 2;
+            } else {
+                result.put(arg, "true");
+                i++;
+            }
+        }
+        return result;
+    }
+
+    private static Object coerceOverrideValue(String raw, String type) {
+        if ("number".equals(type)) {
+            try { return Double.parseDouble(raw); } catch (NumberFormatException e) { return raw; }
+        }
+        if ("boolean".equals(type)) {
+            return "true".equals(raw) || "1".equals(raw) || "yes".equals(raw);
+        }
+        if ("object".equals(type) || "array".equals(type)) {
+            try {
+                return new ObjectMapper().readValue(raw, Object.class);
+            } catch (Exception e) { return raw; }
+        }
+        return raw;
+    }
+
+    private static Optional<Object> applyOverride(
+            ServerProjection.OverrideSpec spec,
+            Object cnosVal, boolean cnosFound,
+            Map<String, String> parsedArgs,
+            Environment env) {
+        List<String> priority = spec.getPriority() != null && !spec.getPriority().isEmpty()
+                ? spec.getPriority() : DEFAULT_PRIORITY;
+        for (String source : priority) {
+            if ("arg".equals(source)) {
+                for (String flag : spec.getArg()) {
+                    String v = parsedArgs.get(flag);
+                    if (v != null) return Optional.ofNullable(coerceOverrideValue(v, spec.getType()));
+                }
+            } else if ("env".equals(source)) {
+                for (String varName : spec.getEnv()) {
+                    Optional<String> v = env.get(varName);
+                    if (v.isPresent() && !v.get().isEmpty()) return Optional.ofNullable(coerceOverrideValue(v.get(), spec.getType()));
+                }
+            } else if ("cnos".equals(source)) {
+                if (cnosFound) return Optional.ofNullable(cnosVal);
+            }
+        }
+        return cnosFound ? Optional.ofNullable(cnosVal) : Optional.empty();
+    }
+
+    // ================================================================
     // Inner state types
     // ================================================================
 
@@ -1394,6 +1492,7 @@ public final class CnosRuntime {
         Map<String, String> logicalKeyToVault = new HashMap<>();
         Map<String, VaultDefinition> vaults;
         Map<String, SecretVaultProviderFactory> secretFactories = new HashMap<>();
+        Map<String, String> parsedArgs;
 
         Builder projection(ServerProjection p) { this.projection = p; return this; }
         Builder manifest(BootstrappedManifest m) { this.manifest = m; return this; }
@@ -1403,6 +1502,7 @@ public final class CnosRuntime {
         Builder env(Environment e) { this.env = e; return this; }
         Builder secretHome(String h) { this.secretHome = h; return this; }
         Builder encryptedSecrets(Map<String, Object> s) { this.encryptedSecrets = s; return this; }
+        Builder parsedArgs(Map<String, String> a) { this.parsedArgs = a; return this; }
         Builder factories(List<SecretVaultProviderFactory> f) {
             if (f != null) {
                 for (SecretVaultProviderFactory factory : f) {

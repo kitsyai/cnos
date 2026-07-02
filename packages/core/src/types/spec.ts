@@ -2,9 +2,24 @@ export type ConfigSpecValueType = 'string' | 'number' | 'boolean' | 'object' | '
 
 export type ConfigSpecFormat = 'richtext' | 'pem';
 
+export type OverridePrioritySource = 'arg' | 'env' | 'cnos';
+
+export interface OverrideSpec {
+  env: string[];
+  arg: string[];
+  priority: OverridePrioritySource[];
+  type?: ConfigSpecValueType;
+}
+
 export interface ConfigSpecRule {
   type?: ConfigSpecValueType;
   format?: ConfigSpecFormat;
+  /** Environment variable name(s) whose value overrides this key at runtime. */
+  env?: string | string[];
+  /** CLI flag name(s) (e.g. --port, -p) whose value overrides this key at runtime. */
+  arg?: string | string[];
+  /** Resolution priority order. Defaults to ["arg", "env", "cnos"]. */
+  priority?: OverridePrioritySource[];
   required?: boolean;
   enum?: unknown[];
   pattern?: string;

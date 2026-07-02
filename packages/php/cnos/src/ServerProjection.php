@@ -7,13 +7,14 @@ namespace Kitsy\Cnos;
 class ServerProjection
 {
     /**
-     * @param array<string, mixed>         $values
-     * @param array<string, DerivedFormula> $derived
-     * @param array<string, SecretReference> $secretRefs
-     * @param array<string, VaultDefinition> $vaults
-     * @param string[]                      $publicKeys
-     * @param string[]                      $runtimeNamespaces
-     * @param array<string, string>         $valueTypes
+     * @param array<string, mixed>            $values
+     * @param array<string, DerivedFormula>   $derived
+     * @param array<string, SecretReference>  $secretRefs
+     * @param array<string, VaultDefinition>  $vaults
+     * @param string[]                        $publicKeys
+     * @param string[]                        $runtimeNamespaces
+     * @param array<string, string>           $valueTypes
+     * @param array<string, OverrideSpec>     $overrides
      */
     public function __construct(
         public readonly int            $version,
@@ -29,6 +30,7 @@ class ServerProjection
         public readonly array          $runtimeNamespaces,
         public readonly ProjectionMeta $meta,
         public readonly array          $valueTypes = [],
+        public readonly array          $overrides = [],
     ) {}
 
     public static function parse(string $json): self
@@ -86,6 +88,11 @@ class ServerProjection
             $secretRefs[(string) $k] = $ref;
         }
 
+        $overrides = [];
+        foreach ((array) ($raw['overrides'] ?? []) as $k => $v) {
+            $overrides[(string) $k] = OverrideSpec::fromArray((array) $v);
+        }
+
         return new self(
             version:           $version,
             workspace:         $workspace,
@@ -100,6 +107,7 @@ class ServerProjection
             runtimeNamespaces: array_values((array) ($raw['runtimeNamespaces'] ?? [])),
             meta:              ProjectionMeta::fromArray($metaRaw),
             valueTypes:        (array) ($raw['valueTypes'] ?? []),
+            overrides:         $overrides,
         );
     }
 }

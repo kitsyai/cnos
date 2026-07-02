@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -46,6 +47,7 @@ type Runtime struct {
 	logicalKeyToVault map[string]string
 	vaults            map[string]vaultDefinition
 	secretFactories   map[string]SecretVaultProviderFactory
+	parsedArgs        map[string]string
 }
 
 type runtimeProvenance struct {
@@ -130,6 +132,17 @@ func (runtime *Runtime) Projection() ServerProjection {
 }
 
 func (runtime *Runtime) Read(key string) (any, bool, error) {
+	if strings.HasPrefix(key, "value.") && len(runtime.projection.Overrides) > 0 {
+		strippedKey := strings.TrimPrefix(key, "value.")
+		if spec, ok := runtime.projection.Overrides[strippedKey]; ok {
+			cnosVal, cnosFound, err := runtime.readInternal(key, map[string]bool{})
+			if err != nil {
+				return nil, false, err
+			}
+			result, resultFound := applyOverride(spec, cnosVal, cnosFound, runtime.parsedArgs, runtime.env)
+			return result, resultFound, nil
+		}
+	}
 	return runtime.readInternal(key, map[string]bool{})
 }
 
@@ -298,6 +311,7 @@ func newRuntime(source []byte, env environment, secretHome string, factories []S
 		logicalKeyToVault: map[string]string{},
 		vaults:            manifest.Vaults,
 		secretFactories:   secretVaultFactoryMap(factories),
+		parsedArgs:        parseCliArgs(os.Args[1:]),
 	}
 
 	if err := runtime.populateEntries(); err != nil {
@@ -339,6 +353,7 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string, fact
 		logicalKeyToVault: map[string]string{},
 		vaults:            manifest.Vaults,
 		secretFactories:   secretVaultFactoryMap(factories),
+		parsedArgs:        parseCliArgs(os.Args[1:]),
 	}
 
 	for _, resolved := range graph.Entries {
@@ -900,6 +915,80 @@ func cloneLocalVaultCache(source map[string]map[string]string) map[string]map[st
 		result[vault] = secretsCopy
 	}
 	return result
+}
+
+// parseCliArgs parses os.Args-style slice into a flag→value map.
+// --flag=value, --flag value, -f value, -f=value are all supported.
+// Boolean-style flags (no following value) get the value "true".
+func parseCliArgs(args []string) map[string]string {
+	result := make(map[string]string)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if eqIdx := strings.Index(arg, "="); eqIdx != -1 {
+			result[arg[:eqIdx]] = arg[eqIdx+1:]
+			continue
+		}
+		if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			result[arg] = args[i+1]
+			i++
+		} else {
+			result[arg] = "true"
+		}
+	}
+	return result
+}
+
+func coerceOverrideValue(raw string, typ string) any {
+	switch typ {
+	case "number":
+		if n, err := strconv.ParseFloat(raw, 64); err == nil {
+			return n
+		}
+		return raw
+	case "boolean":
+		return raw == "true" || raw == "1" || raw == "yes"
+	case "object", "array":
+		var v any
+		if err := json.Unmarshal([]byte(raw), &v); err == nil {
+			return v
+		}
+		return raw
+	default:
+		return raw
+	}
+}
+
+var defaultOverridePriority = []string{"arg", "env", "cnos"}
+
+func applyOverride(spec OverrideSpec, cnosVal any, cnosFound bool, parsedArgs map[string]string, env environment) (any, bool) {
+	priority := spec.Priority
+	if len(priority) == 0 {
+		priority = defaultOverridePriority
+	}
+	for _, source := range priority {
+		switch source {
+		case "arg":
+			for _, flag := range spec.Arg {
+				if val, ok := parsedArgs[flag]; ok {
+					return coerceOverrideValue(val, spec.Type), true
+				}
+			}
+		case "env":
+			for _, varName := range spec.Env {
+				if val, ok := env.Get(varName); ok && val != "" {
+					return coerceOverrideValue(val, spec.Type), true
+				}
+			}
+		case "cnos":
+			if cnosFound {
+				return cnosVal, true
+			}
+		}
+	}
+	return cnosVal, cnosFound
 }
 
 func IsProjectionNotFound(err error) bool {

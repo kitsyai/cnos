@@ -30,6 +30,7 @@ export * from './runtime/runtimeProviders.js';
 export * from './runtime/toServerProjection.js';
 export * from './runtime/toEnv.js';
 export * from './runtime/toPublicEnv.js';
+export * from './runtime/overrideResolver.js';
 export * from './secrets/auditLog.js';
 export * from './secrets/batchResolve.js';
 export * from './secrets/providerCompatibility.js';
