@@ -251,6 +251,7 @@ impl CnosRuntime {
             vaults: HashMap::new(),
             public_keys: vec![],
             runtime_namespaces: vec![],
+            value_types: HashMap::new(),
             meta: crate::projection::ProjectionMeta {
                 workspace: workspace_id.clone(),
                 profile: graph.profile.clone(),
