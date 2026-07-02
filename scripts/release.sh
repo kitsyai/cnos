@@ -99,6 +99,18 @@ if [[ "$SKIP_TESTS" == false ]]; then
   info "Running pnpm test..."
   pnpm test
   info "Tests passed ✓"
+
+  info "Compiling Java (compile check)..."
+  mvn --quiet --batch-mode --no-transfer-progress clean compile \
+    -f packages/java/pom.xml \
+    -Drevision="${OLD_VERSION}"
+  info "Java compile ✓"
+
+  info "Compiling Kotlin (compile check)..."
+  mvn --quiet --batch-mode --no-transfer-progress clean compile \
+    -f packages/kotlin/pom.xml \
+    -Drevision="${OLD_VERSION}"
+  info "Kotlin compile ✓"
 else
   info "Skipped (--skip-tests)"
 fi
