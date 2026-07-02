@@ -149,6 +149,7 @@ public final class ServerProjection {
                 raw.vaults,
                 raw.publicKeys,
                 raw.runtimeNamespaces,
+                raw.valueTypes,
                 raw.meta);
     }
 
