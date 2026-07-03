@@ -2,6 +2,7 @@ package ai.kitsy.cnos.internal
 
 import ai.kitsy.cnos.CnosError
 import ai.kitsy.cnos.DerivedFormula
+import ai.kitsy.cnos.OverrideSpec
 import ai.kitsy.cnos.SecretReference
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -14,7 +15,8 @@ internal data class RuntimeGraph(
     @JsonProperty("profile") val profile: String = "",
     @JsonProperty("resolvedAt") val resolvedAt: String = "",
     @JsonProperty("profileSource") val profileSource: String = "",
-    @JsonProperty("workspace") val workspace: GraphWorkspace = GraphWorkspace()
+    @JsonProperty("workspace") val workspace: GraphWorkspace = GraphWorkspace(),
+    @JsonProperty("overrides") val overrides: Map<String, OverrideSpec> = emptyMap()
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

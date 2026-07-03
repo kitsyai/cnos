@@ -20,6 +20,9 @@ namespace Kitsy.Cnos.Internal
         [JsonPropertyName("entries")]
         public List<ResolvedEntry> Entries { get; set; } = new();
 
+        [JsonPropertyName("overrides")]
+        public Dictionary<string, OverrideSpec>? Overrides { get; set; }
+
         private static readonly JsonSerializerOptions _opts = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,

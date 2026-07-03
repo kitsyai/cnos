@@ -1149,6 +1149,7 @@ def new_runtime_from_graph(
             vaults={},
             public_keys=[],
             runtime_namespaces=[],
+            overrides=graph.overrides,
             meta=ProjectionMeta(
                 workspace=graph.workspace.workspace_id,
                 profile=graph.profile,

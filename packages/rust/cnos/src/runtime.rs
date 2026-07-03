@@ -259,7 +259,7 @@ impl CnosRuntime {
             public_keys: vec![],
             runtime_namespaces: vec![],
             value_types: HashMap::new(),
-            overrides: HashMap::new(),
+            overrides: graph.overrides.clone(),
             meta: crate::projection::ProjectionMeta {
                 workspace: workspace_id.clone(),
                 profile: graph.profile.clone(),

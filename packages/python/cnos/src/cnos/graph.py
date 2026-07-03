@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from cnos.errors import CnosError
+from cnos.projection import OverrideSpec
 from cnos.types import ConfigOrigin
 
 GRAPH_ENV_VAR = "__CNOS_GRAPH__"
@@ -100,6 +101,7 @@ class RuntimeGraph:
     resolved_at: str = ""
     profile_source: str = ""
     workspace: GraphWorkspace = field(default_factory=GraphWorkspace)
+    overrides: Dict[str, OverrideSpec] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "RuntimeGraph":
@@ -109,6 +111,7 @@ class RuntimeGraph:
             resolved_at=d.get("resolvedAt", ""),
             profile_source=d.get("profileSource", ""),
             workspace=GraphWorkspace.from_dict(d.get("workspace") or {}),
+            overrides={k: OverrideSpec.from_dict(v) for k, v in (d.get("overrides") or {}).items()},
         )
 
 

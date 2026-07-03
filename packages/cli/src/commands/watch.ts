@@ -2,10 +2,12 @@ import type { ChildProcess } from 'node:child_process';
 
 import {
   CNOS_GRAPH_ENV_VAR,
+  CNOS_PROJECTION_ENV_VAR,
   CNOS_SECRET_PAYLOAD_ENV_VAR,
   CNOS_SESSION_KEY_ENV_VAR,
   serializeRuntimeGraph,
   serializeSecretPayload,
+  serializeServerProjection,
 } from '@kitsy/cnos/internal';
 
 import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
@@ -49,6 +51,7 @@ async function buildRunEnvironment(
         )
       : undefined;
   const secretPayload = authenticatedSecrets ? serializeSecretPayload(authenticatedSecrets) : undefined;
+  const serverProjection = runtime.toServerProjection();
 
   return {
     runtime,
@@ -60,7 +63,8 @@ async function buildRunEnvironment(
             ...(prefix ? { prefix } : {}),
           })
         : runtime.toEnv({ includeSecrets: true })),
-      [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph),
+      [CNOS_PROJECTION_ENV_VAR]: serializeServerProjection(serverProjection),
+      [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph, serverProjection.overrides),
       ...(secretPayload
         ? {
             [CNOS_SECRET_PAYLOAD_ENV_VAR]: secretPayload.payload,

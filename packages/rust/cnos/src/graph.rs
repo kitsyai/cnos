@@ -4,6 +4,7 @@ use serde_json::Value;
 use crate::derive::{is_derived_value, parse_raw_derived_value};
 use crate::error::CnosError;
 use crate::manifest::{BootstrappedManifest, RuntimeNamespaceDef, default_frameworks, default_namespace_defs};
+use crate::projection::OverrideSpec;
 use crate::runtime::{RuntimeEntry, RuntimeProvenance};
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +16,8 @@ pub struct RuntimeGraph {
     #[serde(rename = "profileSource")]
     pub profile_source: String,
     pub workspace: GraphWorkspace,
+    #[serde(default)]
+    pub overrides: HashMap<String, OverrideSpec>,
 }
 
 #[derive(Debug, Deserialize)]

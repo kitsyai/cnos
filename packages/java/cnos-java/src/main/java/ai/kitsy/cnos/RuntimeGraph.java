@@ -33,18 +33,23 @@ public final class RuntimeGraph {
     @JsonProperty("workspace")
     private final Workspace workspace;
 
+    @JsonProperty("overrides")
+    private final Map<String, ServerProjection.OverrideSpec> overrides;
+
     @JsonCreator
     public RuntimeGraph(
             @JsonProperty("entries") List<ResolvedEntry> entries,
             @JsonProperty("profile") String profile,
             @JsonProperty("resolvedAt") String resolvedAt,
             @JsonProperty("profileSource") String profileSource,
-            @JsonProperty("workspace") Workspace workspace) {
+            @JsonProperty("workspace") Workspace workspace,
+            @JsonProperty("overrides") Map<String, ServerProjection.OverrideSpec> overrides) {
         this.entries = entries != null ? Collections.unmodifiableList(entries) : Collections.emptyList();
         this.profile = profile;
         this.resolvedAt = resolvedAt;
         this.profileSource = profileSource;
         this.workspace = workspace;
+        this.overrides = overrides != null ? Collections.unmodifiableMap(overrides) : Collections.emptyMap();
     }
 
     /**
@@ -98,6 +103,7 @@ public final class RuntimeGraph {
     public String getResolvedAt() { return resolvedAt; }
     public String getProfileSource() { return profileSource; }
     public Workspace getWorkspace() { return workspace; }
+    public Map<String, ServerProjection.OverrideSpec> getOverrides() { return overrides; }
 
     /**
      * A single resolved graph entry.

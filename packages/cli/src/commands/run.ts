@@ -88,6 +88,7 @@ export async function runCommand(
         )
       : undefined;
   const secretPayload = authenticatedSecrets ? serializeSecretPayload(authenticatedSecrets) : undefined;
+  const serverProjection = runtime.toServerProjection();
   const env = {
     ...process.env,
     ...(isPublic
@@ -96,8 +97,8 @@ export async function runCommand(
           ...(prefix ? { prefix } : {}),
         })
       : runtime.toEnv({ includeSecrets: true })),
-    [CNOS_PROJECTION_ENV_VAR]: serializeServerProjection(runtime.toServerProjection()),
-    [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph),
+    [CNOS_PROJECTION_ENV_VAR]: serializeServerProjection(serverProjection),
+    [CNOS_GRAPH_ENV_VAR]: serializeRuntimeGraph(runtime.graph, serverProjection.overrides),
     ...(secretPayload
       ? {
           [CNOS_SECRET_PAYLOAD_ENV_VAR]: secretPayload.payload,

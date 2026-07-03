@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-import type { ConfigEntry, ResolvedEntry, ResolvedGraph, ServerProjection } from '@kitsy/cnos-core';
+import type { ConfigEntry, OverrideSpec, ResolvedEntry, ResolvedGraph, ServerProjection } from '@kitsy/cnos-core';
 import { isSecretReference } from '@kitsy/cnos-core';
 
 export const CNOS_GRAPH_ENV_VAR = '__CNOS_GRAPH__';
@@ -21,6 +21,7 @@ interface SerializedRuntimeGraph {
   resolvedAt: string;
   profileSource: ResolvedGraph['profileSource'];
   workspace: ResolvedGraph['workspace'];
+  overrides?: Record<string, OverrideSpec>;
 }
 
 interface SerializedSecretPayload {
@@ -66,13 +67,17 @@ export function deserializeServerProjection(source: string): ServerProjection {
   } as ServerProjection;
 }
 
-export function serializeRuntimeGraph(graph: ResolvedGraph): string {
+export function serializeRuntimeGraph(
+  graph: ResolvedGraph,
+  overrides?: Record<string, OverrideSpec>,
+): string {
   const payload: SerializedRuntimeGraph = {
     entries: Array.from(graph.entries.values()),
     profile: graph.profile,
     resolvedAt: graph.resolvedAt,
     profileSource: graph.profileSource,
     workspace: graph.workspace,
+    ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
   };
 
   return JSON.stringify(payload);

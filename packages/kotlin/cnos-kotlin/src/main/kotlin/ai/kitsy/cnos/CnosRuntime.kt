@@ -24,6 +24,7 @@ class CnosRuntime private constructor(
     private val logicalKeyToVault = ConcurrentHashMap<String, String>()
     private val vaults: Map<String, VaultDefinition> = manifest.vaults
     private val secretFactories = ConcurrentHashMap<String, SecretVaultProviderFactory>()
+    internal var graphOverrides: Map<String, OverrideSpec> = emptyMap()
 
     fun getProjection(): ServerProjection? = projection
 
@@ -32,9 +33,10 @@ class CnosRuntime private constructor(
     // ================================================================
 
     fun read(key: String): Optional<Any> {
-        if (key.startsWith("value.") && projection != null && projection.overrides.isNotEmpty()) {
+        val effectiveOverrides = projection?.overrides?.takeIf { it.isNotEmpty() } ?: graphOverrides
+        if (key.startsWith("value.") && effectiveOverrides.isNotEmpty()) {
             val stripped = key.removePrefix("value.")
-            val spec = projection.overrides[stripped]
+            val spec = effectiveOverrides[stripped]
             if (spec != null) {
                 // File override participates as the "cnos" source.
                 val (cnosVal, cnosFound) = fileOrCnos(key)
@@ -542,6 +544,8 @@ class CnosRuntime private constructor(
                 if (vaultId != null) rt.logicalKeyToVault[resolved.key] = vaultId
                 rt.entries[resolved.key] = entry
             }
+
+            if (graph.overrides.isNotEmpty()) rt.graphOverrides = graph.overrides
 
             val runtimeNsList = manifest.namespaces.entries
                 .filter { it.value.runtime }

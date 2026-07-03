@@ -46,6 +46,7 @@ namespace Kitsy.Cnos
         private readonly Dictionary<string, SecretVaultProviderFactory> _secretFactories;
         private readonly Dictionary<string, string> _parsedArgs;
         private readonly Dictionary<string, object?> _fileOverrides;
+        private Dictionary<string, OverrideSpec> _graphOverrides = new(StringComparer.Ordinal);
 
         private CnosRuntime(
             ServerProjection? projection,
@@ -149,12 +150,13 @@ namespace Kitsy.Cnos
         /// <summary>Reads any config key by its logical form (e.g. <c>value.server.port</c>).</summary>
         public (object? Value, bool Found) Read(string key)
         {
-            if (key.StartsWith("value.", StringComparison.Ordinal)
-                && _projection?.Overrides != null
-                && _projection.Overrides.Count > 0)
+            var effectiveOverrides = (_projection?.Overrides is { Count: > 0 } projOverrides)
+                ? projOverrides
+                : _graphOverrides;
+            if (key.StartsWith("value.", StringComparison.Ordinal) && effectiveOverrides.Count > 0)
             {
                 var stripped = key.Substring("value.".Length);
-                if (_projection.Overrides.TryGetValue(stripped, out var spec))
+                if (effectiveOverrides.TryGetValue(stripped, out var spec))
                 {
                     // File override participates as the "cnos" source.
                     var (cnosVal, cnosFound) = FileOrCnos(key);
@@ -749,6 +751,9 @@ namespace Kitsy.Cnos
                 if (entry.SecretRef != null && !string.IsNullOrEmpty(entry.SecretRef.Vault))
                     rt._logicalKeyToVault[resolved.Key] = entry.SecretRef.Vault;
             }
+
+            if (graph.Overrides is { Count: > 0 } overrides)
+                rt._graphOverrides = overrides;
 
             rt.InitializeRuntimeProviders(SortedRuntimeNamespaces(graph));
             rt.PrepareDerivedEntries();

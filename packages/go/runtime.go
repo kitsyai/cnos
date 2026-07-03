@@ -383,6 +383,10 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string, fact
 		}
 	}
 
+	if len(graph.Overrides) > 0 {
+		runtime.projection.Overrides = graph.Overrides
+	}
+
 	runtime.initializeRuntimeProviders(sortedRuntimeNamespaces(runtime.manifest.RuntimeNamespaces))
 	if err := runtime.prepareDerivedEntries(); err != nil {
 		return nil, err

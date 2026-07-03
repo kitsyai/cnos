@@ -50,6 +50,7 @@ public final class CnosRuntime {
     private final Map<String, SecretVaultProviderFactory> secretFactories;
     private final Map<String, String> parsedArgs;
     private final Map<String, Object> fileOverrides;
+    private Map<String, ServerProjection.OverrideSpec> graphOverrides = Collections.emptyMap();
 
     // --- Constructor ---
     private CnosRuntime(Builder b) {
@@ -159,10 +160,11 @@ public final class CnosRuntime {
      * @throws CnosError on derived formula or secret hydration failure
      */
     public Optional<Object> read(String key) throws CnosError {
-        if (key.startsWith("value.") && projection != null
-                && !projection.getOverrides().isEmpty()) {
+        Map<String, ServerProjection.OverrideSpec> effectiveOverrides =
+                projection != null ? projection.getOverrides() : graphOverrides;
+        if (key.startsWith("value.") && !effectiveOverrides.isEmpty()) {
             String stripped = key.substring("value.".length());
-            ServerProjection.OverrideSpec spec = projection.getOverrides().get(stripped);
+            ServerProjection.OverrideSpec spec = effectiveOverrides.get(stripped);
             if (spec != null) {
                 // File override participates as the "cnos" source.
                 Object[] cnos = fileOrCnos(key);
@@ -910,6 +912,10 @@ public final class CnosRuntime {
                     runtime.logicalKeyToVault.put(resolved.getKey(), vault);
                 }
             }
+        }
+
+        if (!graph.getOverrides().isEmpty()) {
+            runtime.graphOverrides = graph.getOverrides();
         }
 
         List<String> runtimeNs = new ArrayList<>(manifest.getNamespaces().keySet());

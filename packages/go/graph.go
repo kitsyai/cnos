@@ -9,11 +9,12 @@ import (
 const GraphEnvVar = "__CNOS_GRAPH__"
 
 type RuntimeGraph struct {
-	Entries       []GraphResolvedEntry `json:"entries"`
-	Profile       string               `json:"profile"`
-	ResolvedAt    string               `json:"resolvedAt"`
-	ProfileSource string               `json:"profileSource"`
-	Workspace     GraphWorkspace       `json:"workspace"`
+	Entries       []GraphResolvedEntry    `json:"entries"`
+	Profile       string                  `json:"profile"`
+	ResolvedAt    string                  `json:"resolvedAt"`
+	ProfileSource string                  `json:"profileSource"`
+	Workspace     GraphWorkspace          `json:"workspace"`
+	Overrides     map[string]OverrideSpec `json:"overrides,omitempty"`
 }
 
 type GraphResolvedEntry struct {

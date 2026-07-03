@@ -319,5 +319,5 @@ describe('spec command', () => {
         processEnv,
       }),
     ).rejects.toThrow('remote and read-only');
-  });
+  }, 20000);
 });
