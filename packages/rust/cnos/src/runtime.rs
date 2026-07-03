@@ -162,6 +162,25 @@ impl CnosRuntime {
             return Self::new_from_bytes(&bytes, env, secret_home, options.secret_vault_providers);
         }
 
+        let parsed_args = parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>());
+
+        // Explicit runtime projection path: --cnos-projection=<path> or CNOS_SERVER_PROJECTION_PATH
+        let runtime_proj = parsed_args.get("--cnos-projection").cloned()
+            .or_else(|| env.get("CNOS_SERVER_PROJECTION_PATH").filter(|v| !v.is_empty()));
+        if let Some(rp) = runtime_proj {
+            let full_path = resolve_path_from_working_dir(options.working_dir.as_deref(), &rp)?;
+            let bytes = std::fs::read(&full_path)
+                .map_err(|e| CnosError::IoError(format!("read projection file {:?}: {}", full_path, e)))?;
+            return Self::new_from_bytes(&bytes, env, secret_home, options.secret_vault_providers);
+        }
+
+        // Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+        let dynamic = parsed_args.get("--cnos-dynamic").map(|v| v == "true").unwrap_or(false)
+            || env.get("CNOS_DYNAMIC").map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes")).unwrap_or(false);
+        if dynamic {
+            return Self::new_dynamic(env, secret_home, options.secret_vault_providers);
+        }
+
         Err(CnosError::ProjectionNotFound)
     }
 
@@ -311,6 +330,69 @@ impl CnosRuntime {
         let ns_keys: Vec<String> = rt.manifest.runtime_namespaces.keys().cloned().collect();
         rt.initialize_runtime_providers_list(&ns_keys);
         rt.prepare_derived_entries()?;
+        Ok(rt)
+    }
+
+    fn new_dynamic(
+        env: CnosEnvironment,
+        secret_home: String,
+        factories: Vec<SecretVaultProviderFactory>,
+    ) -> Result<Self, CnosError> {
+        let encrypted_secrets = decrypt_secret_payload_from_env(&env)?;
+        let manifest = crate::graph::bootstrapped_dynamic_manifest();
+
+        let factory_map: HashMap<String, SecretVaultProviderFactory> =
+            factories.into_iter().filter(|f| !f.provider.is_empty()).map(|f| (f.provider.clone(), f)).collect();
+
+        let dummy_proj = ServerProjection {
+            version: 1,
+            workspace: "base".into(),
+            profile: String::new(),
+            resolved_at: String::new(),
+            config_hash: String::new(),
+            values: HashMap::new(),
+            derived: HashMap::new(),
+            secret_refs: HashMap::new(),
+            vaults: HashMap::new(),
+            public_keys: vec![],
+            runtime_namespaces: vec!["process".into()],
+            value_types: HashMap::new(),
+            overrides: HashMap::new(),
+            meta: crate::projection::ProjectionMeta {
+                workspace: "base".into(),
+                profile: String::new(),
+                cnos_version: "dynamic".into(),
+                namespaces: vec![],
+            },
+        };
+
+        let mut rt = CnosRuntime {
+            manifest,
+            profile_source: "dynamic".into(),
+            workspace_id: "base".into(),
+            workspace_source: "implicit".into(),
+            workspace_chain: vec!["base".into()],
+            graph_bootstrapped: false,
+            env,
+            secret_home,
+            entries: HashMap::new(),
+            sources: HashMap::new(),
+            runtime_namespaces: HashSet::new(),
+            runtime_providers: RwLock::new(HashMap::new()),
+            encrypted_secrets,
+            hydrated_secrets: Mutex::new(HashMap::new()),
+            local_vault_cache: Mutex::new(HashMap::new()),
+            logical_key_to_vault: HashMap::new(),
+            secret_factories: Mutex::new(factory_map),
+            projection: dummy_proj,
+            parsed_args: parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>()),
+            file_overrides: load_patch_file(
+                std::env::args().skip(1).collect::<Vec<_>>(),
+                &std::env::var("CNOS_PATCH_FILE").unwrap_or_default(),
+            ),
+        };
+
+        rt.initialize_runtime_providers_list(&["process".to_string()]);
         Ok(rt)
     }
 
@@ -1321,12 +1403,30 @@ fn parse_patch_properties(text: &str) -> HashMap<String, Value> {
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
             continue;
         }
+        // Bash-style dotenv: "export KEY=value"
+        let trimmed = if trimmed.starts_with("export ") {
+            trimmed["export ".len()..].trim()
+        } else {
+            trimmed
+        };
         if let Some(eq) = trimmed.find('=') {
             let key = trimmed[..eq].trim();
             let raw = trimmed[eq + 1..].trim();
             if key.is_empty() {
                 continue;
             }
+            // Strip inline comments from unquoted values: KEY=value # comment
+            let raw = if !raw.starts_with('"') && !raw.starts_with('\'') {
+                if raw.starts_with('#') {
+                    ""
+                } else if let Some(idx) = raw.find(" #") {
+                    raw[..idx].trim()
+                } else {
+                    raw
+                }
+            } else {
+                raw
+            };
             if raw.is_empty() {
                 eprintln!("cnos [warn]: patch file key {:?} has empty value — skipping", key);
                 continue;

@@ -168,6 +168,33 @@ func bootstrappedManifestFromGraph(graph RuntimeGraph) authoringManifest {
 	}
 }
 
+func bootstrappedDynamicManifest() authoringManifest {
+	namespaces := map[string]namespaceDefinition{}
+	for key, value := range defaultNamespaceDefs {
+		namespaces[key] = value
+	}
+	frameworks := map[string]string{}
+	for key, value := range defaultFrameworks {
+		frameworks[key] = value
+	}
+	return authoringManifest{
+		ProjectName:      "dynamic",
+		WorkspaceDefault: "base",
+		EnvMapping:       envMappingConfig{Explicit: map[string]string{}},
+		Frameworks:       frameworks,
+		Namespaces:       namespaces,
+		RuntimeNamespaces: map[string]runtimeNamespaceDefinition{
+			"process": {
+				Description: "Live process runtime values.",
+				ServerOnly:  true,
+				BuiltIn:     true,
+			},
+		},
+		Vaults: map[string]vaultDefinition{},
+		Schema: map[string]configSpecRule{},
+	}
+}
+
 func discoverRuntimeNamespacesFromGraph(graph RuntimeGraph) []string {
 	configNamespaces := map[string]struct{}{
 		"value":  {},

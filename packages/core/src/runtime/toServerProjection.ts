@@ -274,6 +274,25 @@ export function toServerProjection(
     }
   }
 
+  // Second pass: schema keys that declare env/arg but had no stored value in the graph.
+  // This ensures the overrides block is complete even for keys with no resolved value
+  // (e.g. a key whose value will be supplied entirely via env var or CLI arg at runtime).
+  for (const [schemaKey, schemaRule] of Object.entries(manifest.schema)) {
+    if (!schemaRule?.env && !schemaRule?.arg) continue;
+    const strippedKey = stripValuePrefix(schemaKey);
+    if (overrides[strippedKey]) continue;
+    const envAliases = schemaRule.env ? (Array.isArray(schemaRule.env) ? schemaRule.env : [schemaRule.env]) : [];
+    const argAliases = schemaRule.arg ? (Array.isArray(schemaRule.arg) ? schemaRule.arg : [schemaRule.arg]) : [];
+    if (envAliases.length > 0 || argAliases.length > 0) {
+      overrides[strippedKey] = {
+        env: envAliases,
+        arg: argAliases,
+        priority: schemaRule.priority ?? DEFAULT_OVERRIDE_PRIORITY,
+        ...(schemaRule.type ? { type: schemaRule.type } : {}),
+      };
+    }
+  }
+
   const vaults = projectReferencedVaults(manifest, referencedVaultIds);
 
   return {

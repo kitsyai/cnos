@@ -1192,6 +1192,70 @@ def new_runtime_from_graph(
     return runtime
 
 
+def new_dynamic_runtime(
+    env: Environment,
+    secret_home: str,
+    factories: List[SecretVaultProviderFactory],
+) -> "CnosRuntime":
+    """Create a stub runtime for dynamic mode (CNOS_DYNAMIC=1 / --cnos-dynamic).
+
+    env.* and args.* reads work; value.* returns None unless supplied via --cnos-patch.
+    """
+    encrypted_secrets = decrypt_secret_payload_from_env(env)
+    namespaces = dict(_DEFAULT_NAMESPACE_DEFS)
+    frameworks = dict(_DEFAULT_FRAMEWORKS)
+    manifest: Dict[str, Any] = {
+        "project_name":       "dynamic",
+        "workspace_default":  "base",
+        "env_mapping":        {"convention": "", "explicit": {}},
+        "frameworks":         frameworks,
+        "namespaces":         namespaces,
+        "runtime_namespaces": {
+            "process": {"description": "Live process runtime values.", "server_only": True, "built_in": True},
+        },
+        "vaults": {},
+        "schema": {},
+    }
+    parsed_args = _parse_cli_args(sys.argv[1:])
+    runtime = CnosRuntime(
+        projection=ServerProjection(
+            version=1,
+            workspace="base",
+            profile="",
+            resolved_at="",
+            config_hash="",
+            values={},
+            derived={},
+            secret_refs={},
+            vaults={},
+            public_keys=[],
+            runtime_namespaces=["process"],
+            overrides={},
+            meta=ProjectionMeta(workspace="base", profile="", cnos_version="dynamic"),
+        ),
+        manifest=manifest,
+        profile_source="dynamic",
+        workspace_state=new_implicit_workspace_state("base"),
+        graph_bootstrapped=False,
+        env=env,
+        secret_home=secret_home,
+        entries={},
+        sources={},
+        runtime_namespaces=set(),
+        runtime_providers={},
+        encrypted_secrets=encrypted_secrets,
+        hydrated_secrets={},
+        local_vault_cache={},
+        logical_key_to_vault={},
+        vaults={},
+        secret_factories=_secret_vault_factory_map(factories),
+        parsed_args=parsed_args,
+        file_overrides=_load_patch_file(_detect_patch_path(sys.argv[1:], env)),
+    )
+    runtime._initialize_runtime_providers(["process"])
+    return runtime
+
+
 def _detect_patch_path(argv: List[str], env: Environment) -> Optional[str]:
     parsed = _parse_cli_args(argv)
     path = parsed.get("--cnos-patch")
@@ -1230,6 +1294,9 @@ def _parse_patch_properties(text: str) -> Dict[str, Any]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or stripped.startswith(";"):
             continue
+        # Bash-style dotenv: "export KEY=value"
+        if stripped.startswith("export "):
+            stripped = stripped[len("export "):].strip()
         eq = stripped.find("=")
         if eq == -1:
             continue
@@ -1237,6 +1304,12 @@ def _parse_patch_properties(text: str) -> Dict[str, Any]:
         raw = stripped[eq + 1:].strip()
         if not key:
             continue
+        # Strip inline comments from unquoted values: KEY=value # comment
+        if not raw.startswith('"') and not raw.startswith("'"):
+            if raw.startswith("#"):
+                raw = ""
+            elif " #" in raw:
+                raw = raw[:raw.index(" #")].strip()
         if not raw:
             print(f'cnos [warn]: patch file key "{key}" has empty value — skipping', file=sys.stderr)
             continue

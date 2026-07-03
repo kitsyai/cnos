@@ -168,6 +168,18 @@ fn to_secret_reference(val: &Value) -> Result<crate::projection::SecretRefRaw, C
     })
 }
 
+pub fn bootstrapped_dynamic_manifest() -> BootstrappedManifest {
+    let namespaces = default_namespace_defs();
+    let mut runtime_namespaces: HashMap<String, RuntimeNamespaceDef> = HashMap::new();
+    runtime_namespaces.insert("process".into(), RuntimeNamespaceDef { server_only: true, built_in: true });
+    BootstrappedManifest {
+        namespaces,
+        runtime_namespaces,
+        frameworks: default_frameworks(),
+        vaults: HashMap::new(),
+    }
+}
+
 pub fn bootstrapped_manifest_from_graph(graph: &RuntimeGraph) -> BootstrappedManifest {
     let namespaces = default_namespace_defs();
     let mut runtime_namespaces: HashMap<String, RuntimeNamespaceDef> = HashMap::new();

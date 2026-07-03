@@ -726,11 +726,24 @@ class CnosRuntime
         foreach (explode("\n", $text) as $line) {
             $trimmed = trim($line);
             if ($trimmed === '' || $trimmed[0] === '#' || $trimmed[0] === ';') continue;
+            // Bash-style dotenv: "export KEY=value"
+            if (str_starts_with($trimmed, 'export ')) {
+                $trimmed = trim(substr($trimmed, strlen('export ')));
+            }
             $eq = strpos($trimmed, '=');
             if ($eq === false) continue;
             $key = trim(substr($trimmed, 0, $eq));
             $raw = trim(substr($trimmed, $eq + 1));
             if ($key === '') continue;
+            // Strip inline comments from unquoted values: KEY=value # comment
+            if (!str_starts_with($raw, '"') && !str_starts_with($raw, "'")) {
+                if ($raw !== '' && $raw[0] === '#') {
+                    $raw = '';
+                } else {
+                    $ci = strpos($raw, ' #');
+                    if ($ci !== false) $raw = trim(substr($raw, 0, $ci));
+                }
+            }
             if ($raw === '') {
                 fwrite(STDERR, "cnos [warn]: patch file key \"$key\" has empty value — skipping\n");
                 continue;

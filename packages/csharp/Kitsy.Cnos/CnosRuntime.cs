@@ -126,6 +126,28 @@ namespace Kitsy.Cnos
             if (projPath != null)
                 return NewRuntime(File.ReadAllBytes(projPath), env, secretHome, factories);
 
+            var parsedArgs = ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray());
+
+            // Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+            string runtimeProj = parsedArgs.GetValueOrDefault("--cnos-projection", "");
+            if (string.IsNullOrEmpty(runtimeProj))
+                runtimeProj = env.Get("CNOS_SERVER_PROJECTION_PATH") ?? "";
+            if (!string.IsNullOrEmpty(runtimeProj))
+            {
+                string resolved = ResolvePathFromWorkingDir(options.WorkingDir, runtimeProj);
+                return NewRuntime(File.ReadAllBytes(resolved), env, secretHome, factories);
+            }
+
+            // Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+            bool isDynamic = parsedArgs.GetValueOrDefault("--cnos-dynamic") == "true";
+            if (!isDynamic)
+            {
+                string? dynEnv = env.Get("CNOS_DYNAMIC");
+                isDynamic = dynEnv == "1" || dynEnv == "true" || dynEnv == "yes";
+            }
+            if (isDynamic)
+                return NewDynamicRuntime(env, secretHome, factories);
+
             throw new CnosError(CnosError.ProjectionNotFound);
         }
 
@@ -707,6 +729,36 @@ namespace Kitsy.Cnos
 
             rt.PopulateEntries();
             rt.InitializeRuntimeProviders(projection.RuntimeNamespaces ?? new List<string>());
+            rt.PrepareDerivedEntries();
+            return rt;
+        }
+
+        private static CnosRuntime NewDynamicRuntime(CnosEnvironment env, string secretHome,
+            List<SecretVaultProviderFactory> factories)
+        {
+            var encryptedSecrets = DecryptSecretPayloadFromEnv(env);
+            var manifest = new BootstrappedManifest(
+                new Dictionary<string, BootstrappedManifest.NamespaceDef>(BootstrappedManifest.DefaultNamespaces),
+                new Dictionary<string, string>(BootstrappedManifest.DefaultFrameworks),
+                new Dictionary<string, string>(),
+                new Dictionary<string, VaultDefinition>());
+
+            var ws = new WorkspaceState("base", "implicit", new List<string> { "base" });
+            var parsedArgs = ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray());
+            var rt = new CnosRuntime(
+                null, manifest, "dynamic", ws,
+                env, secretHome,
+                new Dictionary<string, RuntimeEntry>(StringComparer.Ordinal),
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                new HashSet<string>(StringComparer.Ordinal),
+                new Dictionary<string, Func<string, object?>>(StringComparer.Ordinal),
+                encryptedSecrets,
+                new Dictionary<string, VaultDefinition>(),
+                BuildFactoryMap(factories),
+                parsedArgs,
+                LoadPatchFile(DetectPatchPath(parsedArgs, env)));
+
+            rt.InitializeRuntimeProviders(new List<string> { "process" });
             rt.PrepareDerivedEntries();
             return rt;
         }
@@ -1366,11 +1418,25 @@ namespace Kitsy.Cnos
             {
                 var trimmed = line.TrimEnd('\r').Trim();
                 if (string.IsNullOrEmpty(trimmed) || trimmed[0] == '#' || trimmed[0] == ';') continue;
+                // Bash-style dotenv: "export KEY=value"
+                if (trimmed.StartsWith("export ", StringComparison.Ordinal))
+                    trimmed = trimmed["export ".Length..].Trim();
                 var eq = trimmed.IndexOf('=');
                 if (eq < 0) continue;
                 var key = trimmed.Substring(0, eq).Trim();
                 var raw = trimmed.Substring(eq + 1).Trim();
                 if (string.IsNullOrEmpty(key)) continue;
+                // Strip inline comments from unquoted values: KEY=value # comment
+                if (!raw.StartsWith('"') && !raw.StartsWith('\''))
+                {
+                    if (raw.StartsWith('#'))
+                        raw = "";
+                    else
+                    {
+                        var ci = raw.IndexOf(" #", StringComparison.Ordinal);
+                        if (ci >= 0) raw = raw.Substring(0, ci).Trim();
+                    }
+                }
                 if (string.IsNullOrEmpty(raw))
                 {
                     Console.Error.WriteLine($"cnos [warn]: patch file key \"{key}\" has empty value — skipping");

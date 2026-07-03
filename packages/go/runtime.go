@@ -115,6 +115,27 @@ func Load(options Options) (*Runtime, error) {
 		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
 	}
 
+	parsedArgs := parseCliArgs(os.Args[1:])
+
+	// Explicit runtime projection path: --cnos-projection=<path> or CNOS_SERVER_PROJECTION_PATH
+	if rp := resolveRuntimeProjectionPath(parsedArgs, env); rp != "" {
+		resolved, err := resolvePathFromWorkingDir(options.WorkingDir, rp)
+		if err != nil {
+			return nil, fmt.Errorf("cnos: resolve --cnos-projection path %s: %w", rp, err)
+		}
+		bytes, err := os.ReadFile(resolved)
+		if err != nil {
+			return nil, fmt.Errorf("cnos: read projection file %s: %w", resolved, err)
+		}
+		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
+	}
+
+	// Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic suppresses the projection-not-found error.
+	// env.* and args.* reads work; value.* returns nil unless supplied via --cnos-patch.
+	if isDynamicMode(parsedArgs, env) {
+		return newDynamicRuntime(env, secretHome, options.SecretVaultProviders)
+	}
+
 	return loadAuthoringRuntime(options, env, secretHome)
 }
 
@@ -391,6 +412,58 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string, fact
 	if err := runtime.prepareDerivedEntries(); err != nil {
 		return nil, err
 	}
+	return runtime, nil
+}
+
+func resolveRuntimeProjectionPath(parsedArgs map[string]string, env environment) string {
+	if p := parsedArgs["--cnos-projection"]; p != "" {
+		return p
+	}
+	if p, ok := env.Get("CNOS_SERVER_PROJECTION_PATH"); ok && p != "" {
+		return p
+	}
+	return ""
+}
+
+func isDynamicMode(parsedArgs map[string]string, env environment) bool {
+	if parsedArgs["--cnos-dynamic"] == "true" {
+		return true
+	}
+	if v, ok := env.Get("CNOS_DYNAMIC"); ok {
+		lv := strings.ToLower(v)
+		return lv == "1" || lv == "true" || lv == "yes"
+	}
+	return false
+}
+
+func newDynamicRuntime(env environment, secretHome string, factories []SecretVaultProviderFactory) (*Runtime, error) {
+	encryptedSecrets, err := decryptSecretPayloadFromEnv(env)
+	if err != nil {
+		return nil, err
+	}
+	parsedArgs := parseCliArgs(os.Args[1:])
+	manifest := bootstrappedDynamicManifest()
+	runtime := &Runtime{
+		manifest:          manifest,
+		profileSource:     "dynamic",
+		workspaceState:    newImplicitWorkspaceState("base"),
+		graphBootstrapped: false,
+		env:               env,
+		secretHome:        secretHome,
+		entries:           map[string]*runtimeEntry{},
+		sources:           map[string]string{},
+		runtimeNamespaces: map[string]struct{}{},
+		runtimeProviders:  map[string]RuntimeProvider{},
+		encryptedSecrets:  encryptedSecrets,
+		hydratedSecrets:   map[string]any{},
+		localVaultCache:   map[string]map[string]string{},
+		logicalKeyToVault: map[string]string{},
+		vaults:            manifest.Vaults,
+		secretFactories:   secretVaultFactoryMap(factories),
+		parsedArgs:        parsedArgs,
+		fileOverrides:     loadPatchFile(parsedArgs["--cnos-patch"], os.Getenv("CNOS_PATCH_FILE")),
+	}
+	runtime.initializeRuntimeProviders(sortedRuntimeNamespaces(manifest.RuntimeNamespaces))
 	return runtime, nil
 }
 
@@ -1106,6 +1179,10 @@ func parsePatchProperties(text string) map[string]any {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
 			continue
 		}
+		// Bash-style dotenv: "export KEY=value"
+		if strings.HasPrefix(trimmed, "export ") {
+			trimmed = strings.TrimSpace(trimmed[len("export "):])
+		}
 		eq := strings.IndexByte(trimmed, '=')
 		if eq == -1 {
 			continue
@@ -1114,6 +1191,14 @@ func parsePatchProperties(text string) map[string]any {
 		raw := strings.TrimSpace(trimmed[eq+1:])
 		if key == "" {
 			continue
+		}
+		// Strip inline comments from unquoted values: KEY=value # comment
+		if !strings.HasPrefix(raw, `"`) && !strings.HasPrefix(raw, `'`) {
+			if strings.HasPrefix(raw, "#") {
+				raw = ""
+			} else if idx := strings.Index(raw, " #"); idx != -1 {
+				raw = strings.TrimSpace(raw[:idx])
+			}
 		}
 		if raw == "" {
 			fmt.Fprintf(os.Stderr, "cnos [warn]: patch file key %q has empty value — skipping\n", key)

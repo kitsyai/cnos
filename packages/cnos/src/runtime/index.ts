@@ -103,17 +103,27 @@ function getProcessEnvFlag(env: Record<string, string | undefined>, key: string)
 function resolveExplicitProjectionPath(processEnv: Record<string, string | undefined>): string | undefined {
   const raw = processEnv[CNOS_SERVER_PROJECTION_PATH_ENV_VAR];
 
-  if (raw === undefined) {
-    return undefined;
+  if (raw !== undefined) {
+    const trimmed = raw.trim();
+    if (trimmed) return path.resolve(trimmed);
   }
 
-  const trimmed = raw.trim();
-
-  if (!trimmed) {
-    return undefined;
+  // Also honour --cnos-projection=<path> passed as a runtime argv flag.
+  if (typeof process !== 'undefined') {
+    const argv = process.argv ?? [];
+    for (let i = 0; i < argv.length; i++) {
+      const arg = argv[i];
+      if (arg.startsWith('--cnos-projection=')) {
+        const val = arg.slice('--cnos-projection='.length).trim();
+        if (val) return path.resolve(val);
+      }
+      if (arg === '--cnos-projection' && i + 1 < argv.length && !(argv[i + 1] ?? '').startsWith('-')) {
+        return path.resolve(argv[i + 1] as string);
+      }
+    }
   }
 
-  return path.resolve(trimmed);
+  return undefined;
 }
 
 function projectionRequirementMessage(processEnv: Record<string, string | undefined>): string {
@@ -1093,8 +1103,47 @@ function getBootstrapFailure(processEnv: Record<string, string | undefined>): Er
   return undefined;
 }
 
+function bootstrapDynamic(): void {
+  if (getSingletonRuntime()) {
+    return;
+  }
+
+  if (typeof process === 'undefined') {
+    return;
+  }
+
+  const envFlag = process.env['CNOS_DYNAMIC'];
+  const argFlag = (process.argv ?? []).some(
+    (a) => a === '--cnos-dynamic' || a.startsWith('--cnos-dynamic='),
+  );
+  const isDynamic =
+    argFlag || (envFlag !== undefined && ['1', 'true', 'yes'].includes(envFlag.toLowerCase()));
+
+  if (!isDynamic) {
+    return;
+  }
+
+  const dynamicProjection: ServerProjection = {
+    version: 1,
+    workspace: 'base',
+    profile: '',
+    resolvedAt: '',
+    configHash: '',
+    values: {},
+    derived: {},
+    secretRefs: {},
+    publicKeys: [],
+    runtimeNamespaces: ['process'],
+    overrides: {},
+    meta: { workspace: 'base', profile: '', cnos_version: 'dynamic' },
+  };
+
+  attachBootstrappedProjection(dynamicProjection);
+}
+
 bootstrapFromProcessEnv();
 bootstrapFromProjectionFile();
+bootstrapDynamic();
 
 const cnos = Object.assign(
   (<T = unknown>(key: LogicalKey) => readLogicalKey<T>(getRuntimeOrThrow(), key)) as CnosSingleton,

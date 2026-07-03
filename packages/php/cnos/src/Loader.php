@@ -57,6 +57,28 @@ class Loader
             return self::newRuntime(self::readFile($path), $env, $secretHome, $factories);
         }
 
+        $argv      = array_slice($GLOBALS['argv'] ?? [], 1);
+        $parsedArgv = self::parseArgv($argv);
+
+        // 5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+        $runtimeProj = $parsedArgv['--cnos-projection'] ?? '';
+        if ($runtimeProj === '') {
+            $runtimeProj = self::envValue('CNOS_SERVER_PROJECTION_PATH', $env) ?? '';
+        }
+        if ($runtimeProj !== '') {
+            return self::newRuntime(self::readFile($runtimeProj), $env, $secretHome, $factories);
+        }
+
+        // 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+        $isDynamic = ($parsedArgv['--cnos-dynamic'] ?? '') === 'true';
+        if (!$isDynamic) {
+            $dynEnv = strtolower(self::envValue('CNOS_DYNAMIC', $env) ?? '');
+            $isDynamic = in_array($dynEnv, ['1', 'true', 'yes'], true);
+        }
+        if ($isDynamic) {
+            return self::newDynamicRuntime($env, $secretHome, $factories);
+        }
+
         throw CnosError::projectionNotFound();
     }
 
@@ -113,6 +135,53 @@ class Loader
         if (isset($env[$key])) return (string) $env[$key];
         $val = getenv($key);
         return $val !== false ? $val : null;
+    }
+
+    private static function newDynamicRuntime(
+        array $env,
+        string $secretHome,
+        array $factories,
+    ): CnosRuntime {
+        $projection = new ServerProjection(
+            version:           1,
+            workspace:         'base',
+            profile:           '',
+            resolvedAt:        '',
+            configHash:        '',
+            values:            [],
+            derived:           [],
+            secretRefs:        [],
+            vaults:            [],
+            publicKeys:        [],
+            runtimeNamespaces: ['process'],
+            meta:              new ProjectionMeta(workspace: 'base', profile: '', cnosVersion: 'dynamic'),
+        );
+        return new CnosRuntime($projection, $env, $secretHome, $factories);
+    }
+
+    /** @param string[] $argv @return array<string, string> */
+    private static function parseArgv(array $argv): array
+    {
+        $result = [];
+        $i = 0;
+        while ($i < count($argv)) {
+            $arg = $argv[$i];
+            if (!str_starts_with($arg, '-')) { $i++; continue; }
+            $eq = strpos($arg, '=');
+            if ($eq !== false) {
+                $result[substr($arg, 0, $eq)] = substr($arg, $eq + 1);
+                $i++;
+                continue;
+            }
+            if ($i + 1 < count($argv) && !str_starts_with($argv[$i + 1], '-')) {
+                $result[$arg] = $argv[$i + 1];
+                $i += 2;
+            } else {
+                $result[$arg] = 'true';
+                $i++;
+            }
+        }
+        return $result;
     }
 
     /** @param array<string, string> $env */

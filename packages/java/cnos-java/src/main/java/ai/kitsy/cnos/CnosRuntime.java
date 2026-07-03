@@ -131,6 +131,24 @@ public final class CnosRuntime {
             return newRuntime(data, env, secretHome, factories);
         }
 
+        Map<String, String> parsedArgs = parseCliArgs(getProcessArgs());
+
+        // 5.5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+        String runtimeProj = parsedArgs.getOrDefault("--cnos-projection", "");
+        if (runtimeProj.isEmpty()) {
+            runtimeProj = env.get("CNOS_SERVER_PROJECTION_PATH").orElse("");
+        }
+        if (!runtimeProj.isEmpty()) {
+            String resolved = resolvePathFromWorkingDir(options.getWorkingDir(), runtimeProj);
+            byte[] data = readFile(resolved);
+            return newRuntime(data, env, secretHome, factories);
+        }
+
+        // 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+        if ("true".equals(parsedArgs.get("--cnos-dynamic")) || isDynamicEnv(env)) {
+            return newDynamicRuntime(env, secretHome, factories);
+        }
+
         throw new CnosError(CnosError.PROJECTION_NOT_FOUND);
     }
 
@@ -929,6 +947,45 @@ public final class CnosRuntime {
         return runtime;
     }
 
+    private static boolean isDynamicEnv(Environment env) {
+        Optional<String> v = env.get("CNOS_DYNAMIC");
+        if (!v.isPresent() || v.get().isEmpty()) return false;
+        String lv = v.get().toLowerCase();
+        return "1".equals(lv) || "true".equals(lv) || "yes".equals(lv);
+    }
+
+    private static BootstrappedManifest bootstrappedDynamicManifest() {
+        return new BootstrappedManifest(
+                new HashMap<>(BootstrappedManifest.DEFAULT_NAMESPACES),
+                new HashMap<>(BootstrappedManifest.DEFAULT_FRAMEWORKS),
+                Collections.emptyMap(),
+                Collections.emptyMap());
+    }
+
+    private static CnosRuntime newDynamicRuntime(Environment env, String secretHome,
+            List<SecretVaultProviderFactory> factories) throws CnosError {
+        Map<String, Object> encryptedSecrets = decryptSecretPayloadFromEnv(env);
+        BootstrappedManifest manifest = bootstrappedDynamicManifest();
+        Map<String, String> parsedArgs = parseCliArgs(getProcessArgs());
+        Builder b = new Builder()
+                .projection(null)
+                .manifest(manifest)
+                .profileSource("dynamic")
+                .workspaceState(newImplicitWorkspaceState("base"))
+                .graphBootstrapped(false)
+                .env(env)
+                .secretHome(secretHome)
+                .encryptedSecrets(encryptedSecrets)
+                .factories(factories)
+                .parsedArgs(parsedArgs)
+                .fileOverrides(loadPatchFile(detectPatchPath(parsedArgs, env)));
+
+        CnosRuntime runtime = b.build();
+        runtime.initializeRuntimeProviders(Collections.singletonList("process"));
+        runtime.prepareDerivedEntries();
+        return runtime;
+    }
+
     private void populateEntries() {
         Set<String> explicitNamespaces = new HashSet<>(
                 Arrays.asList("config", "flags", "process"));
@@ -1475,11 +1532,24 @@ public final class CnosRuntime {
         for (String line : text.split("\n", -1)) {
             String trimmed = line.replace("\r", "").trim();
             if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";")) continue;
+            // Bash-style dotenv: "export KEY=value"
+            if (trimmed.startsWith("export ")) {
+                trimmed = trimmed.substring("export ".length()).trim();
+            }
             int eq = trimmed.indexOf('=');
             if (eq < 0) continue;
             String key = trimmed.substring(0, eq).trim();
             String raw = trimmed.substring(eq + 1).trim();
             if (key.isEmpty()) continue;
+            // Strip inline comments from unquoted values: KEY=value # comment
+            if (!raw.startsWith("\"") && !raw.startsWith("'")) {
+                if (raw.startsWith("#")) {
+                    raw = "";
+                } else {
+                    int commentIdx = raw.indexOf(" #");
+                    if (commentIdx >= 0) raw = raw.substring(0, commentIdx).trim();
+                }
+            }
             if (raw.isEmpty()) {
                 System.err.println("cnos [warn]: patch file key \"" + key + "\" has empty value — skipping");
                 continue;

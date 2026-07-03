@@ -497,8 +497,26 @@ class CnosRuntime private constructor(
             }
 
             val projPath = findProjectionPath(options.workingDir)
-                ?: throw CnosError(CnosError.PROJECTION_NOT_FOUND)
-            return buildFromProjection(File(projPath).readBytes(), env, secretHome, options.secretVaultProviders)
+            if (projPath != null)
+                return buildFromProjection(File(projPath).readBytes(), env, secretHome, options.secretVaultProviders)
+
+            val parsedArgs = parseCliArgs(getProcessArgv())
+
+            // Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+            val runtimeProj = parsedArgs["--cnos-projection"]?.takeIf { it.isNotEmpty() }
+                ?: env.get("CNOS_SERVER_PROJECTION_PATH")?.takeIf { it.isNotEmpty() }
+            if (runtimeProj != null) {
+                val resolved = resolvePathFromWorkingDir(options.workingDir, runtimeProj)
+                return buildFromProjection(File(resolved).readBytes(), env, secretHome, options.secretVaultProviders)
+            }
+
+            // Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+            val isDynamic = parsedArgs["--cnos-dynamic"] == "true" ||
+                env.get("CNOS_DYNAMIC")?.lowercase()?.let { it == "1" || it == "true" || it == "yes" } == true
+            if (isDynamic)
+                return buildDynamic(env, secretHome, options.secretVaultProviders)
+
+            throw CnosError(CnosError.PROJECTION_NOT_FOUND)
         }
 
         @JvmStatic
@@ -551,6 +569,25 @@ class CnosRuntime private constructor(
                 .filter { it.value.runtime }
                 .map { it.key }
             rt.initRuntimeProviders(runtimeNsList)
+            rt.prepareDerivedEntries()
+            return rt
+        }
+
+        private fun buildDynamic(
+            env: Environment, secretHome: String,
+            factories: List<SecretVaultProviderFactory>
+        ): CnosRuntime {
+            val manifest = BootstrappedManifest(
+                BootstrappedManifest.DEFAULT_NAMESPACES.toMap(),
+                BootstrappedManifest.DEFAULT_FRAMEWORKS.toMap(),
+                emptyMap(), emptyMap()
+            )
+            val encrypted = decryptSecretPayload(env)
+            val pa = parseCliArgs(getProcessArgv())
+            val rt = CnosRuntime(null, manifest, env, secretHome, mutableMapOf(), mutableSetOf(), encrypted,
+                pa, loadPatchFile(detectPatchPath(pa, env)))
+            factories.forEach { if (it.provider.isNotEmpty()) rt.secretFactories[it.provider] = it }
+            rt.initRuntimeProviders(listOf("process"))
             rt.prepareDerivedEntries()
             return rt
         }
@@ -676,13 +713,23 @@ class CnosRuntime private constructor(
         private fun parsePatchProperties(text: String): Map<String, Any?> {
             val result = mutableMapOf<String, Any?>()
             for (line in text.lines()) {
-                val trimmed = line.trim()
+                var trimmed = line.trim()
                 if (trimmed.isEmpty() || trimmed.startsWith('#') || trimmed.startsWith(';')) continue
+                // Bash-style dotenv: "export KEY=value"
+                if (trimmed.startsWith("export ")) trimmed = trimmed.removePrefix("export ").trim()
                 val eq = trimmed.indexOf('=')
                 if (eq < 0) continue
                 val key = trimmed.substring(0, eq).trim()
-                val raw = trimmed.substring(eq + 1).trim()
+                var raw = trimmed.substring(eq + 1).trim()
                 if (key.isEmpty()) continue
+                // Strip inline comments from unquoted values: KEY=value # comment
+                if (!raw.startsWith('"') && !raw.startsWith('\'')) {
+                    raw = when {
+                        raw.startsWith('#') -> ""
+                        raw.contains(" #") -> raw.substring(0, raw.indexOf(" #")).trim()
+                        else -> raw
+                    }
+                }
                 if (raw.isEmpty()) {
                     System.err.println("cnos [warn]: patch file key \"$key\" has empty value — skipping")
                     continue

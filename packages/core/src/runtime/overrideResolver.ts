@@ -138,13 +138,24 @@ export function parsePatchProperties(
 ): Map<string, unknown> {
   const result = new Map<string, unknown>();
   for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith(';')) continue;
+    // Bash-style dotenv: "export KEY=value"
+    if (trimmed.startsWith('export ')) trimmed = trimmed.slice('export '.length).trim();
     const eq = trimmed.indexOf('=');
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim();
-    const raw = trimmed.slice(eq + 1).trim();
+    let raw = trimmed.slice(eq + 1).trim();
     if (!key) continue;
+    // Strip inline comments from unquoted values: KEY=value # comment
+    if (!raw.startsWith('"') && !raw.startsWith("'")) {
+      if (raw.startsWith('#')) {
+        raw = '';
+      } else {
+        const commentIdx = raw.indexOf(' #');
+        if (commentIdx !== -1) raw = raw.slice(0, commentIdx).trim();
+      }
+    }
     if (raw === '') {
       warn(`cnos [warn]: patch file key "${key}" has empty value — skipping`);
       continue;

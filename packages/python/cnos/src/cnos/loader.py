@@ -5,6 +5,7 @@ in runtime.go.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from typing import List, Optional
 
@@ -15,7 +16,9 @@ from cnos.graph import GRAPH_ENV_VAR
 from cnos.projection import PROJECTION_ENV_VAR
 from cnos.runtime import (
     CnosRuntime,
+    _parse_cli_args,
     _secret_vault_factory_map,
+    new_dynamic_runtime,
     new_runtime,
     new_runtime_from_graph,
 )
@@ -115,7 +118,7 @@ def load(options: Optional[CnosOptions] = None) -> CnosRuntime:
     if proj_found and proj_serialized:
         return new_runtime(proj_serialized.encode(), env, secret_home, factories)
 
-    # 5. .cnos-server.json file
+    # 5. .cnos-server.json file discovery
     proj_path = find_projection_path(opts.working_dir)
     if proj_path:
         try:
@@ -124,6 +127,30 @@ def load(options: Optional[CnosOptions] = None) -> CnosRuntime:
         except OSError as exc:
             raise CnosError(f"cnos: read projection file {proj_path}: {exc}") from exc
         return new_runtime(data, env, secret_home, factories)
+
+    # 5.5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+    parsed_args = _parse_cli_args(sys.argv[1:])
+    runtime_proj: Optional[str] = parsed_args.get("--cnos-projection")
+    if not runtime_proj:
+        _ep, _found = env.get("CNOS_SERVER_PROJECTION_PATH")
+        if _found and _ep:
+            runtime_proj = _ep
+    if runtime_proj:
+        resolved = resolve_path_from_working_dir(opts.working_dir, runtime_proj)
+        try:
+            with open(resolved, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            raise CnosError(f"cnos: read projection file {resolved}: {exc}") from exc
+        return new_runtime(data, env, secret_home, factories)
+
+    # 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+    # env.* and args.* reads work; value.* returns None unless supplied via --cnos-patch.
+    if parsed_args.get("--cnos-dynamic") == "true":
+        return new_dynamic_runtime(env, secret_home, factories)
+    _dv, _dfound = env.get("CNOS_DYNAMIC")
+    if _dfound and _dv and _dv.lower() in ("1", "true", "yes"):
+        return new_dynamic_runtime(env, secret_home, factories)
 
     raise projection_not_found()
 
