@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Mutex;
 use cnos::{CnosRuntime, Options, reset_default_runtime, set_default_runtime};
 use serde_json::Value;
@@ -124,4 +123,68 @@ fn format_substitutes_config_keys() {
 
     let msg = cnos::format("App: ${value.app.name}").unwrap();
     assert_eq!(msg, "App: cnos-rust");
+}
+
+// ============================================================
+// Composition model tests
+// ============================================================
+//
+// Simulates: root → lib_a → lib_b → lib_c → lib_d, lib_e → lib_f
+// Libraries call the module-level singleton. Only the root initializes.
+
+fn lib_f_read_meta() -> Result<Option<Value>, cnos::CnosError> {
+    cnos::meta("workspace")
+}
+
+fn lib_e_read_meta() -> Result<Option<Value>, cnos::CnosError> {
+    lib_f_read_meta()
+}
+
+fn lib_d_read_port() -> Result<Option<Value>, cnos::CnosError> {
+    cnos::value("server.port")
+}
+
+fn lib_c_read_port() -> Result<Option<Value>, cnos::CnosError> {
+    lib_d_read_port()
+}
+
+fn lib_b_read() -> Result<(Option<Value>, Option<Value>), cnos::CnosError> {
+    Ok((lib_c_read_port()?, lib_e_read_meta()?))
+}
+
+fn lib_a_read() -> Result<(Option<Value>, Option<Value>), cnos::CnosError> {
+    lib_b_read()
+}
+
+#[test]
+fn composition_libraries_succeed_after_root_initializes() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    reset_default_runtime();
+    set_default_runtime(make_runtime());  // root initializes once
+
+    let (port, workspace) = lib_a_read().unwrap();
+    assert_eq!(port.unwrap().as_i64().unwrap(), 3000);
+    assert_eq!(workspace.unwrap().as_str().unwrap(), "base");
+}
+
+#[test]
+fn composition_libraries_fail_before_root_initializes() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    reset_default_runtime();
+
+    let result = lib_a_read();
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not initialized"));
+}
+
+#[test]
+fn composition_multiple_libraries_share_same_runtime() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    reset_default_runtime();
+    set_default_runtime(make_runtime());
+
+    let first = cnos::default_runtime().unwrap();
+    let _ = lib_a_read().unwrap();
+    let second = cnos::default_runtime().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
 }

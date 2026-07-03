@@ -28,6 +28,21 @@ class Cnos
         return Loader::load($options);
     }
 
+    public static function setDefaultRuntime(CnosRuntime $runtime): void
+    {
+        Loader::setDefaultRuntime($runtime);
+    }
+
+    public static function defaultRuntime(): CnosRuntime
+    {
+        return Loader::defaultRuntime();
+    }
+
+    public static function resetDefaultRuntime(): void
+    {
+        Loader::resetDefaultRuntime();
+    }
+
     // -------------------------------------------------------------------------
     // Read API — all return [value, found]
     // -------------------------------------------------------------------------
@@ -100,5 +115,26 @@ class Cnos
     public static function toObject(): array
     {
         return Loader::defaultRuntime()->toObject();
+    }
+
+    /** @return array<string, string> */
+    public static function toPublicEnv(string $framework = '', string $prefix = ''): array
+    {
+        return Loader::defaultRuntime()->toPublicEnv($framework, $prefix);
+    }
+
+    public static function format(string $message): string
+    {
+        return Loader::defaultRuntime()->format($message);
+    }
+
+    public static function refreshSecrets(): void
+    {
+        Loader::defaultRuntime()->refreshSecrets();
+    }
+
+    public static function refreshSecret(string $path): void
+    {
+        Loader::defaultRuntime()->refreshSecret($path);
     }
 }

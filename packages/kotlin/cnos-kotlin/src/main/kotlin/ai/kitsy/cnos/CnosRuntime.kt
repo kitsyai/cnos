@@ -125,6 +125,83 @@ class CnosRuntime private constructor(
             ?: throw CnosError("cnos: unknown public framework prefix: ${options.framework}")
     }
 
+    fun toObject(): Map<String, Any?> = toNamespaceObject("")
+
+    fun toNamespace(namespace: String): Map<String, Any?> = toNamespaceObject(namespace.trim())
+
+    private fun toNamespaceObject(namespace: String): Map<String, Any?> {
+        val output = LinkedHashMap<String, Any?>()
+        entries.keys.sorted().forEach { key ->
+            val entry = entries[key] ?: return@forEach
+            if (namespace.isNotEmpty() && namespace != entry.namespace) return@forEach
+            val (value, found) = readInternal(key, mutableSetOf())
+            if (!found) return@forEach
+            val targetPath = if (namespace.isEmpty()) key else key.removePrefix("$namespace.")
+            setNestedValue(output, targetPath.split("."), value)
+        }
+        return output
+    }
+
+    private fun setNestedValue(target: MutableMap<String, Any?>, segments: List<String>, value: Any?) {
+        if (segments.isEmpty() || segments[0].isEmpty()) return
+        if (segments.size == 1) { target[segments[0]] = value; return }
+        @Suppress("UNCHECKED_CAST")
+        val child: MutableMap<String, Any?> = when (val existing = target[segments[0]]) {
+            is MutableMap<*, *> -> existing as MutableMap<String, Any?>
+            else -> LinkedHashMap<String, Any?>().also { target[segments[0]] = it }
+        }
+        setNestedValue(child, segments.drop(1), value)
+    }
+
+    fun refreshSecrets() {
+        val savedHydrated = HashMap(hydratedSecrets)
+        val savedLocalCache = HashMap(localVaultCache)
+        hydratedSecrets.clear()
+        localVaultCache.clear()
+        try {
+            warmSecrets()
+        } catch (e: CnosError) {
+            hydratedSecrets.clear()
+            hydratedSecrets.putAll(savedHydrated)
+            localVaultCache.clear()
+            localVaultCache.putAll(savedLocalCache)
+            throw e
+        }
+    }
+
+    fun refreshSecret(path: String) {
+        val key = toLogicalKey("secret", path)
+        val entry = entries[key] ?: return
+        if (entry.secretRef == null) return
+
+        val hadValue = hydratedSecrets.containsKey(key)
+        val savedValue: Any? = hydratedSecrets[key]  // Any? from map getter; non-null when hadValue=true
+        val vaultId = logicalKeyToVault[key]
+        val savedVaultCache = vaultId?.let { localVaultCache[it]?.toMap() }
+
+        hydratedSecrets.remove(key)
+        vaultId?.let { localVaultCache.remove(it) }
+
+        try {
+            readSecret(key, entry.secretRef!!)
+        } catch (e: CnosError) {
+            if (hadValue && savedValue != null) hydratedSecrets[key] = savedValue
+            if (vaultId != null) {
+                if (savedVaultCache != null) localVaultCache[vaultId] = savedVaultCache
+                else localVaultCache.remove(vaultId)
+            }
+            throw e
+        }
+    }
+
+    private fun warmSecrets() {
+        entries.keys.sorted().forEach { key ->
+            val entry = entries[key] ?: return@forEach
+            if (entry.secretRef == null) return@forEach
+            readSecret(key, entry.secretRef!!)
+        }
+    }
+
     fun registerRuntimeProvider(namespace: String, provider: (String) -> Any?) {
         if (namespace == "process") throw CnosError("cnos: cannot override built-in runtime namespace \"process\"")
         if (!runtimeNamespaces.contains(namespace))

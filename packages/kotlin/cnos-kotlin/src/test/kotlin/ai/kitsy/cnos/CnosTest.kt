@@ -1,5 +1,6 @@
 package ai.kitsy.cnos
 
+import java.util.Optional
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -37,7 +38,7 @@ class CnosTest {
 
     @AfterEach
     fun cleanup() {
-        Cnos.reset()
+        Cnos.resetDefaultRuntime()
     }
 
     @Test
@@ -141,10 +142,59 @@ class CnosTest {
     }
 
     @Test
-    fun `reset clears the instance`() {
+    fun `resetDefaultRuntime clears the instance`() {
         val rt = CnosRuntime.loadProjection(MINIMAL.toByteArray())
         Cnos.setDefaultRuntime(rt)
-        Cnos.reset()
+        Cnos.resetDefaultRuntime()
         assertThrows<CnosError> { Cnos.read("value.app.name") }
+    }
+
+    @Test
+    fun `toObject returns flat key-value map`() {
+        val rt = CnosRuntime.loadProjection(MINIMAL.toByteArray())
+        Cnos.setDefaultRuntime(rt)
+        val obj = Cnos.toObject()
+        assertNotNull(obj)
+        assertTrue(obj.containsKey("value.server.port") || obj.containsKey("value"))
+    }
+
+    @Test
+    fun `refreshSecrets completes without error when no secrets`() {
+        val rt = CnosRuntime.loadProjection(MINIMAL.toByteArray())
+        Cnos.setDefaultRuntime(rt)
+        assertDoesNotThrow { Cnos.refreshSecrets() }
+    }
+
+    @Test
+    fun `refreshSecret on missing key is a no-op`() {
+        val rt = CnosRuntime.loadProjection(MINIMAL.toByteArray())
+        Cnos.setDefaultRuntime(rt)
+        assertDoesNotThrow { Cnos.refreshSecret("does.not.exist") }
+    }
+
+    // ================================================================
+    // Composition model
+    // ================================================================
+
+    // Simulates: root → libA → libB where each library reads from the
+    // module-level singleton and only the root calls setDefaultRuntime.
+
+    private fun libB_read(): Optional<Any> = Cnos.value("server.port")
+    private fun libA_read(): Optional<Any> = libB_read()
+
+    @Test
+    fun `composition root — libraries succeed after root initializes singleton`() {
+        val rt = CnosRuntime.loadProjection(MINIMAL.toByteArray())
+        Cnos.setDefaultRuntime(rt)    // root initializes once
+
+        val port = libA_read()        // libA → libB → Cnos.value(…)
+        assertTrue(port.isPresent)
+        assertEquals(3000L, (port.get() as Number).toLong())
+    }
+
+    @Test
+    fun `composition root — libraries throw before root initializes`() {
+        // root has NOT initialized the singleton
+        assertThrows<CnosError> { libA_read() }
     }
 }

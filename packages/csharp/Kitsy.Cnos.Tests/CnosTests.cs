@@ -129,6 +129,54 @@ namespace Kitsy.Cnos.Tests
             Assert.True(found);
             Assert.Equal("console.kitsy.local", host);
         }
+
+        // ================================================================
+        // Composition model
+        // ================================================================
+        //
+        // root → LibA → LibB → LibC → LibD, LibE → LibF
+        // Libraries read from the singleton. Only the root calls SetDefaultRuntime.
+
+        private static (object? Value, bool Found) LibF_ReadMeta() => Cnos.Meta("workspace");
+        private static (object? Value, bool Found) LibE_ReadMeta() => LibF_ReadMeta();
+        private static (object? Value, bool Found) LibD_ReadPort() => Cnos.Value("server.port");
+        private static (object? Value, bool Found) LibC_ReadPort() => LibD_ReadPort();
+
+        private static ((object? Value, bool Found) Port, (object? Value, bool Found) Workspace) LibB_Read()
+            => (LibC_ReadPort(), LibE_ReadMeta());
+
+        private static ((object? Value, bool Found) Port, (object? Value, bool Found) Workspace) LibA_Read()
+            => LibB_Read();
+
+        [Fact]
+        public void CompositionLibrariesSucceedAfterRootInitializes()
+        {
+            Cnos.SetDefaultRuntime(MakeRuntime());  // root initializes once
+
+            var (portResult, wsResult) = LibA_Read();
+            Assert.True(portResult.Found);
+            Assert.Equal(3000L, Convert.ToInt64(portResult.Value));
+            Assert.True(wsResult.Found);
+            Assert.Equal("base", wsResult.Value);
+        }
+
+        [Fact]
+        public void CompositionLibrariesFailBeforeRootInitializes()
+        {
+            // Root has NOT initialized — reads should throw
+            Assert.Throws<CnosError>(() => LibA_Read());
+        }
+
+        [Fact]
+        public void CompositionMultipleLibrariesShareSameRuntime()
+        {
+            var rt = MakeRuntime();
+            Cnos.SetDefaultRuntime(rt);
+
+            Assert.Same(rt, Cnos.DefaultRuntime());
+            _ = LibA_Read();
+            Assert.Same(rt, Cnos.DefaultRuntime());  // unchanged after reads
+        }
     }
 
     [CollectionDefinition("Singleton")]

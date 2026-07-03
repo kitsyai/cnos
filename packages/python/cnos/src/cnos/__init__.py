@@ -15,13 +15,14 @@ from cnos.exports import (
     log_message,
     to_env,
     to_namespace,
-    to_object,
-    to_public_env,
+    to_object as _exports_to_object,
+    to_public_env as _exports_to_public_env,
     to_server_projection,
 )
 from cnos.inspect import InspectResult
 from cnos.loader import (
     CnosOptions,
+    _reset_default_runtime,
     bootstrap_default_runtime,
     default_runtime,
     load,
@@ -83,7 +84,7 @@ def inspect(key: str) -> InspectResult:
 
 
 def get_to_object() -> Dict[str, Any]:
-    return to_object(default_runtime())
+    return _exports_to_object(default_runtime())
 
 
 def get_to_namespace(namespace: str) -> Dict[str, Any]:
@@ -95,7 +96,7 @@ def get_to_env(options: Optional[ToEnvOptions] = None) -> Dict[str, str]:
 
 
 def get_to_public_env(options: Optional[ToPublicEnvOptions] = None) -> Dict[str, str]:
-    return to_public_env(default_runtime(), options)
+    return _exports_to_public_env(default_runtime(), options)
 
 
 def get_to_server_projection() -> ServerProjection:
@@ -124,6 +125,30 @@ def register_runtime_provider(namespace: str, provider: Any) -> None:
 
 def register_secret_vault_providers(*factories: SecretVaultProviderFactory) -> None:
     default_runtime().register_secret_vault_providers(*factories)
+
+
+# ---------------------------------------------------------------------------
+# Contract-standard names (consistent with Go, Rust, Java, C#, Kotlin)
+# ---------------------------------------------------------------------------
+
+def reset_default_runtime() -> None:
+    """Reset the default runtime. Use in tests to restore a clean state."""
+    _reset_default_runtime()
+
+
+def to_object() -> Dict[str, Any]:
+    """Return all resolved config keys as a nested dict (singleton shortcut)."""
+    return _exports_to_object(default_runtime())
+
+
+def to_public_env(options: Optional[ToPublicEnvOptions] = None) -> Dict[str, str]:
+    """Export promoted public keys as env-var pairs (singleton shortcut)."""
+    return _exports_to_public_env(default_runtime(), options)
+
+
+def format(message: str) -> str:  # noqa: A001 — intentional shadow of builtin
+    """Substitute ${key} patterns in message with resolved config values."""
+    return format_message(default_runtime(), message)
 
 
 # Bootstrap eagerly (mirrors Go's init())
@@ -156,6 +181,7 @@ __all__ = [
     "ready",
     "set_default_runtime",
     "default_runtime",
+    "reset_default_runtime",
     # Module-level read API
     "read",
     "require",
@@ -165,7 +191,11 @@ __all__ = [
     "meta",
     "public",
     "inspect",
-    # Export API
+    # Contract-standard names
+    "to_object",
+    "to_public_env",
+    "format",
+    # Export API (legacy names kept for backwards compat)
     "get_to_object",
     "get_to_namespace",
     "get_to_env",

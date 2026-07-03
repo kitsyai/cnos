@@ -23,6 +23,11 @@ class Loader
         self::$defaultRuntime = $runtime;
     }
 
+    public static function resetDefaultRuntime(): void
+    {
+        self::$defaultRuntime = null;
+    }
+
     public static function load(?LoaderOptions $options = null): CnosRuntime
     {
         $opts       = $options ?? new LoaderOptions();

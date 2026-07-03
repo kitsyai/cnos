@@ -216,6 +216,135 @@ class CnosRuntime
         return $result;
     }
 
+    public function format(string $message): string
+    {
+        return (string) preg_replace_callback('/\$\{([^}]+)}/', function (array $m): string {
+            $key = trim($m[1]);
+            if ($key === '') return $m[0];
+            [$value, $found] = $this->readInternal($key, []);
+            if (!$found) return $m[0];
+            return is_string($value) ? $value : (string) json_encode($value);
+        }, $message);
+    }
+
+    /**
+     * Export promoted public keys as env-var pairs for a browser framework.
+     *
+     * @param string $framework  'vite', 'next', 'react', 'gatsby', 'expo', 'nuxt', 'svelte', 'astro', 'angular', 'webpack'
+     * @param string $prefix     explicit prefix override (empty = derive from $framework)
+     * @return array<string, string>
+     */
+    public function toPublicEnv(string $framework = '', string $prefix = ''): array
+    {
+        $effectivePrefix = $prefix !== '' ? $prefix : self::frameworkPrefix($framework);
+        $result          = [];
+        foreach ($this->entries as $key => $entry) {
+            if (($entry['namespace'] ?? '') !== 'public') continue;
+            if (!empty($entry['aliasTo']) && str_starts_with((string) $entry['aliasTo'], 'secret.')) continue;
+            [$value, $found] = $this->readInternal($key, []);
+            if (!$found || $value === null) continue;
+            $shortPath = str_starts_with($key, 'public.') ? substr($key, 7) : $key;
+            $baseVar   = $this->fallbackPublicEnvVar($shortPath);
+            $envVar    = ($effectivePrefix !== '' && !str_starts_with($baseVar, $effectivePrefix))
+                ? $effectivePrefix . $baseVar
+                : $baseVar;
+            $result[$envVar] = is_string($value) ? $value : (string) json_encode($value);
+        }
+        return $result;
+    }
+
+    public function refreshSecrets(): void
+    {
+        $savedHydrated   = $this->hydratedSecrets;
+        $savedLocalCache = $this->localVaultCache;
+        $this->hydratedSecrets  = [];
+        $this->localVaultCache  = [];
+        try {
+            $this->warmSecrets();
+        } catch (CnosError $e) {
+            $this->hydratedSecrets  = $savedHydrated;
+            $this->localVaultCache  = $savedLocalCache;
+            throw $e;
+        }
+    }
+
+    public function refreshSecret(string $path): void
+    {
+        $key   = $this->toLogicalKey('secret', $path);
+        $entry = $this->entries[$key] ?? null;
+        if ($entry === null || empty($entry['ref'])) return;
+
+        $hadValue        = array_key_exists($key, $this->hydratedSecrets);
+        $savedValue      = $this->hydratedSecrets[$key] ?? null;
+        $vaultId         = $this->logicalKeyToVault[$key] ?? null;
+        $savedVaultCache = $vaultId !== null ? ($this->localVaultCache[$vaultId] ?? null) : null;
+
+        unset($this->hydratedSecrets[$key]);
+        if ($vaultId !== null) unset($this->localVaultCache[$vaultId]);
+
+        try {
+            $this->readSecret($key, $entry['ref']);
+        } catch (CnosError $e) {
+            if ($hadValue) $this->hydratedSecrets[$key] = $savedValue;
+            if ($vaultId !== null) {
+                if ($savedVaultCache !== null) $this->localVaultCache[$vaultId] = $savedVaultCache;
+                else unset($this->localVaultCache[$vaultId]);
+            }
+            throw $e;
+        }
+    }
+
+    private function warmSecrets(): void
+    {
+        $keys = array_keys($this->entries);
+        sort($keys);
+        foreach ($keys as $key) {
+            $entry = $this->entries[$key] ?? null;
+            if ($entry === null || empty($entry['ref'])) continue;
+            if (($entry['type'] ?? '') !== 'secret') continue;
+            $this->readSecret($key, $entry['ref']);
+        }
+    }
+
+    private static function frameworkPrefix(string $framework): string
+    {
+        return match ($framework) {
+            'vite'    => 'VITE_',
+            'next'    => 'NEXT_PUBLIC_',
+            'react'   => 'REACT_APP_',
+            'gatsby'  => 'GATSBY_',
+            'expo'    => 'EXPO_PUBLIC_',
+            'nuxt'    => 'NUXT_PUBLIC_',
+            'svelte'  => 'PUBLIC_',
+            'astro'   => 'PUBLIC_',
+            'angular' => 'NG_APP_',
+            'webpack' => 'PUBLIC_',
+            default   => '',
+        };
+    }
+
+    private function fallbackPublicEnvVar(string $subPath): string
+    {
+        $result        = '';
+        $lastUnderscore = false;
+        for ($i = 0; $i < strlen($subPath); $i++) {
+            $c = $subPath[$i];
+            if ($c >= 'a' && $c <= 'z') {
+                $result        .= strtoupper($c);
+                $lastUnderscore = false;
+            } elseif (($c >= 'A' && $c <= 'Z') || ($c >= '0' && $c <= '9')) {
+                $result        .= $c;
+                $lastUnderscore = false;
+            } else {
+                if (!$lastUnderscore) {
+                    $result        .= '_';
+                    $lastUnderscore = true;
+                }
+            }
+        }
+        return trim($result, '_');
+    }
+
     // -------------------------------------------------------------------------
     // Internal read
     // -------------------------------------------------------------------------

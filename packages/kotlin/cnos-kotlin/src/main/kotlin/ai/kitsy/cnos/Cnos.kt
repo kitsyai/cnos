@@ -65,11 +65,14 @@ object Cnos {
             "cnos: runtime not initialized. Call Cnos.ready() or Cnos.setDefaultRuntime()"
         )
 
-    /** Resets the default runtime (useful for testing). */
-    fun reset() {
+    /** Resets the default runtime. Use in tests to restore a clean state. */
+    fun resetDefaultRuntime() {
         lock.lock()
         try { instance = null } finally { lock.unlock() }
     }
+
+    @Deprecated("Use resetDefaultRuntime()", ReplaceWith("resetDefaultRuntime()"))
+    fun reset() = resetDefaultRuntime()
 
     // ================================================================
     // Read APIs
@@ -85,8 +88,16 @@ object Cnos {
     fun json(path: String): Optional<Any> = defaultRuntime().json(path)
     fun pem(path: String): Optional<String> = defaultRuntime().pem(path)
     fun format(message: String): String = defaultRuntime().format(message)
+    fun toObject(): Map<String, Any?> = defaultRuntime().toObject()
     fun toPublicEnv(options: ToPublicEnvOptions = ToPublicEnvOptions()): Map<String, String> =
         defaultRuntime().toPublicEnv(options)
+
+    // ================================================================
+    // Secrets
+    // ================================================================
+
+    fun refreshSecrets() = defaultRuntime().refreshSecrets()
+    fun refreshSecret(path: String) = defaultRuntime().refreshSecret(path)
 
     // ================================================================
     // Registration
