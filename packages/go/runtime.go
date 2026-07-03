@@ -103,21 +103,10 @@ func Load(options Options) (*Runtime, error) {
 		return newRuntime([]byte(serialized), env, secretHome, options.SecretVaultProviders)
 	}
 
-	projectionPath, err := findProjectionPath(options.WorkingDir)
-	if err != nil {
-		return nil, fmt.Errorf("cnos: discover projection file: %w", err)
-	}
-	if projectionPath != "" {
-		bytes, err := os.ReadFile(projectionPath)
-		if err != nil {
-			return nil, fmt.Errorf("cnos: read projection file %s: %w", projectionPath, err)
-		}
-		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
-	}
-
 	parsedArgs := parseCliArgs(os.Args[1:])
 
 	// Explicit runtime projection path: --cnos-projection=<path> or CNOS_SERVER_PROJECTION_PATH
+	// Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
 	if rp := resolveRuntimeProjectionPath(parsedArgs, env); rp != "" {
 		resolved, err := resolvePathFromWorkingDir(options.WorkingDir, rp)
 		if err != nil {
@@ -126,6 +115,18 @@ func Load(options Options) (*Runtime, error) {
 		bytes, err := os.ReadFile(resolved)
 		if err != nil {
 			return nil, fmt.Errorf("cnos: read projection file %s: %w", resolved, err)
+		}
+		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
+	}
+
+	projectionPath, err := findProjectionPath(options.WorkingDir)
+	if err != nil {
+		return nil, fmt.Errorf("cnos: discover projection file: %w", err)
+	}
+	if projectionPath != "" {
+		bytes, err := os.ReadFile(projectionPath)
+		if err != nil {
+			return nil, fmt.Errorf("cnos: read projection file %s: %w", projectionPath, err)
 		}
 		return newRuntime(bytes, env, secretHome, options.SecretVaultProviders)
 	}

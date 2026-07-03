@@ -1112,10 +1112,22 @@ function bootstrapDynamic(): void {
     return;
   }
 
+  // Dynamic mode only suppresses projection-not-found. If a higher-priority source
+  // (__CNOS_GRAPH__, __CNOS_PROJECTION__, or an explicit path) was attempted but failed,
+  // surface that error rather than silently falling through to a dynamic stub.
+  if (bootstrapGraphEnvError || bootstrapEnvProjectionError || explicitServerProjectionPathError) {
+    return;
+  }
+
   const envFlag = process.env['CNOS_DYNAMIC'];
-  const argFlag = (process.argv ?? []).some(
-    (a) => a === '--cnos-dynamic' || a.startsWith('--cnos-dynamic='),
-  );
+  const argFlag = (process.argv ?? []).some((a) => {
+    if (a === '--cnos-dynamic') return true;
+    if (a.startsWith('--cnos-dynamic=')) {
+      const val = a.slice('--cnos-dynamic='.length).toLowerCase();
+      return val === '1' || val === 'true' || val === 'yes';
+    }
+    return false;
+  });
   const isDynamic =
     argFlag || (envFlag !== undefined && ['1', 'true', 'yes'].includes(envFlag.toLowerCase()));
 

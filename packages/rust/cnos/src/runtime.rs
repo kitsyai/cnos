@@ -156,21 +156,21 @@ impl CnosRuntime {
             return Self::new_from_bytes(serialized.as_bytes(), env, secret_home, options.secret_vault_providers);
         }
 
-        if let Some(path) = find_projection_path(options.working_dir.as_deref())? {
-            let bytes = std::fs::read(&path)
-                .map_err(|e| CnosError::IoError(format!("read projection file {:?}: {}", path, e)))?;
-            return Self::new_from_bytes(&bytes, env, secret_home, options.secret_vault_providers);
-        }
-
-        let parsed_args = parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>());
-
         // Explicit runtime projection path: --cnos-projection=<path> or CNOS_SERVER_PROJECTION_PATH
+        // Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
+        let parsed_args = parse_cli_args(std::env::args().skip(1).collect::<Vec<_>>());
         let runtime_proj = parsed_args.get("--cnos-projection").cloned()
             .or_else(|| env.get("CNOS_SERVER_PROJECTION_PATH").filter(|v| !v.is_empty()));
         if let Some(rp) = runtime_proj {
             let full_path = resolve_path_from_working_dir(options.working_dir.as_deref(), &rp)?;
             let bytes = std::fs::read(&full_path)
                 .map_err(|e| CnosError::IoError(format!("read projection file {:?}: {}", full_path, e)))?;
+            return Self::new_from_bytes(&bytes, env, secret_home, options.secret_vault_providers);
+        }
+
+        if let Some(path) = find_projection_path(options.working_dir.as_deref())? {
+            let bytes = std::fs::read(&path)
+                .map_err(|e| CnosError::IoError(format!("read projection file {:?}: {}", path, e)))?;
             return Self::new_from_bytes(&bytes, env, secret_home, options.secret_vault_providers);
         }
 

@@ -52,21 +52,23 @@ class Loader
         }
 
         // 4. .cnos-server.json file discovery
-        $path = Discover::findProjectionPath($opts->workingDir);
-        if ($path !== '') {
-            return self::newRuntime(self::readFile($path), $env, $secretHome, $factories);
-        }
-
-        $argv      = array_slice($GLOBALS['argv'] ?? [], 1);
+        $argv       = array_slice($GLOBALS['argv'] ?? [], 1);
         $parsedArgv = self::parseArgv($argv);
 
         // 5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+        // Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
         $runtimeProj = $parsedArgv['--cnos-projection'] ?? '';
         if ($runtimeProj === '') {
             $runtimeProj = self::envValue('CNOS_SERVER_PROJECTION_PATH', $env) ?? '';
         }
         if ($runtimeProj !== '') {
-            return self::newRuntime(self::readFile($runtimeProj), $env, $secretHome, $factories);
+            $resolved = self::resolvePathFromWorkingDir($opts->workingDir, $runtimeProj);
+            return self::newRuntime(self::readFile($resolved), $env, $secretHome, $factories);
+        }
+
+        $path = Discover::findProjectionPath($opts->workingDir);
+        if ($path !== '') {
+            return self::newRuntime(self::readFile($path), $env, $secretHome, $factories);
         }
 
         // 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
@@ -157,6 +159,17 @@ class Loader
             meta:              new ProjectionMeta(workspace: 'base', profile: '', cnosVersion: 'dynamic'),
         );
         return new CnosRuntime($projection, $env, $secretHome, $factories);
+    }
+
+    private static function resolvePathFromWorkingDir(?string $workingDir, string $path): string
+    {
+        if ($path === '') return $path;
+        // Absolute path: Unix /... or Windows C:\... / C:/...
+        if ($path[0] === '/' || $path[0] === '\\' || (strlen($path) >= 2 && $path[1] === ':')) {
+            return $path;
+        }
+        $base = ($workingDir !== null && $workingDir !== '') ? $workingDir : (getcwd() ?: '');
+        return $base . DIRECTORY_SEPARATOR . $path;
     }
 
     /** @param string[] $argv @return array<string, string> */

@@ -118,17 +118,8 @@ def load(options: Optional[CnosOptions] = None) -> CnosRuntime:
     if proj_found and proj_serialized:
         return new_runtime(proj_serialized.encode(), env, secret_home, factories)
 
-    # 5. .cnos-server.json file discovery
-    proj_path = find_projection_path(opts.working_dir)
-    if proj_path:
-        try:
-            with open(proj_path, "rb") as f:
-                data = f.read()
-        except OSError as exc:
-            raise CnosError(f"cnos: read projection file {proj_path}: {exc}") from exc
-        return new_runtime(data, env, secret_home, factories)
-
-    # 5.5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+    # 5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+    # Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
     parsed_args = _parse_cli_args(sys.argv[1:])
     runtime_proj: Optional[str] = parsed_args.get("--cnos-projection")
     if not runtime_proj:
@@ -142,6 +133,16 @@ def load(options: Optional[CnosOptions] = None) -> CnosRuntime:
                 data = f.read()
         except OSError as exc:
             raise CnosError(f"cnos: read projection file {resolved}: {exc}") from exc
+        return new_runtime(data, env, secret_home, factories)
+
+    # 6. .cnos-server.json file discovery
+    proj_path = find_projection_path(opts.working_dir)
+    if proj_path:
+        try:
+            with open(proj_path, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            raise CnosError(f"cnos: read projection file {proj_path}: {exc}") from exc
         return new_runtime(data, env, secret_home, factories)
 
     # 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.

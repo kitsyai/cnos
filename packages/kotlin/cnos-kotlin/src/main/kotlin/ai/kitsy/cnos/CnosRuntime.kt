@@ -496,19 +496,20 @@ class CnosRuntime private constructor(
                 return buildFromProjection(it.toByteArray(), env, secretHome, options.secretVaultProviders)
             }
 
-            val projPath = findProjectionPath(options.workingDir)
-            if (projPath != null)
-                return buildFromProjection(File(projPath).readBytes(), env, secretHome, options.secretVaultProviders)
-
             val parsedArgs = parseCliArgs(getProcessArgv())
 
             // Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+            // Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
             val runtimeProj = parsedArgs["--cnos-projection"]?.takeIf { it.isNotEmpty() }
                 ?: env.get("CNOS_SERVER_PROJECTION_PATH")?.takeIf { it.isNotEmpty() }
             if (runtimeProj != null) {
                 val resolved = resolvePathFromWorkingDir(options.workingDir, runtimeProj)
                 return buildFromProjection(File(resolved).readBytes(), env, secretHome, options.secretVaultProviders)
             }
+
+            val projPath = findProjectionPath(options.workingDir)
+            if (projPath != null)
+                return buildFromProjection(File(projPath).readBytes(), env, secretHome, options.secretVaultProviders)
 
             // Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
             val isDynamic = parsedArgs["--cnos-dynamic"] == "true" ||

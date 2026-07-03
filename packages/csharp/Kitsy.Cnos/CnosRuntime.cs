@@ -122,13 +122,10 @@ namespace Kitsy.Cnos
             if (!string.IsNullOrEmpty(projSerialized))
                 return NewRuntime(Encoding.UTF8.GetBytes(projSerialized!), env, secretHome, factories);
 
-            string? projPath = FindProjectionPath(options.WorkingDir);
-            if (projPath != null)
-                return NewRuntime(File.ReadAllBytes(projPath), env, secretHome, factories);
-
             var parsedArgs = ParseCliArgs(System.Environment.GetCommandLineArgs().Skip(1).ToArray());
 
             // Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+            // Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
             string runtimeProj = parsedArgs.GetValueOrDefault("--cnos-projection", "");
             if (string.IsNullOrEmpty(runtimeProj))
                 runtimeProj = env.Get("CNOS_SERVER_PROJECTION_PATH") ?? "";
@@ -137,6 +134,10 @@ namespace Kitsy.Cnos
                 string resolved = ResolvePathFromWorkingDir(options.WorkingDir, runtimeProj);
                 return NewRuntime(File.ReadAllBytes(resolved), env, secretHome, factories);
             }
+
+            string? projPath = FindProjectionPath(options.WorkingDir);
+            if (projPath != null)
+                return NewRuntime(File.ReadAllBytes(projPath), env, secretHome, factories);
 
             // Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
             bool isDynamic = parsedArgs.GetValueOrDefault("--cnos-dynamic") == "true";

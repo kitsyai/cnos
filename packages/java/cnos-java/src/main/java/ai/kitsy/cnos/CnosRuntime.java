@@ -124,16 +124,10 @@ public final class CnosRuntime {
                     env, secretHome, factories);
         }
 
-        // 5. .cnos-server.json file discovery
-        String projectionPath = findProjectionPath(options.getWorkingDir());
-        if (projectionPath != null) {
-            byte[] data = readFile(projectionPath);
-            return newRuntime(data, env, secretHome, factories);
-        }
-
         Map<String, String> parsedArgs = parseCliArgs(getProcessArgs());
 
-        // 5.5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+        // 5. Explicit runtime projection path: --cnos-projection or CNOS_SERVER_PROJECTION_PATH
+        // Checked before file auto-discovery so it always wins over .cnos-server.json on disk.
         String runtimeProj = parsedArgs.getOrDefault("--cnos-projection", "");
         if (runtimeProj.isEmpty()) {
             runtimeProj = env.get("CNOS_SERVER_PROJECTION_PATH").orElse("");
@@ -144,7 +138,14 @@ public final class CnosRuntime {
             return newRuntime(data, env, secretHome, factories);
         }
 
-        // 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
+        // 6. .cnos-server.json file discovery
+        String projectionPath = findProjectionPath(options.getWorkingDir());
+        if (projectionPath != null) {
+            byte[] data = readFile(projectionPath);
+            return newRuntime(data, env, secretHome, factories);
+        }
+
+        // 7. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
         if ("true".equals(parsedArgs.get("--cnos-dynamic")) || isDynamicEnv(env)) {
             return newDynamicRuntime(env, secretHome, factories);
         }
