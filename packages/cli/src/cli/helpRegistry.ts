@@ -830,10 +830,16 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'build server',
     summary: 'Build a server runtime projection artifact.',
-    usage: 'cnos build server --to <path> [--format <json|yaml>] [global-options]',
+    usage: 'cnos build server --to <path> [--format <json|yaml>] [--dynamic] [global-options]',
     description:
-      'Builds a flat server projection for runtime auto-loading. Non-secret values are embedded, while secret refs remain refs and hydrate at runtime.',
-    examples: ['cnos build server --to .cnos-server.json', 'cnos build server --profile prod --to dist/.cnos-server.json'],
+      'Builds a flat server projection for runtime auto-loading. Non-secret values are embedded, while secret refs remain refs and hydrate at runtime. ' +
+      'Pass --dynamic to include all schema-declared keys in the overrides block even when they have no stored value, ' +
+      'so runtimes can apply schema type metadata to values supplied via --cnos-patch at startup.',
+    examples: [
+      'cnos build server --to .cnos-server.json',
+      'cnos build server --profile prod --to dist/.cnos-server.json',
+      'cnos build server --dynamic --to .cnos-server.json',
+    ],
   },
   {
     id: 'build browser',

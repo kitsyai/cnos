@@ -226,12 +226,12 @@ export function createRuntime(
         isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(resolveProjectedSourceKey(key)),
       });
     },
-    toServerProjection() {
+    toServerProjection(opts) {
       return toServerProjection(graph, manifest, cnosVersion, {
         read: (key) => derivedSupport.toConcreteValue(key, (candidate) => readLogicalKey(candidate), 'server'),
         isRuntimeDependent: (key) => derivedSupport.isRuntimeDependentKey(key),
         toServerFormula: (key) => derivedSupport.toServerFormula(key),
-      });
+      }, opts);
     },
     registerRuntimeProvider(namespace, provider) {
       registerRuntimeProvider(manifest, runtimeProviders, namespace, provider);

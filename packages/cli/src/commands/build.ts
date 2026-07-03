@@ -18,6 +18,7 @@ export async function runBuild(
   const infoArgs = [...(options.cliArgs ?? [])];
   const format = (consumeOption(infoArgs, '--format') ?? undefined) as ProjectionFormat | undefined;
   const isPublic = consumeFlag(infoArgs, '--public');
+  const isDynamic = consumeFlag(infoArgs, '--dynamic');
   const framework = consumeOption(infoArgs, '--framework');
   consumeOption(infoArgs, '--prefix');
   const to = consumeOption(infoArgs, '--to');
@@ -50,7 +51,7 @@ export async function runBuild(
       break;
     }
     case 'server': {
-      const result = await buildServerProjectionArtifact(to, options, format ?? 'json');
+      const result = await buildServerProjectionArtifact(to, options, format ?? 'json', { dynamic: isDynamic });
       targetPath = result.targetPath;
       count = 1;
       break;

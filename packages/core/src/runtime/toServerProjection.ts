@@ -174,6 +174,11 @@ export function toServerProjection(
     isRuntimeDependent?: (key: string) => boolean;
     toServerFormula?: (key: string) => ServerProjection['derived'][string] | undefined;
   } = {},
+  options: {
+    /** Include all schema-declared keys in the overrides block, not just those with env/arg aliases.
+     *  Enables patch-file-only workflows to carry schema type metadata at runtime. */
+    dynamic?: boolean;
+  } = {},
 ): ServerProjection {
   const values: Record<string, unknown> = {};
   const derived: ServerProjection['derived'] = {};
@@ -289,6 +294,21 @@ export function toServerProjection(
         arg: argAliases,
         priority: schemaRule.priority ?? DEFAULT_OVERRIDE_PRIORITY,
         ...(schemaRule.type ? { type: schemaRule.type } : {}),
+      };
+    }
+  }
+
+  // Third pass (dynamic mode only): remaining schema keys with no env/arg — emit a cnos-priority
+  // override entry so their declared type travels with the projection for patch-file workflows.
+  if (options.dynamic) {
+    for (const [schemaKey, schemaRule] of Object.entries(manifest.schema)) {
+      const strippedKey = stripValuePrefix(schemaKey);
+      if (overrides[strippedKey]) continue;
+      overrides[strippedKey] = {
+        env: [],
+        arg: [],
+        priority: ['cnos'],
+        ...(schemaRule?.type ? { type: schemaRule.type } : {}),
       };
     }
   }

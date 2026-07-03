@@ -135,6 +135,7 @@ export async function resolveFrameworkEnv(
 
 export async function resolveServerProjection(
   options: CnosCreateOptions = {},
+  buildOptions: { dynamic?: boolean } = {},
 ): Promise<ServerProjection> {
   const secretResolution = options.secretResolution ?? 'lazy';
   const runtime = await createCnos({
@@ -143,7 +144,7 @@ export async function resolveServerProjection(
     secretResolution,
   });
   validateServerProjectionSecretRefs(runtime);
-  return runtime.toServerProjection();
+  return runtime.toServerProjection(buildOptions);
 }
 
 function validateServerProjectionSecretRefs(runtime: CnosRuntime): void {

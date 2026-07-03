@@ -50,11 +50,12 @@ export async function buildServerProjectionArtifact(
   to: string,
   options: RuntimeServiceOptions = {},
   format: ProjectionFormat = 'json',
+  buildOptions: { dynamic?: boolean } = {},
 ): Promise<{ targetPath: string; output: string }> {
   const projection = await resolveServerProjection({
     ...options,
     cacheMode: 'build',
-  });
+  }, buildOptions);
   const output =
     format === 'yaml'
       ? stringifyYaml(projection)

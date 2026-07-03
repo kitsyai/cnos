@@ -182,7 +182,7 @@ export interface CnosRuntime {
   toNamespace(namespace: NamespaceName): Record<string, unknown>;
   toEnv(options?: ToEnvOptions): Record<string, string>;
   toPublicEnv(options?: ToPublicEnvOptions): Record<string, string>;
-  toServerProjection(): ServerProjection;
+  toServerProjection(options?: { dynamic?: boolean }): ServerProjection;
   registerRuntimeProvider(namespace: string, provider: RuntimeProvider): void;
   refreshSecrets(): Promise<void>;
   refreshSecret(key: LogicalKey): Promise<void>;
