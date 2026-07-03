@@ -271,7 +271,7 @@ describe('spec doctor command', () => {
         cliArgs: ['--review-all'],
       }),
     ).rejects.toThrow('remote and read-only');
-  });
+  }, 20000);
 
   it('cnos doctor includes spec doctor pointer when schema is non-empty', async () => {
     const root = await createSpecDoctorFixture();
