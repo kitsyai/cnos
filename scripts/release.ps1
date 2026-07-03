@@ -57,7 +57,7 @@ Info "Fetching origin/main..."
 git fetch --quiet origin main
 $local  = git rev-parse HEAD
 $remote = git rev-parse origin/main
-if ($local -ne $remote) { Die "Local main is not in sync with origin/main — run: git pull origin main" }
+if ($local -ne $remote) { Die "Local main is not in sync with origin/main - run: git pull origin main" }
 Info "Up to date with origin/main OK"
 
 # ── tests ─────────────────────────────────────────────────────────────────────
