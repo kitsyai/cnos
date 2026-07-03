@@ -2,14 +2,16 @@
 # release.ps1 — bump all runtimes, run checks, commit, push, and tag.
 #
 # Usage:
-#   .\scripts\release.ps1 1.12.4
-#   .\scripts\release.ps1 -SkipTests 1.12.4
-#   .\scripts\release.ps1 -NoTag 1.12.4     # commit+push only, tag separately
+#   .\scripts\release.ps1 patch          # 1.2.3 -> 1.2.4
+#   .\scripts\release.ps1 minor          # 1.2.3 -> 1.3.0
+#   .\scripts\release.ps1 major          # 1.2.3 -> 2.0.0
+#   .\scripts\release.ps1 1.12.4         # explicit version
+#   .\scripts\release.ps1 -SkipTests patch
+#   .\scripts\release.ps1 -NoTag patch   # commit+push only, tag separately
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$NewVersion,
 
     [switch]$SkipTests,
@@ -43,6 +45,23 @@ function Write-Utf8NoBom([string]$path, [string]$content) {
 $pkgJson = Get-Content "packages\cnos\package.json" -Raw | ConvertFrom-Json
 $OldVersion = $pkgJson.version
 if (-not $OldVersion) { Die "Could not detect current version from packages/cnos/package.json" }
+
+# ── resolve semantic bump ────────────────────────────────────────────────────
+
+if ($NewVersion -in 'major', 'minor', 'patch') {
+    $parts = $OldVersion -split '\.'
+    $maj = [int]$parts[0]; $min = [int]$parts[1]; $pat = [int]$parts[2]
+    $NewVersion = switch ($NewVersion.ToLower()) {
+        'major' { "$($maj + 1).0.0" }
+        'minor' { "$maj.$($min + 1).0" }
+        'patch' { "$maj.$min.$($pat + 1)" }
+    }
+}
+
+if ($NewVersion -notmatch '^\d+\.\d+\.\d+$') {
+    Die "Version must be X.Y.Z or major|minor|patch (got: '$NewVersion')"
+}
+
 if ($OldVersion -eq $NewVersion) { Die "Already at $NewVersion — nothing to do" }
 
 Write-Host ""

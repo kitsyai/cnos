@@ -19,7 +19,7 @@ step() { echo; echo "▸ $*"; }
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [options] <new-version>
+Usage: $(basename "$0") [options] <major|minor|patch|X.Y.Z>
 
 Bumps all runtime versions, runs tests, commits, pushes to main, and tags.
 
@@ -29,9 +29,12 @@ Options:
   -h, --help      Show this help
 
 Examples:
-  ./scripts/release.sh 1.12.4
-  ./scripts/release.sh --skip-tests 1.12.4
-  ./scripts/release.sh --no-tag 1.12.4
+  ./scripts/release.sh patch              # 1.2.3 -> 1.2.4
+  ./scripts/release.sh minor             # 1.2.3 -> 1.3.0
+  ./scripts/release.sh major             # 1.2.3 -> 2.0.0
+  ./scripts/release.sh 1.12.4            # explicit version
+  ./scripts/release.sh --skip-tests patch
+  ./scripts/release.sh --no-tag patch
 EOF
   exit 0
 }
@@ -55,8 +58,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$NEW_VERSION" ]] || usage
-[[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-  || die "Version must be X.Y.Z (got: '$NEW_VERSION')"
+[[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$NEW_VERSION" =~ ^(major|minor|patch)$ ]] \
+  || die "Version must be X.Y.Z or major|minor|patch (got: '$NEW_VERSION')"
 
 # ── detect current version ────────────────────────────────────────────────────
 
@@ -64,6 +67,18 @@ OLD_VERSION=$(grep '"version"' packages/cnos/package.json \
   | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
 [[ -n "$OLD_VERSION" ]] \
   || die "Could not detect current version from packages/cnos/package.json"
+
+# ── resolve semantic bump ─────────────────────────────────────────────────────
+
+if [[ "$NEW_VERSION" =~ ^(major|minor|patch)$ ]]; then
+  IFS='.' read -r _MAJ _MIN _PAT <<< "$OLD_VERSION"
+  case "$NEW_VERSION" in
+    major) NEW_VERSION="$((_MAJ + 1)).0.0" ;;
+    minor) NEW_VERSION="${_MAJ}.$((_MIN + 1)).0" ;;
+    patch) NEW_VERSION="${_MAJ}.${_MIN}.$((_PAT + 1))" ;;
+  esac
+fi
+
 [[ "$OLD_VERSION" != "$NEW_VERSION" ]] \
   || die "Already at $NEW_VERSION — nothing to do"
 
