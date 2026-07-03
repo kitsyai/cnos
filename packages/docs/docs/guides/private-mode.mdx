@@ -1,0 +1,139 @@
+---
+title: Private Mode
+description: Store local-only config overrides, personal credentials, and dev-only flags that never leave your machine.
+---
+
+# Private Mode
+
+Private mode lets you store config values, secrets, and profile overrides that should never leave your local development machine. These values live in `.cnos/.private/` — a directory that sits outside your committed config tree and should be added to `.gitignore`.
+
+Private mode is **not** encryption at rest. The intent is isolation from version control. For production secrets, use vault-backed secret storage.
+
+## When to use private mode
+
+- A local database password or API key that differs from the rest of the team's
+- Personal feature-flag overrides you are testing
+- Credentials for a third-party service where each developer has their own account
+- Config values for local infra (Docker containers, local Postgres) that do not apply in shared environments
+
+## File layout
+
+Private layers live under `.cnos/.private/` and mirror the structure of the main config tree:
+
+```
+.cnos/
+  .private/
+    values/          ← base workspace private values (all profiles)
+    secrets/         ← base workspace private secrets
+    profiles/
+      local/
+        values/      ← profile-specific private values
+        secrets/     ← profile-specific private secrets
+```
+
+Private layers are loaded after the normal resolution chain. A private value for a key shadows the shared value for that key within the active workspace and profile.
+
+## Set up the gitignore
+
+Add `.cnos/.private/` to `.gitignore` before writing any private values:
+
+```bash
+echo '.cnos/.private/' >> .gitignore
+```
+
+CNOS does not add this line automatically.
+
+## Write private values
+
+Pass `--private` on any write command to route the value to `.cnos/.private/` instead of the shared config path:
+
+```bash
+# Route a value to the private layer
+cnos value set db.host localhost --private
+
+# Route a secret to the private layer (stored as plaintext, not vault-encrypted)
+cnos secret set db.password localdev --private
+```
+
+The flags `--incog` and `--anonymous` are aliases of `--private` and behave identically:
+
+```bash
+cnos value set flags.new_ui true --incog
+cnos value set flags.new_ui true --anonymous
+```
+
+## Read private values
+
+Private layers are invisible unless you pass `--use-private` at read time:
+
+```bash
+# Without --use-private: private values are not included
+cnos read value.db.host
+
+# With --use-private: private layer shadows the shared value
+cnos read value.db.host --use-private
+```
+
+`--use-private` applies to all read-path commands:
+
+```bash
+cnos inspect value.db.host --use-private
+cnos export env --use-private
+cnos run --use-private -- node server.js
+```
+
+When `--use-private` is absent the `.cnos/.private/` directory is ignored entirely, even if it exists.
+
+## Private profiles
+
+Create a profile that is stored entirely under `.private/profiles/`:
+
+```bash
+cnos profile create mylocal --private
+```
+
+Use a private profile like any other profile:
+
+```bash
+cnos read value.server.port --profile mylocal --use-private
+cnos run --profile mylocal --use-private -- node server.js
+```
+
+:::note
+`--use-private` is required whenever any private layer (values, secrets, or profiles) needs to be visible. Omitting it means the private profile is not found.
+:::
+
+## Typical local dev workflow
+
+Set up your personal overrides once per repo clone:
+
+```bash
+# 1. Keep .private/ out of version control
+echo '.cnos/.private/' >> .gitignore
+
+# 2. Write your local DB credentials
+cnos value set db.host localhost --private
+cnos secret set db.password mylocalpw --private
+
+# 3. Set a feature flag you are testing
+cnos value set flags.new_dashboard true --private
+```
+
+Start your service with private layers active:
+
+```bash
+cnos run --use-private -- node server.js
+```
+
+Or export to a shell session:
+
+```bash
+eval "$(cnos export env --use-private)"
+```
+
+## Security notes
+
+- `.cnos/.private/` is plain text. Any process with filesystem read access can read these files.
+- Do not store production secrets in private mode. Use vault-backed secrets for anything that should not be readable from disk.
+- `cnos secret set --private` writes the value as plaintext under `.cnos/.private/secrets/`. It is excluded from version control but not encrypted by CNOS.
+- Private mode is designed to prevent accidental commits, not to protect secrets from local attackers.

@@ -1,0 +1,232 @@
+---
+title: PHP Runtime
+description: Use CNOS from PHP applications with Composer installation, a static facade, and array-based read API.
+---
+
+# PHP Runtime
+
+CNOS ships a first-party PHP runtime in [`packages/php`](https://github.com/kitsyai/cnos/tree/main/packages/php).
+
+The PHP client reads the same runtime bootstrap contracts as every other CNOS runtime:
+
+- `__CNOS_GRAPH__`
+- `__CNOS_PROJECTION__`
+- explicit `.cnos-server.json`
+- autodiscovered `.cnos-server.json` next to `.cnosrc.yml`
+
+## Build the projection
+
+For deployment or local packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+For process bootstrap during development:
+
+```bash
+cnos run -- php artisan serve
+```
+
+## Install
+
+```bash
+composer require kitsy/cnos
+```
+
+## Load the runtime
+
+**Singleton (static facade)**:
+
+```php
+use Kitsy\Cnos\Cnos;
+
+Cnos::ready();  // discover and load the projection
+
+[$port, $ok] = Cnos::value('server.port');
+if ($ok) {
+    echo "Listening on port $port\n";
+}
+```
+
+**Explicit instance**:
+
+```php
+use Kitsy\Cnos\Loader;
+use Kitsy\Cnos\LoaderOptions;
+
+$options = new LoaderOptions();
+$options->projectionPath = '.cnos-server.json';
+
+$runtime = Loader::load($options);
+[$port, $ok] = $runtime->value('server.port');
+```
+
+`Loader::load()` checks sources in this order:
+
+1. `projectionData` string from `LoaderOptions`
+2. explicit path from `LoaderOptions::$projectionPath`
+3. `__CNOS_GRAPH__` env var
+4. `__CNOS_PROJECTION__` env var
+5. `.cnos-server.json` in the current working directory
+6. `.cnos-server.json` beside a discovered `.cnosrc.yml`
+
+## Read values and secrets
+
+All instance read methods return `[mixed, bool]` arrays:
+
+```php
+[$port, $ok] = $runtime->value('server.port');
+if ($ok) {
+    echo "Port: $port\n";
+}
+
+[$token, $ok] = $runtime->secret('app.token');
+```
+
+Convenience forms by namespace:
+
+```php
+[$port, $ok]     = $runtime->value('server.port');
+[$password, $ok] = $runtime->secret('db.password');
+[$profile, $ok]  = $runtime->meta('profile');
+[$appUrl, $ok]   = $runtime->pub('app.url');  // public.* namespace
+```
+
+Read by full logical key:
+
+```php
+[$port, $ok] = $runtime->read('value.server.port');
+```
+
+Require (throws `CnosError` if absent):
+
+```php
+$port = $runtime->require('value.server.port');
+```
+
+Read with fallback:
+
+```php
+$port = $runtime->readOr('value.server.port', 3000);
+```
+
+## Read JSON and PEM values
+
+```php
+// Parses string values with json_decode; already-parsed arrays pass through
+[$params, $ok] = $runtime->json('api.default_query_params');
+
+// Returns PEM string with literal \n normalised to real newlines.
+// Checks value.* first, then secret.*
+[$cert, $ok] = $runtime->pem('tls.cert');
+```
+
+## Derived values stay live
+
+Runtime-dependent derived formulas in the server projection are evaluated at read time, not frozen during build.
+
+Example CNOS config:
+
+```yaml
+app:
+  origin:
+    $derive: "https://${value.app.host}:${process.env.PORT}"
+```
+
+In PHP:
+
+```php
+[$origin, $ok] = $runtime->value('app.origin');
+```
+
+If `PORT` changes in the host process, the next read re-evaluates the formula. Config-only derived values are cached once per resolution pass.
+
+## Custom runtime namespaces
+
+Register a callable for any namespace declared in the CNOS manifest:
+
+```php
+$runtime->registerRuntimeProvider('request', function (string $path): mixed {
+    if ($path === 'headers.host') {
+        return $_SERVER['HTTP_HOST'] ?? null;
+    }
+    return null;
+});
+```
+
+The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, and `pid`. It cannot be overridden.
+
+## Secret hydration
+
+The PHP runtime supports the built-in secret-ref providers used by server projections:
+
+- `environment`
+- `github-secrets`
+- `local`
+
+Remote providers (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) are registered as factory objects:
+
+```php
+use Kitsy\Cnos\SecretVaultProviderFactory;
+
+$runtime->registerSecretVaultProviders($gcpFactory, $awsFactory);
+```
+
+Or pass them at load time:
+
+```php
+use Kitsy\Cnos\LoaderOptions;
+
+$options = new LoaderOptions();
+$options->secretVaultProviders = [$gcpFactory];
+$runtime = Loader::load($options);
+```
+
+Auth conventions for local vaults:
+
+- `CNOS_SECRET_PASSPHRASE_<VAULT>`
+- `CNOS_SECRET_PASSPHRASE`
+
+Secret caches can be flushed and re-warmed:
+
+```php
+// Re-warm all secrets
+$runtime->refreshSecrets();
+
+// Re-warm a single secret
+$runtime->refreshSecret('db.password');
+```
+
+## Export helpers
+
+```php
+// All keys as UPPER_SNAKE_CASE env pairs
+$env = $runtime->toEnv();
+
+// All resolved values as an associative array (keyed by logical key)
+$obj = $runtime->toObject();
+
+// Promoted public keys with framework prefix
+$vite  = $runtime->toPublicEnv('vite');   // VITE_ prefix
+$next  = $runtime->toPublicEnv('next');   // NEXT_PUBLIC_ prefix
+$react = $runtime->toPublicEnv('react');  // REACT_APP_ prefix
+
+// Or supply an explicit prefix
+$custom = $runtime->toPublicEnv('', 'MY_APP_');
+```
+
+## Format helper
+
+Substitute `${key}` patterns in a message string:
+
+```php
+$msg = $runtime->format('Connecting to ${value.db.host}:${value.db.port}');
+echo $msg . "\n";
+```
+
+## Current limits
+
+- Browser/public runtime behavior is not supported. Use `cnos build env --public` instead.
+- YAML patch files are not supported in the PHP runtime; use JSON or `.properties` format.
+- All I/O is synchronous; there is no async hydration path.

@@ -1,0 +1,146 @@
+---
+title: Schema-level Overrides
+description: Declare per-key env var and CLI arg overrides in the schema so any CNOS runtime honours them without extra code.
+---
+
+# Schema-level Overrides
+
+Every entry in the CNOS `schema` section can declare which environment variables and CLI flags can override it at runtime. This is defined once in `cnos.yml` and works identically across all 8 CNOS runtimes.
+
+## Declaring overrides
+
+```yaml
+schema:
+  value.server.port:
+    type: number
+    required: true
+    env: PORT                   # single env var
+    arg: --port                 # single CLI flag
+
+  value.db.host:
+    type: string
+    env: [DB_HOST, DATABASE_HOST]   # multiple env vars (first match wins)
+    arg: [--db-host, --database-host]
+
+  value.log.level:
+    type: string
+    enum: [debug, info, warn, error]
+    env: LOG_LEVEL
+    arg: --log-level
+    priority: [env, arg, cnos]  # custom order: env beats flag for this key
+```
+
+## Priority order
+
+The default priority, applied to every key that declares `env` or `arg`:
+
+```
+arg  >  env  >  patch file  >  CNOS resolved value
+```
+
+The full chain including patch files:
+
+| Source | Set via |
+|--------|---------|
+| `arg` | CLI flag passed to the process (`--port 9090`) |
+| `env` | Environment variable (`PORT=9090`) |
+| patch file | `--cnos-patch=local.json` or `CNOS_PATCH_FILE=local.json` |
+| `cnos` | Profile values, vaults, derived formulas |
+
+A key that has no `env` or `arg` in its schema entry is still affected by patch files. Schema-level overrides are a separate, higher-priority layer on top.
+
+### Custom priority
+
+Override the order per key with the `priority` field:
+
+```yaml
+value.feature.killswitch:
+  type: boolean
+  env: KILLSWITCH
+  arg: --killswitch
+  priority: [env, arg, cnos]   # env wins over the flag for this key
+```
+
+Valid sources: `arg`, `env`, `cnos`. Omit a source to exclude it entirely.
+
+## How runtimes apply overrides
+
+At read time every CNOS runtime checks the override spec for the requested key:
+
+1. Walk `priority` in order.
+2. For each `arg` entry: look for the flag in the process argument list.
+3. For each `env` entry: look for the variable in the process environment.
+4. If a match is found and the value is non-empty and coercible to the declared `type`, return it immediately.
+5. If the value is empty or fails type coercion: emit a warning to stderr and continue to the next source.
+6. After exhausting the spec: fall through to the patch file, then to the CNOS resolved value.
+
+The override spec travels inside the server projection (`__CNOS_PROJECTION__` / `.cnos-server.json`) so the runtime does not need to parse `cnos.yml` directly.
+
+## Type coercion
+
+Override values from env vars and CLI args are always strings at the OS level. CNOS coerces them to the declared `type`:
+
+| Schema type | Coercion |
+|-------------|---------|
+| `string` | As-is |
+| `number` | `parseFloat` / `strconv.ParseFloat` |
+| `boolean` | `"true"` / `"1"` → `true`; `"false"` / `"0"` → `false` |
+| `array` | JSON-parsed if it starts with `[`, otherwise comma-split |
+| `object` | JSON-parsed |
+
+A value that cannot be coerced emits a warning and falls through to the next source.
+
+## Example: Gustav service
+
+The Gustav `cnos.yml` uses schema overrides for every public-facing tunable:
+
+```yaml
+schema:
+  value.http.addr:
+    type: string
+    env: GUSTAV_HTTP_ADDR
+    arg: --http.addr
+
+  secret.gustav.storeDsn:
+    type: string
+    env: GUSTAV_STORE_DSN
+    arg: --gustav.store-dsn
+
+  value.gustav.cache.url:
+    type: string
+    env: GUSTAV_CACHE_URL
+    arg: --gustav.cache.url
+```
+
+Starting the service with overrides:
+
+```bash
+# Via env vars (common in containers and CI)
+GUSTAV_HTTP_ADDR=0.0.0.0:9090 GUSTAV_STORE_DSN=postgres://... ./gustav
+
+# Via CLI flags
+./gustav --http.addr 0.0.0.0:9090 --gustav.store-dsn postgres://...
+
+# Via patch file (local dev)
+./gustav --cnos-patch=local.patch.json
+```
+
+All three forms are equivalent. The CNOS runtime resolves whichever source appears first in the priority chain.
+
+## envMapping vs schema env/arg
+
+CNOS has two distinct env-var mechanisms — don't confuse them:
+
+| Mechanism | Location | Purpose |
+|-----------|----------|---------|
+| `schema[key].env` | `schema` section | Runtime override: the env var *replaces* the CNOS value at read time |
+| `envMapping.explicit` | `envMapping` section | Export mapping: the env var is *written* by `cnos export env` / `cnos build env` for consumers that only read env vars |
+| `envMapping.convention` | `envMapping` section | Auto-naming convention for exported env vars (e.g. `SCREAMING_SNAKE`) |
+
+Schema-level `env` is read by the runtime on every `read()` call. `envMapping` is used when generating `.env` files or injecting env into child processes — it is not a live override mechanism.
+
+## See also
+
+- [Patch Files](./patch-files) — bulk overrides via a file at startup
+- [Profiles](./profiles) — standard mechanism for environment-specific config
+- [Manifest reference](../reference/manifest) — full `cnos.yml` field reference

@@ -1,0 +1,251 @@
+---
+title: C# Runtime
+description: Use CNOS from .NET applications with first-party runtime, value-tuple read API, and NuGet distribution.
+---
+
+# C# Runtime
+
+CNOS ships a first-party C# runtime in [`packages/csharp`](https://github.com/kitsyai/cnos/tree/main/packages/csharp).
+
+The C# client reads the same runtime bootstrap contracts as every other CNOS runtime:
+
+- `__CNOS_GRAPH__`
+- `__CNOS_PROJECTION__`
+- explicit `.cnos-server.json`
+- autodiscovered `.cnos-server.json` next to `.cnosrc.yml`
+
+:::note
+The `Kitsy.Cnos` NuGet package is fully implemented. Publication to NuGet.org is pending; reference the package from source or a local feed in the meantime.
+:::
+
+## Build the projection
+
+For deployment or local packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+For process bootstrap during development:
+
+```bash
+cnos run -- dotnet run
+```
+
+## Add the dependency
+
+Once published to NuGet.org:
+
+```bash
+dotnet add package Kitsy.Cnos
+```
+
+Or add directly to your project file:
+
+```xml
+<PackageReference Include="Kitsy.Cnos" Version="1.16.0" />
+```
+
+## Load the runtime
+
+```csharp
+using Kitsy.Cnos;
+
+var runtime = CnosRuntime.Load();
+var (port, found) = runtime.Value("server.port");
+if (found)
+{
+    Console.WriteLine($"Port: {port}");
+}
+```
+
+With explicit options:
+
+```csharp
+var runtime = CnosRuntime.Load(new CnosOptions
+{
+    ProjectionPath = ".cnos-server.json",
+    SecretHome = "/run/secrets/.cnos",
+});
+```
+
+`CnosRuntime.Load()` checks sources in this order:
+
+1. `ProjectionData` bytes from `CnosOptions`
+2. explicit path from `CnosOptions.ProjectionPath`
+3. `__CNOS_GRAPH__` env var
+4. `__CNOS_PROJECTION__` env var
+5. `.cnos-server.json` in the current working directory
+6. `.cnos-server.json` beside a discovered `.cnosrc.yml`
+
+Load from explicit projection bytes:
+
+```csharp
+byte[] data = File.ReadAllBytes(".cnos-server.json");
+var runtime = CnosRuntime.LoadProjection(data);
+```
+
+## Read values and secrets
+
+All instance read methods return a C# value tuple `(object? Value, bool Found)`:
+
+```csharp
+var (port, ok) = runtime.Value("server.port");
+if (ok) Console.WriteLine($"Port: {port}");
+
+var (token, ok2) = runtime.Secret("app.token");
+```
+
+Convenience forms by namespace:
+
+```csharp
+var (port, _)     = runtime.Value("server.port");
+var (password, _) = runtime.Secret("db.password");
+var (profile, _)  = runtime.Meta("profile");
+var (appUrl, _)   = runtime.Public("app.url");
+```
+
+Read by full logical key:
+
+```csharp
+var (port, found) = runtime.Read("value.server.port");
+```
+
+Require (throws `CnosError` if absent):
+
+```csharp
+object port = runtime.Require("value.server.port");
+```
+
+Read with fallback:
+
+```csharp
+object port = runtime.ReadOr("value.server.port", 3000);
+```
+
+## Read JSON and PEM values
+
+```csharp
+// Parses string values with JsonSerializer; already-parsed objects pass through
+var (parsed, ok) = runtime.Json("api.default_query_params");
+
+// Returns PEM string with literal \n normalised to real newlines.
+// Checks value.* first, then secret.*
+var (cert, ok) = runtime.Pem("tls.cert");
+```
+
+## Derived values stay live
+
+Runtime-dependent derived formulas in the server projection are evaluated at read time, not frozen during build.
+
+Example CNOS config:
+
+```yaml
+app:
+  origin:
+    $derive: "https://${value.app.host}:${process.env.PORT}"
+```
+
+In C#:
+
+```csharp
+var (origin, ok) = runtime.Value("app.origin");
+```
+
+If `PORT` changes in the host process, the next read re-evaluates the formula. Config-only derived values are cached once per resolution pass.
+
+## Custom runtime namespaces
+
+Register a `Func<string, object?>` for any namespace declared in the CNOS manifest:
+
+```csharp
+runtime.RegisterRuntimeProvider("request", path =>
+{
+    if (path == "headers.host")
+        return httpContext?.Request.Host.ToString();
+    return null;
+});
+```
+
+The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, `arch`, and `pid`. It cannot be overridden.
+
+## Secret hydration
+
+The C# runtime supports the built-in secret-ref providers used by server projections:
+
+- `environment`
+- `github-secrets`
+- `local`
+
+Remote providers (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) are registered as factory objects:
+
+```csharp
+runtime.RegisterSecretVaultProviders(gcpFactory, awsFactory);
+```
+
+Or pass them at load time:
+
+```csharp
+var runtime = CnosRuntime.Load(new CnosOptions
+{
+    SecretVaultProviders = new List<SecretVaultProviderFactory> { gcpFactory },
+});
+```
+
+For local vaults, the C# client reuses the standard CNOS auth conventions:
+
+- `__CNOS_VAULT_KEY_<VAULT>__`
+- `~/.cnos/secrets/sessions/<vault>.json`
+- `CNOS_SECRET_PASSPHRASE_<VAULT>`
+- `CNOS_SECRET_PASSPHRASE`
+
+`RefreshSecrets()` is thread-safe and protected by a `SemaphoreSlim`. `RefreshSecret(path)` evicts and re-hydrates a single key.
+
+```csharp
+// Evict and re-warm every secret
+runtime.RefreshSecrets();
+
+// Evict and re-warm a single secret
+runtime.RefreshSecret("db.password");
+```
+
+## Inspect provenance
+
+```csharp
+InspectResult result = runtime.Inspect("value.server.port");
+Console.WriteLine(result.Winner.SourceId);
+Console.WriteLine(result.Profile);
+```
+
+## Export helpers
+
+```csharp
+// All resolved values as a nested dictionary
+Dictionary<string, object?> obj = runtime.ToObject();
+
+// Values for a specific namespace
+Dictionary<string, object?> values = runtime.ToNamespace("value");
+
+// Env-mapping entries as KEY=VALUE pairs
+Dictionary<string, string> env = runtime.ToEnv();
+
+// Promoted public keys with framework prefix
+Dictionary<string, string> publicEnv = runtime.ToPublicEnv(new ToPublicEnvOptions
+{
+    Framework = "vite",
+});
+```
+
+## Format helper
+
+Substitute `${key}` patterns in a message string:
+
+```csharp
+string msg = runtime.Format("Connecting to ${value.db.host}:${value.db.port}");
+Console.WriteLine(msg);
+```
+
+## Current limits
+
+- Browser/public runtime behavior is not supported. Use `cnos build env --public` instead.
+- YAML patch files are not supported in the C# runtime; use JSON or `.properties` format.

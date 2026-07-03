@@ -57,6 +57,48 @@ cnos get value.app.name
 cnos read value.app.name
 ```
 
+## File references
+
+A value can load the contents of a file instead of storing an inline scalar. Use the `$file:` object form:
+
+```yaml
+# .cnos/values/app.yml
+tls:
+  cert:
+    $file: certs/server.crt
+  key:
+    $file: certs/server.key
+```
+
+The path is resolved relative to the CNOS root directory (the directory that contains `.cnosrc.yml`).
+
+- `.json` files are **parsed to a structured object or array** — the key receives the parsed value, not a string.
+- All other extensions are read as a **raw string** — the exact file contents.
+
+File references work anywhere a value can be defined: base values, profile overlays, and workspace overrides.
+
+```bash
+# Read the loaded value
+cnos value get tls.cert          # returns PEM string
+cnos value get messaging.config  # returns parsed JSON object
+```
+
+:::note
+`$file:` is an authoring construct resolved at the filesystem plugin layer, not at runtime. The file must be present when CNOS builds the projection or evaluates a read. File references are expanded before derived-value and secret logic runs.
+:::
+
+Common use cases:
+
+- PEM certificates: `$file: certs/server.crt` → raw string, read with `runtime.pem()`
+- Messaging or routing configs: `$file: data/messaging.json` → parsed object, read with `runtime.json()`
+- Multi-line SQL or shell scripts without escaping in YAML
+
+You can also write a `$file:` reference via the CLI — the YAML value parser turns `'$file: path/to/file.json'` into the correct `{$file: ...}` object:
+
+```bash
+cnos value set messaging.config '$file: data/messaging.json'
+```
+
 ## Notes
 
 - Values are private by default.

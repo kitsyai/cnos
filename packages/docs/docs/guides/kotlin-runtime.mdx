@@ -1,0 +1,246 @@
+---
+title: Kotlin Runtime
+description: Use CNOS from Kotlin services with Optional-based read API, singleton object, and Maven distribution.
+---
+
+# Kotlin Runtime
+
+CNOS ships a first-party Kotlin runtime in [`packages/kotlin`](https://github.com/kitsyai/cnos/tree/main/packages/kotlin).
+
+The Kotlin client reads the same runtime bootstrap contracts as every other CNOS runtime:
+
+- `__CNOS_GRAPH__`
+- `__CNOS_PROJECTION__`
+- explicit `.cnos-server.json`
+- autodiscovered `.cnos-server.json` next to `.cnosrc.yml`
+
+## Build the projection
+
+For deployment or local packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+For process bootstrap during development:
+
+```bash
+cnos run -- java -jar app.jar
+```
+
+## Add the dependency
+
+Maven:
+
+```xml
+<dependency>
+  <groupId>ai.kitsy</groupId>
+  <artifactId>cnos-kotlin</artifactId>
+  <version>1.16.0</version>
+</dependency>
+```
+
+Gradle (Kotlin DSL):
+
+```kotlin
+implementation("ai.kitsy:cnos-kotlin:1.16.0")
+```
+
+## Load the runtime
+
+**Singleton approach** — use the `Cnos` object:
+
+```kotlin
+import ai.kitsy.cnos.Cnos
+
+fun main() {
+    Cnos.ready()  // discover and load the projection
+
+    val port = Cnos.require("value.server.port")
+    println("Port: $port")
+}
+```
+
+**Explicit instance**:
+
+```kotlin
+import ai.kitsy.cnos.CnosRuntime
+import ai.kitsy.cnos.CnosOptions
+
+val runtime = CnosRuntime.load(CnosOptions.defaults())
+val port = runtime.value("server.port")
+port.ifPresent { println("Port: $it") }
+```
+
+`CnosRuntime.load()` checks sources in this order:
+
+1. `projectionData` bytes from `CnosOptions`
+2. explicit path from `CnosOptions.projectionPath`
+3. `__CNOS_GRAPH__` env var
+4. `__CNOS_PROJECTION__` env var
+5. `.cnos-server.json` in the current working directory
+6. `.cnos-server.json` beside a discovered `.cnosrc.yml`
+
+The `Cnos` Kotlin object attempts a silent auto-bootstrap at initialization time, so `Cnos.ready()` is optional when a projection is already present.
+
+Load from explicit projection bytes:
+
+```kotlin
+val data = File(".cnos-server.json").readBytes()
+val runtime = CnosRuntime.loadProjection(data, CnosOptions.defaults())
+```
+
+## Read values and secrets
+
+All instance read methods return `Optional<Any>`:
+
+```kotlin
+val port = runtime.value("server.port")
+if (port.isPresent) println("Port: ${port.get()}")
+
+val token = runtime.secret("app.token")
+token.ifPresent { println("Token present") }
+```
+
+Convenience forms by namespace:
+
+```kotlin
+val port     = runtime.value("server.port")
+val password = runtime.secret("db.password")
+val profile  = runtime.meta("profile")
+val appUrl   = runtime.publicKey("app.url")  // public.* namespace
+```
+
+Read by full logical key:
+
+```kotlin
+val port = runtime.read("value.server.port")
+```
+
+Require (throws `CnosError` if absent):
+
+```kotlin
+val port = runtime.require("value.server.port")
+```
+
+Read with fallback:
+
+```kotlin
+val port = runtime.readOr("value.server.port", 3000)
+```
+
+## Read JSON and PEM values
+
+```kotlin
+// Parses string values from JSON; already-parsed objects pass through
+val params = runtime.json("api.default_query_params")
+
+// Returns PEM string with literal \n normalised to real newlines.
+// Checks value.* first, then secret.*
+val cert: Optional<String> = runtime.pem("tls.cert")
+```
+
+## Derived values stay live
+
+Runtime-dependent derived formulas in the server projection are evaluated at read time, not frozen during build.
+
+Example CNOS config:
+
+```yaml
+app:
+  origin:
+    $derive: "https://${value.app.host}:${process.env.PORT}"
+```
+
+In Kotlin:
+
+```kotlin
+val origin = runtime.value("app.origin")
+```
+
+If `PORT` changes in the host process, the next read re-evaluates the formula. Config-only derived values are cached once per resolution pass.
+
+## Custom runtime namespaces
+
+Register a lambda for any namespace declared in the CNOS manifest:
+
+```kotlin
+runtime.registerRuntimeProvider("request") { path ->
+    when (path) {
+        "headers.host" -> requestContext?.request?.host
+        else -> null
+    }
+}
+```
+
+The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, `arch`, and `pid`. It cannot be overridden.
+
+## Secret hydration
+
+The Kotlin runtime supports the built-in secret-ref providers used by server projections:
+
+- `environment`
+- `github-secrets`
+- `local`
+
+Remote providers (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) are registered as factory objects:
+
+```kotlin
+runtime.registerSecretVaultProviders(gcpFactory, awsFactory)
+```
+
+Or pass them when loading:
+
+```kotlin
+val runtime = CnosRuntime.load(
+    CnosOptions(
+        secretVaultProviders = listOf(gcpFactory)
+    )
+)
+```
+
+For local vaults, the Kotlin client reuses the standard CNOS auth conventions:
+
+- `__CNOS_VAULT_KEY_<VAULT>__`
+- `~/.cnos/secrets/sessions/<vault>.json`
+- `CNOS_SECRET_PASSPHRASE_<VAULT>`
+- `CNOS_SECRET_PASSPHRASE`
+
+Secret caches can be flushed and re-warmed:
+
+```kotlin
+// Evict and re-warm every secret
+runtime.refreshSecrets()
+
+// Evict and re-warm a single secret
+runtime.refreshSecret("db.password")
+```
+
+## Export helpers
+
+```kotlin
+// All resolved values as a nested map
+val obj: Map<String, Any?> = runtime.toObject()
+
+// Values for a specific namespace
+val values: Map<String, Any?> = runtime.toNamespace("value")
+
+// Promoted public keys as env-var pairs
+val publicEnv: Map<String, String> = runtime.toPublicEnv(
+    ToPublicEnvOptions(framework = "vite")
+)
+```
+
+## Format helper
+
+Substitute `${key}` patterns in a message string:
+
+```kotlin
+val msg = runtime.format("Connecting to \${value.db.host}:\${value.db.port}")
+println(msg)
+```
+
+## Current limits
+
+- Browser/public runtime behavior is not supported. Use `cnos build env --public` instead.
+- YAML patch files are not supported in the Kotlin runtime; use JSON or `.properties` format.

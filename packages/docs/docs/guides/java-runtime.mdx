@@ -1,0 +1,247 @@
+---
+title: Java Runtime
+description: Use CNOS from Java services with first-party runtime, Optional-based read API, and Maven distribution.
+---
+
+# Java Runtime
+
+CNOS ships a first-party Java runtime in [`packages/java`](https://github.com/kitsyai/cnos/tree/main/packages/java).
+
+The Java client reads the same runtime bootstrap contracts as every other CNOS runtime:
+
+- `__CNOS_GRAPH__`
+- `__CNOS_PROJECTION__`
+- explicit `.cnos-server.json`
+- autodiscovered `.cnos-server.json` next to `.cnosrc.yml`
+
+## Build the projection
+
+For deployment or local packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+For process bootstrap during development:
+
+```bash
+cnos run -- java -jar app.jar
+```
+
+## Add the dependency
+
+Maven:
+
+```xml
+<dependency>
+  <groupId>ai.kitsy</groupId>
+  <artifactId>cnos-java</artifactId>
+  <version>1.16.0</version>
+</dependency>
+```
+
+Gradle (Kotlin DSL):
+
+```kotlin
+implementation("ai.kitsy:cnos-java:1.16.0")
+```
+
+## Load the runtime
+
+**Singleton approach** — use the `Cnos` class, which mirrors Go's package-level functions:
+
+```java
+import ai.kitsy.cnos.Cnos;
+
+public class App {
+    public static void main(String[] args) throws Exception {
+        Cnos.ready();  // discover and load the projection
+
+        Object port = Cnos.require("value.server.port");
+        System.out.println("Port: " + port);
+    }
+}
+```
+
+**Explicit instance**:
+
+```java
+import ai.kitsy.cnos.CnosRuntime;
+import ai.kitsy.cnos.CnosOptions;
+
+CnosRuntime runtime = CnosRuntime.load(CnosOptions.defaults());
+Optional<Object> port = runtime.value("server.port");
+port.ifPresent(p -> System.out.println("Port: " + p));
+```
+
+`CnosRuntime.load()` checks sources in this order:
+
+1. `projectionData` bytes from `CnosOptions`
+2. explicit path from `CnosOptions.projectionPath`
+3. `__CNOS_GRAPH__` env var
+4. `__CNOS_PROJECTION__` env var
+5. `.cnos-server.json` in the current working directory
+6. `.cnos-server.json` beside a discovered `.cnosrc.yml`
+
+The `Cnos` class attempts a silent auto-bootstrap at class load time via a static initializer, so `Cnos.ready()` is optional when a projection is already present.
+
+## Read values and secrets
+
+All instance read methods return `Optional<Object>`:
+
+```java
+Optional<Object> port = runtime.value("server.port");
+if (port.isPresent()) {
+    System.out.println("Port: " + port.get());
+}
+
+Optional<Object> token = runtime.secret("app.token");
+token.ifPresent(t -> System.out.println("Token present"));
+```
+
+Convenience forms by namespace:
+
+```java
+Optional<Object> port     = runtime.value("server.port");
+Optional<Object> password = runtime.secret("db.password");
+Optional<Object> profile  = runtime.meta("profile");
+Optional<Object> appUrl   = runtime.publicKey("app.url");
+```
+
+Read by full logical key:
+
+```java
+Optional<Object> port = runtime.read("value.server.port");
+```
+
+Require (throws `CnosError` if absent):
+
+```java
+Object port = runtime.require("value.server.port");
+```
+
+Read with fallback:
+
+```java
+Object port = runtime.readOr("value.server.port", 3000);
+```
+
+## Read JSON and PEM values
+
+```java
+// Returns value parsed as Map/List from a JSON string; already-parsed values pass through
+Optional<Object> params = runtime.json("api.default_query_params");
+
+// Returns PEM string with literal \n normalised to real newlines.
+// Checks value.* first, then secret.*
+Optional<String> cert = runtime.pem("tls.cert");
+```
+
+## Derived values stay live
+
+Runtime-dependent derived formulas in the server projection are evaluated at read time, not frozen during build.
+
+Example CNOS config:
+
+```yaml
+app:
+  origin:
+    $derive: "https://${value.app.host}:${process.env.PORT}"
+```
+
+In Java:
+
+```java
+Optional<Object> origin = runtime.value("app.origin");
+```
+
+If `PORT` changes in the host process, the next read re-evaluates the formula. Config-only derived values are cached once per resolution pass.
+
+## Custom runtime namespaces
+
+Register a `Function<String, Object>` for any namespace declared in the CNOS manifest:
+
+```java
+runtime.registerRuntimeProvider("request", path -> {
+    if ("headers.host".equals(path)) {
+        return currentRequest.getHeader("Host");
+    }
+    return null;
+});
+```
+
+The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, `arch`, and `pid`. It cannot be overridden.
+
+## Secret hydration
+
+The Java runtime supports the built-in secret-ref providers used by server projections:
+
+- `environment`
+- `github-secrets`
+- `local`
+
+Remote providers (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) are registered as factory objects:
+
+```java
+CnosRuntime runtime = CnosRuntime.load(
+    CnosOptions.builder()
+        .addSecretVaultProvider(gcpFactory)
+        .build()
+);
+```
+
+The manifest remains the configuration source for which named vault uses which provider.
+
+For local vaults, the Java client reuses the standard CNOS auth conventions:
+
+- `__CNOS_VAULT_KEY_<VAULT>__`
+- `~/.cnos/secrets/sessions/<vault>.json`
+- `CNOS_SECRET_PASSPHRASE_<VAULT>`
+- `CNOS_SECRET_PASSPHRASE`
+
+It also understands the encrypted secret payload injected by:
+
+```bash
+cnos run --auth -- java -jar app.jar
+```
+
+Secret caches can be flushed and re-warmed:
+
+```java
+// Evict and re-warm every secret
+runtime.refreshSecrets();
+
+// Evict and re-warm a single secret
+runtime.refreshSecret("db.password");
+```
+
+## Inspect provenance
+
+```java
+InspectResult result = runtime.inspect("value.server.port");
+System.out.println(result.getWinner().getSourceId());
+System.out.println(result.getProfile());
+```
+
+## Export helpers
+
+```java
+// All resolved values as a nested map
+Map<String, Object> obj = runtime.toObject();
+
+// Values for a specific namespace
+Map<String, Object> values = runtime.toNamespace("value");
+
+// Env-mapping entries as KEY=VALUE pairs
+Map<String, String> env = runtime.toEnv(new ToEnvOptions());
+
+// Promoted public keys with framework prefix
+ToPublicEnvOptions pubOptions = new ToPublicEnvOptions();
+pubOptions.setFramework("next");
+Map<String, String> publicEnv = runtime.toPublicEnv(pubOptions);
+```
+
+## Current limits
+
+- Browser/public runtime behavior is not supported. Use `cnos build env --public` instead.
+- YAML patch files are not supported in the Java runtime; use JSON or `.properties` format.

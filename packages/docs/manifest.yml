@@ -21,6 +21,20 @@ sidebar:
         label: Backend Projects
       - path: guides/go-runtime
         label: Go Runtime
+      - path: guides/python-runtime
+        label: Python Runtime
+      - path: guides/java-runtime
+        label: Java Runtime
+      - path: guides/php-runtime
+        label: PHP Runtime
+      - path: guides/csharp-runtime
+        label: C# Runtime
+      - path: guides/rust-runtime
+        label: Rust Runtime
+      - path: guides/kotlin-runtime
+        label: Kotlin Runtime
+      - path: guides/private-mode
+        label: Private Mode
       - path: guides/frontend-vite
         label: Frontend with Vite
       - path: guides/frontend-webpack
@@ -45,6 +59,8 @@ sidebar:
         label: Secrets and Vaults
       - path: guides/vault-providers
         label: Vault Providers
+      - path: guides/schema-overrides
+        label: Schema-level Overrides
       - path: guides/patch-files
         label: Patch Files
       - path: guides/migration

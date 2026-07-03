@@ -1,0 +1,247 @@
+---
+title: Rust Runtime
+description: Use CNOS from Rust services with a thread-safe runtime, Result-based API, and Cargo distribution.
+---
+
+# Rust Runtime
+
+CNOS ships a first-party Rust runtime in [`packages/rust`](https://github.com/kitsyai/cnos/tree/main/packages/rust).
+
+The Rust client reads the same runtime bootstrap contracts as every other CNOS runtime:
+
+- `__CNOS_GRAPH__`
+- `__CNOS_PROJECTION__`
+- explicit `.cnos-server.json`
+- autodiscovered `.cnos-server.json` next to `.cnosrc.yml`
+
+`CnosRuntime` is `Send + Sync` and can be shared across threads with `Arc<CnosRuntime>`.
+
+## Build the projection
+
+For deployment or local packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+For process bootstrap during development:
+
+```bash
+cnos run -- cargo run
+```
+
+## Add the dependency
+
+```toml
+[dependencies]
+cnos = "1.16.0"
+```
+
+## Load the runtime
+
+**Singleton approach** — mirrors the Go API:
+
+```rust
+fn main() -> Result<(), cnos::CnosError> {
+    cnos::ready(cnos::Options::default())?;
+
+    if let Some(port) = cnos::value("server.port")? {
+        println!("Port: {}", port);
+    }
+    Ok(())
+}
+```
+
+**Explicit instance**:
+
+```rust
+use cnos::{CnosRuntime, Options};
+
+let runtime = CnosRuntime::load(Options::default())?;
+let port = runtime.value("server.port")?;
+println!("Port: {:?}", port);
+```
+
+`CnosRuntime::load()` checks sources in this order:
+
+1. `projection_data` bytes from `Options`
+2. explicit path from `Options.projection_path`
+3. `__CNOS_GRAPH__` env var
+4. `__CNOS_PROJECTION__` env var
+5. `.cnos-server.json` in the current working directory
+6. `.cnos-server.json` beside a discovered `.cnosrc.yml`
+
+The singleton is backed by `OnceLock<Mutex<Option<Arc<CnosRuntime>>>>`, so `cnos::ready()` is optional when a projection is already present.
+
+Load from explicit projection bytes or a file path:
+
+```rust
+let data = std::fs::read(".cnos-server.json")?;
+let runtime = CnosRuntime::load_projection(data, Options::default())?;
+
+// or directly from a path
+let runtime = CnosRuntime::load_projection_file(".cnos-server.json", Options::default())?;
+```
+
+## Read values and secrets
+
+All read methods return `Result<Option<serde_json::Value>, CnosError>`:
+
+```rust
+let port  = runtime.value("server.port")?;   // Option<Value>
+let token = runtime.secret("app.token")?;
+```
+
+Convenience forms by namespace:
+
+```rust
+let port     = runtime.value("server.port")?;
+let password = runtime.secret("db.password")?;
+let profile  = runtime.meta("profile")?;
+let app_url  = runtime.public("app.url")?;
+```
+
+Read by full logical key:
+
+```rust
+let port = runtime.read("value.server.port")?;
+```
+
+Require (`Err(CnosError::MissingKey)` if the key is absent):
+
+```rust
+let port = runtime.require("value.server.port")?;
+```
+
+Read with fallback:
+
+```rust
+use serde_json::json;
+let port = runtime.read_or("value.server.port", Some(json!(3000)))?;
+```
+
+## Read JSON and PEM values
+
+```rust
+// Parses string values as JSON; already-parsed values pass through
+let params = runtime.json("api.default_query_params")?;
+
+// Returns PEM string with literal \n normalised to real newlines.
+// Checks value.* first, then secret.*
+let cert: Option<String> = runtime.pem("tls.cert")?;
+```
+
+## Derived values stay live
+
+Runtime-dependent derived formulas in the server projection are evaluated at read time, not frozen during build.
+
+Example CNOS config:
+
+```yaml
+app:
+  origin:
+    $derive: "https://${value.app.host}:${process.env.PORT}"
+```
+
+In Rust:
+
+```rust
+let origin = runtime.value("app.origin")?;
+```
+
+If `PORT` changes in the host process, the next read re-evaluates the formula. Config-only derived values are cached once per resolution pass.
+
+## Custom runtime namespaces
+
+Register a closure for any namespace declared in the CNOS manifest. The closure must be `Send + Sync + 'static`:
+
+```rust
+runtime.register_runtime_provider("request", move |path| {
+    if path == "headers.host" {
+        return Some(serde_json::json!("example.com"));
+    }
+    None
+})?;
+```
+
+The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, `arch`, and `pid`. It cannot be overridden.
+
+## Secret hydration
+
+The Rust runtime supports the built-in secret-ref providers used by server projections:
+
+- `environment`
+- `github-secrets`
+- `local`
+
+Remote providers (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) are registered as factory objects:
+
+```rust
+runtime.register_secret_vault_providers(vec![gcp_factory])?;
+```
+
+Or pass them when loading:
+
+```rust
+use cnos::Options;
+
+let runtime = CnosRuntime::load(Options {
+    secret_vault_providers: vec![gcp_factory],
+    ..Default::default()
+})?;
+```
+
+For local vaults, the Rust client reuses the standard CNOS auth conventions:
+
+- `__CNOS_VAULT_KEY_<VAULT>__`
+- `~/.cnos/secrets/sessions/<vault>.json`
+- `CNOS_SECRET_PASSPHRASE_<VAULT>`
+- `CNOS_SECRET_PASSPHRASE`
+
+Secret caches are protected by `Mutex`. `refresh_secrets()` clears all caches and re-warms them from each vault. `warm_secrets()` pre-fetches all secrets without evicting anything first.
+
+```rust
+// Evict and re-warm every secret
+runtime.refresh_secrets()?;
+
+// Evict and re-warm a single secret
+runtime.refresh_secret("db.password")?;
+
+// Pre-warm all secrets without evicting
+runtime.warm_secrets()?;
+```
+
+## Export helpers
+
+```rust
+use cnos::{CnosRuntime, ToPublicEnvOptions, Options};
+use std::collections::HashMap;
+
+let runtime = CnosRuntime::load(Options::default())?;
+
+// All resolved values as a flat HashMap<String, serde_json::Value>
+let obj = runtime.to_object()?;
+
+// Values for a specific namespace
+let values = runtime.to_namespace("value")?;
+
+// Promoted public keys as env-var pairs HashMap<String, String>
+let public = runtime.to_public_env(ToPublicEnvOptions {
+    framework: Some("vite".into()),
+    ..Default::default()
+})?;
+```
+
+## Format helper
+
+Substitute `${key}` patterns in a message string:
+
+```rust
+let msg = runtime.format("Connecting to ${value.db.host}:${value.db.port}")?;
+println!("{}", msg);
+```
+
+## Current limits
+
+- Browser/public runtime behavior is not supported. Use `cnos build env --public` instead.
+- YAML patch files are not supported in the Rust runtime; use JSON or `.properties` format.

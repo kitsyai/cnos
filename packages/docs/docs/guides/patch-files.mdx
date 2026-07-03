@@ -5,6 +5,10 @@ description: Apply bulk config patches at application startup with a single file
 
 # Patch Files
 
+:::note
+`--cnos-patch` is a **runtime flag**. It is passed to your application process, not to the `cnos` CLI. CNOS runtimes read the flag (or the `CNOS_PATCH_FILE` env var) when they initialize at application startup. You cannot use `--cnos-patch` with CLI authoring commands like `cnos value set` or `cnos build`.
+:::
+
 For projects with many config keys, you can supply a **patch file** that CNOS loads at process startup. Every entry in the file takes precedence over the CNOS-resolved value, making it ideal for local development, staging spot-fixes, and test harnesses.
 
 ## Quick start

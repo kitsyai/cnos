@@ -1,0 +1,228 @@
+---
+title: Python Runtime
+description: Use CNOS from Python services through projections, environment bootstrap, and direct .cnos resolution.
+---
+
+# Python Runtime
+
+CNOS ships a first-party Python runtime in [`packages/python`](https://github.com/kitsyai/cnos/tree/main/packages/python).
+
+The Python client reads the same runtime bootstrap contracts that every other CNOS runtime understands:
+
+- `__CNOS_GRAPH__`
+- `__CNOS_PROJECTION__`
+- explicit `.cnos-server.json`
+- autodiscovered `.cnos-server.json` next to `.cnosrc.yml`
+
+That means a Python service can consume CNOS values and secrets directly without generating a `.env` file.
+
+## Build the projection
+
+For deployment or local packaging:
+
+```bash
+cnos build server --profile prod --to .cnos-server.json
+```
+
+For process bootstrap during development:
+
+```bash
+cnos run -- python app.py
+```
+
+## Install
+
+```bash
+pip install cnos
+```
+
+The package is published as `cnos` on PyPI.
+
+## Load the runtime
+
+**Singleton approach** — mirrors Go's `cnos.Ready()`:
+
+```python
+import cnos
+
+cnos.ready()
+
+value, ok = cnos.value("server.port")
+if ok:
+    print(f"Port: {value}")
+```
+
+**Explicit instance**:
+
+```python
+from cnos import CnosRuntime, CnosOptions
+
+runtime = cnos.load(CnosOptions(projection_path=".cnos-server.json"))
+port, ok = runtime.value("server.port")
+```
+
+`load()` checks sources in this order:
+
+1. `projection_data` bytes passed through `CnosOptions`
+2. explicit path from `CnosOptions.projection_path`
+3. `__CNOS_GRAPH__` env var
+4. `__CNOS_PROJECTION__` env var
+5. `.cnos-server.json` in the current working directory
+6. `.cnos-server.json` beside a discovered `.cnosrc.yml`
+
+The module calls `bootstrap_default_runtime()` at import time, so `cnos.ready()` is optional when a projection is already present in the environment.
+
+## Read values and secrets
+
+All instance read methods return a `(value, found)` tuple:
+
+```python
+port, ok = runtime.value("server.port")
+if ok:
+    print(f"Listening on port {port}")
+
+token, ok = runtime.secret("app.token")
+if ok:
+    headers = {"Authorization": f"Bearer {token}"}
+```
+
+Convenience forms by namespace:
+
+```python
+port, ok     = runtime.value("server.port")
+password, ok = runtime.secret("db.password")
+profile, ok  = runtime.meta("profile")
+app_url, ok  = runtime.public("app.url")
+```
+
+Read by full logical key:
+
+```python
+port, ok = runtime.read("value.server.port")
+```
+
+Require (raises `CnosError` if the key is absent):
+
+```python
+port = runtime.require("value.server.port")
+```
+
+Read with fallback:
+
+```python
+port = runtime.read_or("value.server.port", 3000)
+```
+
+## Read JSON and PEM values
+
+```python
+# Parses string values with json.loads; returns already-parsed dicts/lists as-is
+params, ok = runtime.json("api.default_query_params")
+
+# Normalises literal \n sequences to real newlines.
+# Checks value.* first, then secret.*
+cert, ok = runtime.pem("tls.cert")
+```
+
+## Derived values stay live
+
+Runtime-dependent derived formulas in the server projection are evaluated at read time, not frozen during build.
+
+Example CNOS config:
+
+```yaml
+app:
+  origin:
+    $derive: "https://${value.app.host}:${process.env.PORT}"
+```
+
+In Python:
+
+```python
+origin, ok = runtime.value("app.origin")
+```
+
+If `PORT` changes in the host process, the next read re-evaluates the formula. Config-only derived values are cached once per resolution pass.
+
+## Custom runtime namespaces
+
+Register a callable for any namespace declared in the CNOS manifest:
+
+```python
+def request_provider(path: str):
+    if path == "headers.host":
+        return flask.request.host
+    return None
+
+runtime.register_runtime_provider("request", request_provider)
+```
+
+The built-in `process.*` namespace covers `env.*`, `cwd`, `platform`, `arch`, and `pid`. It cannot be overridden.
+
+## Secret hydration
+
+The Python runtime supports the built-in secret-ref providers used by server projections:
+
+- `environment`
+- `github-secrets`
+- `local`
+
+Remote providers (GCP Secret Manager, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) are registered as factory objects:
+
+```python
+from cnos import CnosOptions, SecretVaultProviderFactory
+
+runtime = cnos.load(CnosOptions(
+    secret_vault_providers=[gcp_factory],
+))
+```
+
+The manifest remains the configuration source for which named vault uses which provider.
+
+For local vaults, the Python client reuses the standard CNOS auth conventions:
+
+- `__CNOS_VAULT_KEY_<VAULT>__`
+- `~/.cnos/secrets/sessions/<vault>.json`
+- `CNOS_SECRET_PASSPHRASE_<VAULT>`
+- `CNOS_SECRET_PASSPHRASE`
+
+It also understands the encrypted secret payload injected by:
+
+```bash
+cnos run --auth -- python app.py
+```
+
+## Inspect provenance
+
+```python
+result = runtime.inspect("value.server.port")
+print(result.winner.source_id)
+print(result.profile)
+```
+
+## Export helpers
+
+```python
+import cnos
+from cnos.exports import to_object, to_namespace, to_env, to_public_env
+from cnos.types import ToPublicEnvOptions
+
+runtime = cnos.load()
+
+# All resolved values as a nested dict
+obj = to_object(runtime)
+
+# Values for a specific namespace
+values = to_namespace(runtime, "value")
+
+# Env-mapping entries as KEY=VALUE pairs
+env = to_env(runtime)
+
+# Promoted public keys with framework prefix
+public = to_public_env(runtime, ToPublicEnvOptions(framework="vite"))
+```
+
+## Current limits
+
+- Browser/public runtime behavior is not supported. Use `cnos build env --public` instead.
+- YAML patch files are not loaded by the Python runtime; use JSON or `.properties` format.
