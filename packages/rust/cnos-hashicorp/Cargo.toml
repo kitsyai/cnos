@@ -1,6 +1,6 @@
 [package]
 name = "cnos-hashicorp"
-version = "1.16.0"
+version = "1.16.1"
 edition = "2021"
 description = "CNOS HashiCorp Vault provider for Rust"
 license = "MIT"

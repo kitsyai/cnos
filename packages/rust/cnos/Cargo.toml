@@ -1,9 +1,9 @@
 [package]
 name = "cnos"
-version = "1.16.0"
+version = "1.16.1"
 edition = "2021"
 rust-version = "1.70"
-description = "CNOS Rust client runtime ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â consumes a server projection and provides typed read APIs"
+description = "CNOS Rust client runtime ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â consumes a server projection and provides typed read APIs"
 license = "MIT"
 repository = "https://github.com/kitsyai/cnos"
 keywords = ["cnos", "configuration", "secrets", "kitsy"]
