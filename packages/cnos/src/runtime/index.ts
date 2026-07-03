@@ -105,7 +105,7 @@ function resolveExplicitProjectionPath(processEnv: Record<string, string | undef
   if (typeof process !== 'undefined') {
     const argv = process.argv ?? [];
     for (let i = 0; i < argv.length; i++) {
-      const arg = argv[i];
+      const arg = argv[i] ?? '';
       if (arg.startsWith('--cnos-projection=')) {
         const val = arg.slice('--cnos-projection='.length).trim();
         if (val) return path.resolve(val);
