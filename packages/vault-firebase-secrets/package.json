@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-vault-firebase",
-  "version": "1.16.1",
+  "version": "1.17.0",
   "description": "Firebase Secrets vault provider for CNOS.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -24,7 +24,7 @@
     "@google-cloud/secret-manager": "^6.1.3"
   },
   "peerDependencies": {
-    "@kitsy/cnos": "^1.16.1"
+    "@kitsy/cnos": "^1.17.0"
   },
   "devDependencies": {
     "@kitsy/cnos": "workspace:*",
