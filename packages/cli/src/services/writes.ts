@@ -17,6 +17,7 @@ import {
 
 import { createRuntimeService, type RuntimeServiceOptions } from './runtime.js';
 import { assertWritableConfigRoot } from './rootAccess.js';
+import { resolveKnownVaultDefinition } from './vaults.js';
 
 function setNestedValue(target: Record<string, unknown>, pathSegments: string[], value: unknown): void {
   const [head, ...tail] = pathSegments;
@@ -347,7 +348,11 @@ export async function setSecret(
   );
   const document = await readYamlDocument(filePath);
   const vault = options.vault?.trim() || 'default';
-  const vaultDefinition = runtime.manifest.vaults[vault];
+  const vaultDefinition = await resolveKnownVaultDefinition(
+    vault,
+    runtime.manifest.vaults,
+    options.processEnv ?? process.env,
+  );
 
   if (!vaultDefinition) {
     throw new Error(`Unknown vault "${vault}". Create it first with cnos vault create ${vault}.`);
@@ -427,7 +432,11 @@ export async function deleteSecret(
   const secretRef = isSecretReference(existingValue) ? existingValue : metadataSecretRef;
 
   if (isSecretReference(secretRef) && secretRef.provider === 'local') {
-    const definition = runtime.manifest.vaults[secretRef.vault ?? 'default'];
+    const definition = await resolveKnownVaultDefinition(
+      secretRef.vault ?? 'default',
+      runtime.manifest.vaults,
+      options.processEnv ?? process.env,
+    );
 
     if (definition) {
       const auth = await resolveVaultAuth(secretRef.vault ?? 'default', definition, options.processEnv ?? process.env);

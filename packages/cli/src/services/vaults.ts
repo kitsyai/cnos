@@ -46,6 +46,26 @@ function buildVaultDefinition(vault: string, provider: string): VaultDefinition 
       };
 }
 
+export async function resolveKnownVaultDefinition(
+  vault: string,
+  vaults: Record<string, VaultDefinition>,
+  processEnv: Record<string, string | undefined> = process.env,
+): Promise<VaultDefinition | undefined> {
+  const definition = vaults[vault];
+
+  if (definition) {
+    return definition;
+  }
+
+  const metadata = await readVaultMetadata(resolveSecretStoreRoot(processEnv), vault);
+
+  if (!metadata) {
+    return undefined;
+  }
+
+  return buildVaultDefinition(vault, 'local');
+}
+
 function sortVaults<T extends Record<string, unknown>>(vaults: Record<string, T>): Record<string, T> {
   return Object.fromEntries(Object.entries(vaults).sort(([left], [right]) => left.localeCompare(right)));
 }
@@ -224,7 +244,11 @@ export async function authenticateVault(
     ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
     ...(options.forceRefresh ? { forceRefresh: true } : {}),
   });
-  const definition = loadedManifest.manifest.vaults[vault];
+  const definition = await resolveKnownVaultDefinition(
+    vault,
+    loadedManifest.manifest.vaults,
+    options.processEnv ?? process.env,
+  );
 
   if (!definition) {
     throw new Error(`Unknown vault "${vault}"`);
