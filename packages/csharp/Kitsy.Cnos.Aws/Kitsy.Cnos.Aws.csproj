@@ -7,7 +7,7 @@
     <AssemblyName>Kitsy.Cnos.Aws</AssemblyName>
 
     <PackageId>Kitsy.Cnos.Aws</PackageId>
-    <Version>1.15.0</Version>
+    <Version>1.16.0</Version>
     <Authors>Prashant Sinha</Authors>
     <Company>Kitsy AI</Company>
     <Description>CNOS C# vault provider for AWS Secrets Manager.</Description>
