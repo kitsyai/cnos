@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@kitsy/cnos-docs",
   "version": "1.15.0",
   "description": "Source-of-truth CNOS documentation content for Astro Starlight and other static docs consumers.",

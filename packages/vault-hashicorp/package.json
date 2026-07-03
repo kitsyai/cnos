@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@kitsy/cnos-vault-hashicorp",
   "version": "1.15.0",
   "description": "HashiCorp Vault provider for CNOS.",

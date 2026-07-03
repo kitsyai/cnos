@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "cnos-gcp"
 version = "1.15.0"
 edition = "2021"

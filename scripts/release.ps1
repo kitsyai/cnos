@@ -31,6 +31,13 @@ function Invoke-Checked([scriptblock]$cmd) {
     if ($LASTEXITCODE -ne 0) { Die "Command failed with exit code $LASTEXITCODE" }
 }
 
+# PS 5.1 Set-Content -Encoding utf8 writes UTF-8 WITH BOM, which breaks TOML/JSON parsers.
+# Use this instead everywhere we update files.
+$_utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Write-Utf8NoBom([string]$path, [string]$content) {
+    [System.IO.File]::WriteAllText($path, $content, $_utf8NoBom)
+}
+
 # ── detect current version ────────────────────────────────────────────────────
 
 $pkgJson = Get-Content "packages\cnos\package.json" -Raw | ConvertFrom-Json
@@ -97,7 +104,7 @@ Get-ChildItem -Path packages -Recurse -Filter package.json |
         $content = Get-Content $_.FullName -Raw
         $content = $content -replace [regex]::Escape("`"version`": `"$OLD`""), "`"version`": `"$NEW`""
         $content = $content -replace [regex]::Escape("`"^$OLD`""), "`"^$NEW`""
-        Set-Content $_.FullName $content -Encoding utf8 -NoNewline
+        Write-Utf8NoBom $_.FullName $content
     }
 Info "Node.js OK"
 
@@ -108,7 +115,7 @@ Get-ChildItem -Path packages\python -Recurse -Filter pyproject.toml |
         $content = $content -replace [regex]::Escape("version = `"$OLD`""), "version = `"$NEW`""
         $content = $content -replace [regex]::Escape("kitsy-cnos>=$OLD"), "kitsy-cnos>=$NEW"
         $content = $content -replace [regex]::Escape("kitsy-cnos-gcp>=$OLD"), "kitsy-cnos-gcp>=$NEW"
-        Set-Content $_.FullName $content -Encoding utf8 -NoNewline
+        Write-Utf8NoBom $_.FullName $content
     }
 Info "Python OK"
 
@@ -119,7 +126,7 @@ Get-ChildItem -Path packages\rust -Recurse -Filter Cargo.toml |
     ForEach-Object {
         $content = Get-Content $_.FullName -Raw
         $content = $content -replace [regex]::Escape("version = `"$OLD`""), "version = `"$NEW`""
-        Set-Content $_.FullName $content -Encoding utf8 -NoNewline
+        Write-Utf8NoBom $_.FullName $content
     }
 Info "Rust OK"
 
@@ -127,7 +134,7 @@ Info "Rust OK"
 foreach ($pom in @('packages\java\pom.xml', 'packages\kotlin\pom.xml')) {
     $content = Get-Content $pom -Raw
     $content = $content -replace [regex]::Escape("<revision>$OLD</revision>"), "<revision>$NEW</revision>"
-    Set-Content $pom $content -Encoding utf8 -NoNewline
+    Write-Utf8NoBom $pom $content
 }
 Info "Java / Kotlin OK"
 
@@ -137,7 +144,7 @@ Get-ChildItem -Path packages\csharp -Recurse -Filter *.csproj |
         $content = Get-Content $_.FullName -Raw
         $content = $content -replace [regex]::Escape("<Version>$OLD</Version>"), "<Version>$NEW</Version>"
         $content = $content -replace [regex]::Escape("Version=`"$OLD`""), "Version=`"$NEW`""
-        Set-Content $_.FullName $content -Encoding utf8 -NoNewline
+        Write-Utf8NoBom $_.FullName $content
     }
 Info "C# OK"
 
