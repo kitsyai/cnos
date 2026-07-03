@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption, consumePrivateFlag } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
@@ -68,10 +68,12 @@ export async function runValue(argsOrPath: string | string[], options: RuntimeSe
     const rawValue = derive ? '' : tail[1] ?? '';
     const deriveExpression = derive ? expr ?? tail[1] ?? deriveArg ?? '' : undefined;
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
+    const writePrivate = consumePrivateFlag(cliArgs);
     const result = await defineValue('value', valuePath, rawValue, {
       ...options,
       cliArgs,
       target,
+      writePrivate,
       ...(deriveExpression !== undefined
         ? {
             deriveExpression,
@@ -96,10 +98,12 @@ export async function runValue(argsOrPath: string | string[], options: RuntimeSe
   if (action === 'delete') {
     const valuePath = tail[0] ?? 'app.name';
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
+    const writePrivate = consumePrivateFlag(cliArgs);
     const result = await deleteValue('value', valuePath, {
       ...options,
       cliArgs,
       target,
+      writePrivate,
     });
 
     if (options.json) {

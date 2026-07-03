@@ -167,11 +167,15 @@ export function resolveNamespaceDirectory(
   const rootFolder =
     namespace === 'value' ? 'values' : namespace === 'secret' ? 'secrets' : namespace;
 
-  if (profile && profile !== 'base') {
-    if (isPrivate) {
+  if (isPrivate) {
+    if (profile && profile !== 'base') {
       return path.resolve(workspaceRoot, '.private', 'profiles', profile, rootFolder);
     }
 
+    return path.resolve(workspaceRoot, '.private', rootFolder);
+  }
+
+  if (profile && profile !== 'base') {
     return path.resolve(workspaceRoot, 'profiles', profile, rootFolder);
   }
 

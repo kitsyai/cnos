@@ -9,6 +9,18 @@ export function consumeFlag(args: string[], flag: string): boolean {
   return false;
 }
 
+export function consumePrivateFlag(args: string[]): boolean {
+  let consumed = false;
+
+  for (const flag of ['--private', '--incog', '--anonymous']) {
+    while (consumeFlag(args, flag)) {
+      consumed = true;
+    }
+  }
+
+  return consumed;
+}
+
 export function consumeOption(args: string[], flag: string): string | undefined {
   const inline = args.find((entry) => entry.startsWith(`${flag}=`));
 

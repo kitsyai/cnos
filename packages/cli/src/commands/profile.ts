@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption, consumePrivateFlag } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { resolveFilesystemBasePath } from '../services/paths.js';
@@ -41,10 +41,7 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
     const profile = tail[0] ?? 'stage';
     const inherit = consumeOption(cliArgs, '--inherit');
     const noInherit = consumeFlag(cliArgs, '--no-inherit');
-    const privateProfile =
-      consumeFlag(cliArgs, '--private') ||
-      consumeFlag(cliArgs, '--incog') ||
-      consumeFlag(cliArgs, '--anonymous');
+    const privateProfile = consumePrivateFlag(cliArgs);
 
     if (inherit && noInherit) {
       throw new Error('profile create accepts either --inherit <name> or --no-inherit, not both');

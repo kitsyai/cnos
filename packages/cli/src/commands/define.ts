@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption, consumePrivateFlag } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import type { RuntimeServiceOptions } from '../services/runtime.js';
@@ -20,10 +20,7 @@ export async function runDefine(
   const ref = consumeFlag(cliArgs, '--ref');
   const provider = consumeOption(cliArgs, '--provider');
   const passphrase = consumeOption(cliArgs, '--passphrase');
-  const writePrivate =
-    consumeFlag(cliArgs, '--private') ||
-    consumeFlag(cliArgs, '--incog') ||
-    consumeFlag(cliArgs, '--anonymous');
+  const writePrivate = consumePrivateFlag(cliArgs);
   const result = await defineValue(namespace, configPath, rawValue, {
     ...options,
     cliArgs,

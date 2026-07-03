@@ -2,7 +2,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { Writable } from 'node:stream';
 
-import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption, consumePrivateFlag } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printTable } from '../format/printTable.js';
@@ -187,10 +187,7 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const provider = consumeOption(cliArgs, '--provider');
     const vault = consumeOption(cliArgs, '--vault') ?? 'default';
     const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : undefined;
-    const writePrivate =
-      consumeFlag(cliArgs, '--private') ||
-      consumeFlag(cliArgs, '--incog') ||
-      consumeFlag(cliArgs, '--anonymous');
+    const writePrivate = consumePrivateFlag(cliArgs);
     const resolvedSecretPath = secretPath ?? 'app.token';
     const promptForMissingValue = await shouldPromptForMissingSecretValue(vault, mode, {
       ...options,
@@ -220,10 +217,7 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   if (action === 'delete') {
     const secretPath = tail[0];
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
-    const writePrivate =
-      consumeFlag(cliArgs, '--private') ||
-      consumeFlag(cliArgs, '--incog') ||
-      consumeFlag(cliArgs, '--anonymous');
+    const writePrivate = consumePrivateFlag(cliArgs);
     const result = await deleteSecret(secretPath ?? 'app.token', {
       ...options,
       writePrivate,

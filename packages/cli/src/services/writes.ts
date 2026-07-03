@@ -73,6 +73,26 @@ function unsetNestedValue(target: Record<string, unknown>, pathSegments: string[
   return deleted;
 }
 
+function getNestedValue(target: Record<string, unknown>, pathSegments: string[]): unknown {
+  const [head, ...tail] = pathSegments;
+
+  if (!head || !(head in target)) {
+    return undefined;
+  }
+
+  const value = target[head];
+
+  if (tail.length === 0) {
+    return value;
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return getNestedValue(value as Record<string, unknown>, tail);
+}
+
 function isSecretReference(value: unknown): value is SecretReference {
   return Boolean(
     value &&
@@ -80,6 +100,15 @@ function isSecretReference(value: unknown): value is SecretReference {
       !Array.isArray(value) &&
       typeof (value as SecretReference).provider === 'string' &&
       typeof (value as SecretReference).ref === 'string',
+  );
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      ((error as { code?: unknown }).code === 'ENOENT' || (error as { code?: unknown }).code === 'ENOTDIR'),
   );
 }
 
@@ -117,7 +146,13 @@ function isProfilePrivate(profileDefinitionPath: string): Promise<boolean> {
       const parsed = parseYaml<Record<string, unknown>>(document);
       return Boolean(parsed?.private);
     })
-    .catch(() => false);
+    .catch((error: unknown) => {
+      if (isMissingFileError(error)) {
+        return false;
+      }
+
+      throw error;
+    });
 }
 
 async function resolveProfilePrivateFlag(
@@ -377,7 +412,7 @@ export async function deleteSecret(
     options.writePrivate === true,
   );
   const document = await readYamlDocument(filePath);
-  const metadata = runtime.graph.entries.get(`secret.${configPath}`)?.winner.metadata;
+  const existingValue = getNestedValue(document, configPath.split('.'));
   const deleted = unsetNestedValue(document, configPath.split('.'));
 
   if (!deleted) {
@@ -388,7 +423,8 @@ export async function deleteSecret(
   }
 
   await writeFile(filePath, stringifyYaml(document), 'utf8');
-  const secretRef = metadata?.secretRef;
+  const metadataSecretRef = runtime.graph.entries.get(`secret.${configPath}`)?.winner.metadata?.secretRef;
+  const secretRef = isSecretReference(existingValue) ? existingValue : metadataSecretRef;
 
   if (isSecretReference(secretRef) && secretRef.provider === 'local') {
     const definition = runtime.manifest.vaults[secretRef.vault ?? 'default'];

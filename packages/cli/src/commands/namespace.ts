@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { consumeFlag, consumeOption } from '../cli/commandOptions.js';
+import { consumeFlag, consumeOption, consumePrivateFlag } from '../cli/commandOptions.js';
 import { displayPath } from '../format/displayPath.js';
 import { printJson } from '../format/printJson.js';
 import { printValue } from '../format/printValue.js';
@@ -71,10 +71,7 @@ export async function runNamespace(
     const rawValue = derive ? '' : tail[1] ?? '';
     const deriveExpression = derive ? expr ?? tail[1] ?? deriveArg ?? '' : undefined;
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
-    const writePrivate =
-      consumeFlag(cliArgs, '--private') ||
-      consumeFlag(cliArgs, '--incog') ||
-      consumeFlag(cliArgs, '--anonymous');
+    const writePrivate = consumePrivateFlag(cliArgs);
     const result = await defineValue(namespace, configPath, rawValue, {
       ...options,
       cliArgs,
@@ -104,10 +101,12 @@ export async function runNamespace(
   if (action === 'delete') {
     const configPath = tail[0] ?? 'app.name';
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
+    const writePrivate = consumePrivateFlag(cliArgs);
     const result = await deleteValue(namespace, configPath, {
       ...options,
       cliArgs,
       target,
+      writePrivate,
     });
 
     if (options.json) {

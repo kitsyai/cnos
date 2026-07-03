@@ -64,6 +64,9 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
 ]);
 const COMMAND_FLAG_KEYS = new Set([
   '--use-private',
+  '--private',
+  '--incog',
+  '--anonymous',
   '--flatten',
   '--public',
   '--local',

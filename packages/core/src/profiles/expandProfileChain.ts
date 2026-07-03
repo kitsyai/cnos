@@ -123,6 +123,19 @@ function pushUnique(target: string[], values: string[]): void {
   }
 }
 
+function isPrivateActivationLayer(entry: string): boolean {
+  const normalized = entry.replace(/\\/g, '/').replace(/^\.\//, '');
+  return normalized === '.private' || normalized.startsWith('.private/');
+}
+
+function filterVisibleActivationLayers(entries: string[], usePrivate: boolean): string[] {
+  if (usePrivate) {
+    return entries;
+  }
+
+  return entries.filter((entry) => !isPrivateActivationLayer(entry));
+}
+
 function buildFallbackActivation(
   activeProfile: string,
   orderedProfiles: string[],
@@ -137,17 +150,17 @@ function buildFallbackActivation(
     definition: NormalizedProfileDefinition,
     namespace: 'values' | 'secrets',
   ): string[] => {
-    const activateLayers = definition.activate[namespace];
+    const activateLayers = filterVisibleActivationLayers(definition.activate[namespace], usePrivate);
 
-    if (definition.private && !usePrivate) {
-      return [];
-    }
-
-    if (definition.activate[namespace].length > 0) {
+    if (activateLayers.length > 0) {
       return activateLayers;
     }
 
     if (definition.private) {
+      if (!usePrivate) {
+        return [];
+      }
+
       return [
         `.private/profiles/${profile}/${namespace}`,
         `.private/${namespace}/${profile}`,
@@ -174,10 +187,16 @@ function buildFallbackActivation(
     const definition = profileByName.get(profile);
     return definition ? buildNamespaceLayers(profile, definition, 'secrets') : [];
   });
+  const baseValueLayers = [
+    'values',
+    ...(activeProfile !== 'base' ? ['values/base'] : []),
+    ...(usePrivate ? ['.private/values'] : []),
+  ];
+  const baseSecretLayers = ['secrets', ...(usePrivate ? ['.private/secrets'] : [])];
 
   return {
-    values: ['values', ...(activeProfile !== 'base' ? ['values/base'] : []), ...valueLayers],
-    secrets: ['secrets', ...secretLayers],
+    values: [...baseValueLayers, ...valueLayers],
+    secrets: [...baseSecretLayers, ...secretLayers],
     envFiles:
       activeProfile === 'base'
         ? ['.env']
@@ -227,15 +246,13 @@ export async function expandProfileChain(
   for (const profileName of orderedProfiles) {
     const definition = definitions.get(profileName);
 
-    const shouldSkipProfile = definition?.private && !options.usePrivate;
-
-    if (!definition || shouldSkipProfile) {
+    if (!definition) {
       continue;
     }
 
-    pushUnique(activation.values, definition.activate.values);
-    pushUnique(activation.secrets, definition.activate.secrets);
-    pushUnique(activation.envFiles, definition.activate.envFiles);
+    pushUnique(activation.values, filterVisibleActivationLayers(definition.activate.values, options.usePrivate ?? false));
+    pushUnique(activation.secrets, filterVisibleActivationLayers(definition.activate.secrets, options.usePrivate ?? false));
+    pushUnique(activation.envFiles, filterVisibleActivationLayers(definition.activate.envFiles, options.usePrivate ?? false));
   }
 
   const fallback = buildFallbackActivation(activeProfile, orderedProfiles, definitions, options.usePrivate ?? false);

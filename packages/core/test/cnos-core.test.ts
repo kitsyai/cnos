@@ -1070,8 +1070,8 @@ describe('@kitsy/cnos-core', () => {
       activeProfile: 'private-overlay',
       profiles: ['base', 'private-overlay'],
       activation: {
-        values: ['values', 'values/base', '.private/profiles/private-overlay/values', '.private/values/private-overlay'],
-        secrets: ['secrets', '.private/profiles/private-overlay/secrets', '.private/secrets/private-overlay'],
+        values: ['values', 'values/base', '.private/values', '.private/profiles/private-overlay/values', '.private/values/private-overlay'],
+        secrets: ['secrets', '.private/secrets', '.private/profiles/private-overlay/secrets', '.private/secrets/private-overlay'],
         envFiles: ['.env', '.env.private-overlay'],
       },
     });

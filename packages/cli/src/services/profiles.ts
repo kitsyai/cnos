@@ -13,6 +13,16 @@ async function resolveProfilesRoot(root = process.cwd()): Promise<string> {
   }
 }
 
+function createPrivateProfileActivation(profile: string): {
+  values: string[];
+  secrets: string[];
+} {
+  return {
+    values: [`.private/profiles/${profile}/values`, `.private/values/${profile}`],
+    secrets: [`.private/profiles/${profile}/secrets`, `.private/secrets/${profile}`],
+  };
+}
+
 export async function createProfileDefinition(
   root = process.cwd(),
   profile: string,
@@ -28,10 +38,10 @@ export async function createProfileDefinition(
         name: profile,
         activate: {
           values: privateProfile
-            ? [`.private/profiles/${profile}/values`, `.private/values/${profile}`]
+            ? createPrivateProfileActivation(profile).values
             : [`profiles/${profile}/values`, `values/${profile}`],
           secrets: privateProfile
-            ? [`.private/profiles/${profile}/secrets`, `.private/secrets/${profile}`]
+            ? createPrivateProfileActivation(profile).secrets
             : [`profiles/${profile}/secrets`, `secrets/${profile}`],
           envFiles: [`.env.${profile}`],
         },
@@ -41,6 +51,7 @@ export async function createProfileDefinition(
           ...(privateProfile ? { private: true } : {}),
           name: profile,
           extends: [inherit],
+          ...(privateProfile ? { activate: createPrivateProfileActivation(profile) } : {}),
         }
       : {
           ...(privateProfile ? { private: true } : {}),
