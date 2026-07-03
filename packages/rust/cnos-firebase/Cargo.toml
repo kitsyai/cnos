@@ -1,6 +1,6 @@
-[package]
+﻿[package]
 name = "cnos-firebase"
-version = "1.14.0"
+version = "1.15.0"
 edition = "2021"
 description = "CNOS Firebase Secrets vault provider for Rust (wraps GCP)"
 license = "MIT"
