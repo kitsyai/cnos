@@ -153,6 +153,11 @@ export async function main(argv: string[]): Promise<void> {
           verbose: true,
         }
       : {}),
+    ...(options.usePrivate
+      ? {
+          usePrivate: true,
+        }
+      : {}),
     ...(options.cliArgs.length > 0
       ? {
           cliArgs: options.cliArgs,

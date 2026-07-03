@@ -33,10 +33,12 @@ export interface SecretEnvMappingRepairResult {
 async function checkGitignore(root: string): Promise<DoctorCheck> {
   const gitignorePath = path.join(root, '.gitignore');
   const expected = [
+    '.cnos/.private',
     '.cnos/env/.env',
     '.cnos/env/.env.*',
     '!.cnos/env/.env.example',
     '!.cnos/env/.env.*.example',
+    '.cnos/workspaces/*/.private',
     '.cnos/workspaces/*/env/.env',
     '.cnos/workspaces/*/env/.env.*',
     '!.cnos/workspaces/*/env/.env.example',

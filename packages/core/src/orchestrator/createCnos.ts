@@ -140,6 +140,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
   const profileChain = await expandProfileChain(activeProfile.profile, {
     manifestRoot: loadedManifest.manifestRoot,
     workspace,
+    ...(typeof options.usePrivate === 'boolean' ? { usePrivate: options.usePrivate } : {}),
   });
   const plugins = options.plugins ?? [];
   const loaderPlugins = plugins.filter((plugin): plugin is LoaderPlugin => plugin.kind === 'loader');

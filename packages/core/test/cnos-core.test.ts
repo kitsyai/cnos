@@ -1014,6 +1014,69 @@ describe('@kitsy/cnos-core', () => {
     });
   });
 
+  it('gates private profile fallback layers behind --use-private', async () => {
+    const root = await createFixtureRoot('version: 1\nproject:\n  name: fixture\n');
+    const profilesRoot = path.join(root, 'cnos', 'profiles');
+    await mkdir(profilesRoot, { recursive: true });
+    await writeFile(
+      path.join(profilesRoot, 'private-overlay.yml'),
+      ['name: private-overlay', 'private: true', 'extends: base'].join('\n'),
+    );
+
+    await expect(
+      expandProfileChain('private-overlay', {
+        manifestRoot: path.join(root, 'cnos'),
+        workspace: {
+          workspaceId: 'fixture',
+          workspaceSource: 'implicit',
+          workspaceChain: ['fixture'],
+          workspaceRoots: [
+            {
+              scope: 'local',
+              workspaceId: 'fixture',
+              path: path.join(root, 'cnos'),
+            },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      activeProfile: 'private-overlay',
+      profiles: ['base', 'private-overlay'],
+      activation: {
+        values: ['values', 'values/base'],
+        secrets: ['secrets'],
+        envFiles: ['.env'],
+      },
+    });
+
+    await expect(
+      expandProfileChain('private-overlay', {
+        manifestRoot: path.join(root, 'cnos'),
+        usePrivate: true,
+        workspace: {
+          workspaceId: 'fixture',
+          workspaceSource: 'implicit',
+          workspaceChain: ['fixture'],
+          workspaceRoots: [
+            {
+              scope: 'local',
+              workspaceId: 'fixture',
+              path: path.join(root, 'cnos'),
+            },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      activeProfile: 'private-overlay',
+      profiles: ['base', 'private-overlay'],
+      activation: {
+        values: ['values', 'values/base', '.private/profiles/private-overlay/values', '.private/values/private-overlay'],
+        secrets: ['secrets', '.private/profiles/private-overlay/secrets', '.private/secrets/private-overlay'],
+        envFiles: ['.env', '.env.private-overlay'],
+      },
+    });
+  });
+
   it('throws on profile inheritance cycles', async () => {
     const root = await createFixtureRoot('version: 1\nproject:\n  name: fixture\n');
     const profilesRoot = path.join(root, 'cnos', 'profiles');

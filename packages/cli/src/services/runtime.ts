@@ -11,6 +11,9 @@ export interface RuntimeServiceOptions {
   forceRefresh?: boolean;
   json?: boolean;
   verbose?: boolean;
+  usePrivate?: boolean;
+  writePrivate?: boolean;
+  target?: 'local' | 'global';
   cliArgs?: string[];
   processEnv?: Record<string, string | undefined>;
   secretResolution?: 'eager' | 'lazy' | 'refreshing';
@@ -28,6 +31,7 @@ export async function createRuntimeService(options: RuntimeServiceOptions = {}) 
     ...(typeof options.cacheTtlSeconds === 'number' ? { cacheTtlSeconds: options.cacheTtlSeconds } : {}),
     ...(options.forceRefresh ? { forceRefresh: true } : {}),
     ...(options.cliArgs && options.cliArgs.length > 0 ? { cliArgs: options.cliArgs } : {}),
+    ...(options.usePrivate ? { usePrivate: true } : {}),
     ...(options.secretResolution ? { secretResolution: options.secretResolution } : {}),
     ...(typeof options.secretRefreshTtl === 'number' ? { secretRefreshTtl: options.secretRefreshTtl } : {}),
     processEnv: options.processEnv ?? process.env,

@@ -71,10 +71,15 @@ export async function runNamespace(
     const rawValue = derive ? '' : tail[1] ?? '';
     const deriveExpression = derive ? expr ?? tail[1] ?? deriveArg ?? '' : undefined;
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
+    const writePrivate =
+      consumeFlag(cliArgs, '--private') ||
+      consumeFlag(cliArgs, '--incog') ||
+      consumeFlag(cliArgs, '--anonymous');
     const result = await defineValue(namespace, configPath, rawValue, {
       ...options,
       cliArgs,
       target,
+      writePrivate,
       ...(deriveExpression !== undefined
         ? {
             deriveExpression,

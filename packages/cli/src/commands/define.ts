@@ -20,10 +20,15 @@ export async function runDefine(
   const ref = consumeFlag(cliArgs, '--ref');
   const provider = consumeOption(cliArgs, '--provider');
   const passphrase = consumeOption(cliArgs, '--passphrase');
+  const writePrivate =
+    consumeFlag(cliArgs, '--private') ||
+    consumeFlag(cliArgs, '--incog') ||
+    consumeFlag(cliArgs, '--anonymous');
   const result = await defineValue(namespace, configPath, rawValue, {
     ...options,
     cliArgs,
     target,
+    writePrivate,
     ...(namespace === 'secret'
       ? {
           mode: local ? 'local' : remote ? 'remote' : ref ? 'ref' : 'local',

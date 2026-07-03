@@ -162,11 +162,16 @@ export function resolveNamespaceDirectory(
   workspaceRoot: string,
   namespace: NamespaceName,
   profile?: string,
+  isPrivate = false,
 ): string {
   const rootFolder =
     namespace === 'value' ? 'values' : namespace === 'secret' ? 'secrets' : namespace;
 
   if (profile && profile !== 'base') {
+    if (isPrivate) {
+      return path.resolve(workspaceRoot, '.private', 'profiles', profile, rootFolder);
+    }
+
     return path.resolve(workspaceRoot, 'profiles', profile, rootFolder);
   }
 
@@ -178,8 +183,9 @@ export function resolveConfigDocumentPath(
   namespace: NamespaceName,
   configPath: string,
   profile?: string,
+  isPrivate = false,
 ): string {
-  const namespaceRoot = resolveNamespaceDirectory(workspaceRoot, namespace, profile);
+  const namespaceRoot = resolveNamespaceDirectory(workspaceRoot, namespace, profile, isPrivate);
   const fileName = `${configPath.split('.').shift() ?? 'app'}.yml`;
   return path.resolve(namespaceRoot, fileName);
 }

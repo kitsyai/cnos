@@ -13,11 +13,18 @@ Profiles model environment overlays such as `local`, `stage`, and `prod`.
 cnos profile [create <name> | list | use <name> | delete <name>] [options] [--root <path>] [--json]
 ```
 
+`create` supports:
+
+```bash
+cnos profile create <name> [--inherit <name> | --no-inherit] [--private | --incog | --anonymous]
+```
+
 ## Examples
 
 ```bash
 cnos profile create stage
 cnos profile create isolated --no-inherit
+cnos profile create private-stage --private
 cnos profile list
 cnos profile use stage
 ```

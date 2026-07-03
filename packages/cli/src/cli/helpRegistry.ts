@@ -66,6 +66,10 @@ const GLOBAL_OPTIONS: HelpOption[] = [
     description: 'Override the remote-root cache TTL for mutable refs during this invocation.',
   },
   {
+    flag: '--use-private',
+    description: 'Include profile values and secret refs from private layers during runtime resolution.',
+  },
+  {
     flag: '--json',
     description: 'Emit JSON output for commands that support structured responses.',
   },
@@ -637,10 +641,16 @@ const COMMANDS: HelpCommand[] = [
         flag: '--no-inherit',
         description: 'Create a clean profile that does not inherit base fallback layers.',
       },
+      {
+        flag: '--private | --incog | --anonymous',
+        description:
+          'Store the profile in .cnos/.private so generated values and secret references stay out of committed .cnos trees.',
+      },
     ],
     examples: [
       'cnos profile create stage',
       'cnos profile create isolated --no-inherit',
+      'cnos profile create private-stage --private',
       'cnos profile list',
       'cnos profile use stage',
     ],
@@ -648,9 +658,22 @@ const COMMANDS: HelpCommand[] = [
   {
     id: 'profile create',
     summary: 'Create a profile definition.',
-    usage: 'cnos profile create <name> [--inherit <name> | --no-inherit] [--root <path>] [--json]',
-    description: 'Creates .cnos/profiles/<name>.yml for an explicit profile overlay. New profiles inherit base by default unless --no-inherit is set.',
-    examples: ['cnos profile create stage', 'cnos profile create isolated --no-inherit'],
+    usage:
+      'cnos profile create <name> [--inherit <name> | --no-inherit] [--private|--incog|--anonymous] [--root <path>] [--json]',
+    description:
+      'Creates .cnos/profiles/<name>.yml for an explicit profile overlay. New profiles inherit base by default unless --no-inherit is set.',
+    options: [
+      {
+        flag: '--private | --incog | --anonymous',
+        description:
+          'Store the profile in .cnos/.private so generated values and secret references stay out of committed .cnos trees.',
+      },
+    ],
+    examples: [
+      'cnos profile create stage',
+      'cnos profile create isolated --no-inherit',
+      'cnos profile create private-stage --private',
+    ],
   },
   {
     id: 'profile list',

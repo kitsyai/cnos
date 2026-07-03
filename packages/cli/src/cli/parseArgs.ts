@@ -7,6 +7,7 @@ export interface CommandOptions {
   json?: boolean;
   help?: boolean;
   verbose?: boolean;
+  usePrivate?: boolean;
   cliArgs: string[];
 }
 
@@ -62,6 +63,7 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--deprecation-message',
 ]);
 const COMMAND_FLAG_KEYS = new Set([
+  '--use-private',
   '--flatten',
   '--public',
   '--local',
@@ -288,6 +290,11 @@ export function parseArgs(argv: string[]): ParsedCommand {
 
     if (token === '--help' || token === '-h') {
       options.help = true;
+      continue;
+    }
+
+    if (token === '--use-private') {
+      options.usePrivate = true;
       continue;
     }
 

@@ -111,6 +111,87 @@ function getSelectedWorkspaceRoot(
   return workspaceRoot.path;
 }
 
+function isProfilePrivate(profileDefinitionPath: string): Promise<boolean> {
+  return readFile(profileDefinitionPath, 'utf8')
+    .then((document) => {
+      const parsed = parseYaml<Record<string, unknown>>(document);
+      return Boolean(parsed?.private);
+    })
+    .catch(() => false);
+}
+
+async function resolveProfilePrivateFlag(
+  runtime: Awaited<ReturnType<typeof createRuntimeService>>,
+  profile: string,
+): Promise<boolean> {
+  if (profile === 'base') {
+    return false;
+  }
+
+  const runtimeWorkspaceRoots = [...runtime.graph.workspace.workspaceRoots].reverse().map((entry) => entry.path);
+  const profilePaths = collectProfileDefinitionPaths(runtimeWorkspaceRoots, profile);
+
+  for (const profilePath of profilePaths) {
+    const isPrivate = await isProfilePrivate(profilePath);
+
+    if (isPrivate || (await resolveProfileExistence(profilePath))) {
+      return isPrivate;
+    }
+  }
+
+  return false;
+}
+
+function collectProfileDefinitionPaths(
+  runtimeWorkspaceRoots: string[],
+  profile: string,
+): string[] {
+  const candidates = new Set<string>();
+  const profilePaths: string[] = [];
+  const profileFilename = `${profile}.yml`;
+
+  for (const workspaceRoot of runtimeWorkspaceRoots) {
+    const workspaceProfilePath = path.join(workspaceRoot, 'profiles', profileFilename);
+    if (!candidates.has(workspaceProfilePath)) {
+      candidates.add(workspaceProfilePath);
+      profilePaths.push(workspaceProfilePath);
+    }
+
+    if (path.basename(path.dirname(workspaceRoot)) === 'workspaces') {
+      const manifestRoot = path.resolve(workspaceRoot, '..', '..');
+      const manifestProfilePath = path.join(manifestRoot, 'profiles', profileFilename);
+      if (!candidates.has(manifestProfilePath)) {
+        candidates.add(manifestProfilePath);
+        profilePaths.push(manifestProfilePath);
+      }
+    }
+  }
+
+  return profilePaths;
+}
+
+async function resolveProfileExistence(profilePath: string): Promise<boolean> {
+  try {
+    await readFile(profilePath, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveProfileDocumentPath(
+  workspaceRoot: string,
+  namespace: string,
+  configPath: string,
+  profile: string,
+  runtime: Awaited<ReturnType<typeof createRuntimeService>>,
+  writePrivate = false,
+): Promise<string> {
+  const isPrivate = (await resolveProfilePrivateFlag(runtime, profile)) || writePrivate;
+
+  return resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile, isPrivate);
+}
+
 export async function defineValue(
   namespace: string,
   configPath: string,
@@ -165,7 +246,14 @@ export async function defineValue(
 
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
-  const filePath = resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile);
+  const filePath = await resolveProfileDocumentPath(
+    workspaceRoot,
+    namespace,
+    configPath,
+    profile,
+    runtime,
+    options.writePrivate === true,
+  );
   const document = await readYamlDocument(filePath);
 
   let parsedValue: unknown;
@@ -214,7 +302,14 @@ export async function setSecret(
   });
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
-  const filePath = resolveConfigDocumentPath(workspaceRoot, 'secret', configPath, profile);
+  const filePath = await resolveProfileDocumentPath(
+    workspaceRoot,
+    'secret',
+    configPath,
+    profile,
+    runtime,
+    options.writePrivate === true,
+  );
   const document = await readYamlDocument(filePath);
   const vault = options.vault?.trim() || 'default';
   const vaultDefinition = runtime.manifest.vaults[vault];
@@ -230,7 +325,7 @@ export async function setSecret(
       : vaultDefinition.provider === 'github-secrets' || vaultDefinition.provider === 'environment'
         ? 'ref'
         : 'remote');
-  let reference: SecretReference;
+  let reference: { provider: string; ref: string; vault?: string };
 
   if (mode === 'local') {
     const auth = await resolveVaultAuth(vault, vaultDefinition, options.processEnv ?? process.env);
@@ -273,7 +368,14 @@ export async function deleteSecret(
   });
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
-  const filePath = resolveConfigDocumentPath(workspaceRoot, 'secret', configPath, profile);
+  const filePath = await resolveProfileDocumentPath(
+    workspaceRoot,
+    'secret',
+    configPath,
+    profile,
+    runtime,
+    options.writePrivate === true,
+  );
   const document = await readYamlDocument(filePath);
   const metadata = runtime.graph.entries.get(`secret.${configPath}`)?.winner.metadata;
   const deleted = unsetNestedValue(document, configPath.split('.'));
@@ -338,7 +440,14 @@ export async function deleteValue(
 
   const workspaceRoot = getSelectedWorkspaceRoot(options, runtime);
   const profile = options.profile ?? runtime.graph.profile;
-  const filePath = resolveConfigDocumentPath(workspaceRoot, namespace, configPath, profile);
+  const filePath = await resolveProfileDocumentPath(
+    workspaceRoot,
+    namespace,
+    configPath,
+    profile,
+    runtime,
+    options.writePrivate === true,
+  );
   const document = await readYamlDocument(filePath);
   const deleted = unsetNestedValue(document, configPath.split('.'));
 

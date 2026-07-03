@@ -625,6 +625,47 @@ describe('@kitsy/cnos-cli', () => {
     });
   });
 
+  it('parses private-profile aliases on profile create', () => {
+    expect(parseArgs(['create', 'profile', 'incognito', '--private'])).toEqual({
+      command: 'profile',
+      args: ['create', 'incognito'],
+      options: {
+        cliArgs: ['--private'],
+      },
+      passthrough: [],
+    });
+
+    expect(parseArgs(['profile', 'create', 'incognito', '--incog'])).toEqual({
+      command: 'profile',
+      args: ['create', 'incognito'],
+      options: {
+        cliArgs: ['--incog'],
+      },
+      passthrough: [],
+    });
+
+    expect(parseArgs(['profile', 'create', 'incognito', '--anonymous'])).toEqual({
+      command: 'profile',
+      args: ['create', 'incognito'],
+      options: {
+        cliArgs: ['--anonymous'],
+      },
+      passthrough: [],
+    });
+  });
+
+  it('parses global --use-private option', () => {
+    expect(parseArgs(['read', 'value.app.name', '--use-private'])).toEqual({
+      command: 'read',
+      args: ['value.app.name'],
+      options: {
+        usePrivate: true,
+        cliArgs: [],
+      },
+      passthrough: [],
+    });
+  });
+
   it('parses help flags for root and command-level help', () => {
     expect(parseArgs(['--help'])).toEqual({
       command: 'help',
@@ -1636,6 +1677,181 @@ describe('@kitsy/cnos-cli', () => {
     await expect(readFile(path.join(root, '.cnos', 'profiles', 'isolated.yml'), 'utf8')).resolves.toContain(
       '.env.isolated',
     );
+  });
+
+  it('creates private profiles with .private activation layers and private metadata', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runProfile(['create', 'private-stage'], {
+        root,
+        cliArgs: ['--private'],
+      }),
+    ).resolves.toBe('created profile private-stage at .cnos/profiles/private-stage.yml; inherits values from base by default');
+    await expect(readFile(path.join(root, '.cnos', 'profiles', 'private-stage.yml'), 'utf8')).resolves.toContain(
+      'private: true',
+    );
+  });
+
+  it('writes value documents under .cnos/.private when profile is marked private', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-private-write-'));
+    fixtureRoots.push(secretHome);
+
+    await runProfile(['create', 'private-stage'], {
+      root,
+      cliArgs: ['--private'],
+    });
+
+    await expect(
+      runVault(['create', 'default'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+      }),
+    ).resolves.toContain('created vault "default"');
+
+    await expect(
+      runDefine('value', 'app.name', 'private-override', {
+        root,
+        workspace: 'api',
+        profile: 'private-stage',
+      }),
+    ).resolves.toContain('.cnos/workspaces/api/.private/profiles/private-stage/values/app.yml');
+
+    await expect(
+      runSecret(['set', 'app.token', 'private-token'], {
+        root,
+        workspace: 'api',
+        profile: 'private-stage',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--local', '--vault', 'default'],
+      }),
+    ).resolves.toContain('.cnos/workspaces/api/.private/profiles/private-stage/secrets/app.yml');
+
+    await expect(
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', '.private', 'profiles', 'private-stage', 'values', 'app.yml'), 'utf8'),
+    ).resolves.toContain('name: private-override');
+
+    await expect(
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', '.private', 'profiles', 'private-stage', 'secrets', 'app.yml'), 'utf8'),
+    ).resolves.toContain('provider: local');
+  });
+
+  it('writes single-key entries to private layers with --private on regular profiles', async () => {
+    const root = await createRuntimeFixture();
+
+    await expect(
+      runDefine('value', 'app.name', 'public-value', {
+        root,
+        workspace: 'api',
+        profile: 'local',
+      }),
+    ).resolves.toContain('.cnos/workspaces/api/profiles/local/values/app.yml');
+
+    await expect(
+      runDefine('value', 'app.name', 'private-value', {
+        root,
+        workspace: 'api',
+        profile: 'local',
+        cliArgs: ['--private'],
+      }),
+    ).resolves.toContain('.cnos/workspaces/api/.private/profiles/local/values/app.yml');
+
+    await expect(
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', 'values', 'app.yml'), 'utf8'),
+    ).resolves.not.toContain('public-value');
+
+    await expect(
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', 'profiles', 'local', 'values', 'app.yml'), 'utf8'),
+    ).resolves.toContain('public-value');
+    await expect(
+      readFile(path.join(root, '.cnos', 'workspaces', 'api', '.private', 'profiles', 'local', 'values', 'app.yml'), 'utf8'),
+    ).resolves.toContain('private-value');
+
+    await expect(
+      runValue(['get', 'app.name'], {
+        root,
+        workspace: 'api',
+        profile: 'local',
+      }),
+    ).resolves.toBe('public-value');
+    await expect(
+      runValue(['get', 'app.name'], {
+        root,
+        workspace: 'api',
+        profile: 'local',
+        usePrivate: true,
+      }),
+    ).resolves.toBe('private-value');
+  });
+
+  it('writes secret references to private layers with --private and resolves only with --use-private', async () => {
+    const root = await createRuntimeFixture();
+    const secretHome = await mkdtemp(path.join(os.tmpdir(), 'cnos-cli-private-secret-'));
+    fixtureRoots.push(secretHome);
+
+    await expect(
+      runVault(['create', 'default'], {
+        root,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+      }),
+    ).resolves.toContain('created vault "default"');
+
+    await expect(
+      runSecret(['set', 'service.token', 'private-token'], {
+        root,
+        workspace: 'api',
+        profile: 'local',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--local', '--private', '--vault', 'default'],
+      }),
+    ).resolves.toContain('.cnos/workspaces/api/.private/profiles/local/secrets/service.yml');
+
+    await expect(
+      readFile(
+        path.join(root, '.cnos', 'workspaces', 'api', '.private', 'profiles', 'local', 'secrets', 'service.yml'),
+        'utf8',
+      ),
+    ).resolves.toContain('provider: local');
+
+    await expect(
+      runSecret(['get', 'service.token'], {
+        root,
+        workspace: 'api',
+        profile: 'local',
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--vault', 'default'],
+      }),
+    ).rejects.toThrow('Missing CNOS secret path: service.token');
+
+    await expect(
+      runSecret(['get', 'service.token'], {
+        root,
+        workspace: 'api',
+        profile: 'local',
+        usePrivate: true,
+        processEnv: {
+          CNOS_SECRET_HOME: secretHome,
+          CNOS_SECRET_PASSPHRASE: 'dev-pass',
+        },
+        cliArgs: ['--vault', 'default', '--reveal'],
+      }),
+    ).resolves.toBe('private-token');
   });
 
   it('creates vault-backed local secret refs with simple keys', async () => {

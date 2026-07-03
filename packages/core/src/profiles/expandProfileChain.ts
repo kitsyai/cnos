@@ -15,6 +15,7 @@ import { parseYaml } from '../utils/yaml.js';
 export interface ExpandProfileChainOptions {
   manifestRoot?: string;
   workspace?: WorkspaceContext;
+  usePrivate?: boolean;
 }
 
 async function fileExists(targetPath: string): Promise<boolean> {
@@ -50,6 +51,7 @@ function normalizeProfileDefinition(
 
   return {
     name: rawDefinition?.name?.trim() || profileName,
+    private: Boolean(rawDefinition?.private),
     extends: Array.isArray(rawDefinition?.extends)
       ? rawDefinition.extends.map((entry) => entry.trim()).filter(Boolean)
       : rawDefinition?.extends
@@ -121,21 +123,65 @@ function pushUnique(target: string[], values: string[]): void {
   }
 }
 
-function buildFallbackActivation(activeProfile: string, orderedProfiles: string[]): ProfileActivation {
+function buildFallbackActivation(
+  activeProfile: string,
+  orderedProfiles: string[],
+  profileByName: Map<string, NormalizedProfileDefinition>,
+  usePrivate: boolean,
+): ProfileActivation {
   const overlayProfiles = orderedProfiles.filter((profile) => profile !== 'base');
+  const includeActiveProfileEnv = activeProfile !== 'base' && !((profileByName.get(activeProfile)?.private ?? false) && !usePrivate);
+
+  const buildNamespaceLayers = (
+    profile: string,
+    definition: NormalizedProfileDefinition,
+    namespace: 'values' | 'secrets',
+  ): string[] => {
+    const activateLayers = definition.activate[namespace];
+
+    if (definition.private && !usePrivate) {
+      return [];
+    }
+
+    if (definition.activate[namespace].length > 0) {
+      return activateLayers;
+    }
+
+    if (definition.private) {
+      return [
+        `.private/profiles/${profile}/${namespace}`,
+        `.private/${namespace}/${profile}`,
+      ];
+    }
+
+    if (!usePrivate) {
+      return [`profiles/${profile}/${namespace}`, `${namespace}/${profile}`];
+    }
+
+    return [
+      `profiles/${profile}/${namespace}`,
+      `${namespace}/${profile}`,
+      `.private/profiles/${profile}/${namespace}`,
+      `.private/${namespace}/${profile}`,
+    ];
+  };
+
+  const valueLayers = overlayProfiles.flatMap((profile) => {
+    const definition = profileByName.get(profile);
+    return definition ? buildNamespaceLayers(profile, definition, 'values') : [];
+  });
+  const secretLayers = overlayProfiles.flatMap((profile) => {
+    const definition = profileByName.get(profile);
+    return definition ? buildNamespaceLayers(profile, definition, 'secrets') : [];
+  });
 
   return {
-    values: [
-      'values',
-      ...(activeProfile !== 'base' ? ['values/base'] : []),
-      ...overlayProfiles.flatMap((profile) => [`profiles/${profile}/values`, `values/${profile}`]),
-    ],
-    secrets: [
-      'secrets',
-      ...overlayProfiles.flatMap((profile) => [`profiles/${profile}/secrets`, `secrets/${profile}`]),
-    ],
+    values: ['values', ...(activeProfile !== 'base' ? ['values/base'] : []), ...valueLayers],
+    secrets: ['secrets', ...secretLayers],
     envFiles:
-      activeProfile === 'base' ? ['.env'] : ['.env', `.env.${activeProfile}`],
+      activeProfile === 'base'
+        ? ['.env']
+        : ['.env', ...(includeActiveProfileEnv ? [`.env.${activeProfile}`] : [])],
   };
 }
 
@@ -181,7 +227,9 @@ export async function expandProfileChain(
   for (const profileName of orderedProfiles) {
     const definition = definitions.get(profileName);
 
-    if (!definition) {
+    const shouldSkipProfile = definition?.private && !options.usePrivate;
+
+    if (!definition || shouldSkipProfile) {
       continue;
     }
 
@@ -190,18 +238,17 @@ export async function expandProfileChain(
     pushUnique(activation.envFiles, definition.activate.envFiles);
   }
 
-  const fallback = buildFallbackActivation(activeProfile, orderedProfiles);
-
-  if (activation.values.length === 0) {
-    activation.values = fallback.values;
-  }
-
-  if (activation.secrets.length === 0) {
-    activation.secrets = fallback.secrets;
-  }
+  const fallback = buildFallbackActivation(activeProfile, orderedProfiles, definitions, options.usePrivate ?? false);
 
   if (activation.envFiles.length === 0) {
-    activation.envFiles = fallback.envFiles;
+    activation.envFiles = [...fallback.envFiles];
+  }
+
+  if (activation.values.length === 0) {
+    activation.values = [...fallback.values];
+  }
+  if (activation.secrets.length === 0) {
+    activation.secrets = [...fallback.secrets];
   }
 
   return {

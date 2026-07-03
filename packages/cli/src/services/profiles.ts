@@ -17,25 +17,33 @@ export async function createProfileDefinition(
   root = process.cwd(),
   profile: string,
   inherit?: string,
-  options: { noInherit?: boolean } = {},
+  options: { noInherit?: boolean; privateProfile?: boolean } = {},
 ): Promise<{ filePath: string; profile: string; inherit?: string; noInherit?: boolean }> {
   const filePath = path.join(await resolveProfilesRoot(root), `${profile}.yml`);
   await mkdir(path.dirname(filePath), { recursive: true });
+  const privateProfile = options.privateProfile === true;
   const document = options.noInherit
     ? {
+        ...(privateProfile ? { private: true } : {}),
         name: profile,
         activate: {
-          values: [`profiles/${profile}/values`, `values/${profile}`],
-          secrets: [`profiles/${profile}/secrets`, `secrets/${profile}`],
+          values: privateProfile
+            ? [`.private/profiles/${profile}/values`, `.private/values/${profile}`]
+            : [`profiles/${profile}/values`, `values/${profile}`],
+          secrets: privateProfile
+            ? [`.private/profiles/${profile}/secrets`, `.private/secrets/${profile}`]
+            : [`profiles/${profile}/secrets`, `secrets/${profile}`],
           envFiles: [`.env.${profile}`],
         },
       }
     : inherit && inherit !== 'base'
       ? {
+          ...(privateProfile ? { private: true } : {}),
           name: profile,
           extends: [inherit],
         }
       : {
+          ...(privateProfile ? { private: true } : {}),
           name: profile,
         };
 

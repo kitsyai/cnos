@@ -41,12 +41,19 @@ export async function runProfile(args: string[], options: RuntimeServiceOptions 
     const profile = tail[0] ?? 'stage';
     const inherit = consumeOption(cliArgs, '--inherit');
     const noInherit = consumeFlag(cliArgs, '--no-inherit');
+    const privateProfile =
+      consumeFlag(cliArgs, '--private') ||
+      consumeFlag(cliArgs, '--incog') ||
+      consumeFlag(cliArgs, '--anonymous');
 
     if (inherit && noInherit) {
       throw new Error('profile create accepts either --inherit <name> or --no-inherit, not both');
     }
 
-    const result = await createProfileDefinition(root, profile, inherit, { noInherit });
+    const result = await createProfileDefinition(root, profile, inherit, {
+      noInherit,
+      privateProfile,
+    });
 
     if (options.json) {
       return printJson(result);

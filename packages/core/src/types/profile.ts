@@ -4,6 +4,7 @@ export type ProfileSource = 'cli' | 'workspace-file' | 'env' | 'manifest-default
 
 export interface ProfileDefinitionFile {
   name?: string;
+  private?: boolean;
   extends?: string | string[];
   activate?: {
     values?: string[];
@@ -14,6 +15,7 @@ export interface ProfileDefinitionFile {
 
 export interface NormalizedProfileDefinition {
   name: string;
+  private: boolean;
   extends: string[];
   activate: {
     values: string[];

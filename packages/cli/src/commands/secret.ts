@@ -187,6 +187,10 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const provider = consumeOption(cliArgs, '--provider');
     const vault = consumeOption(cliArgs, '--vault') ?? 'default';
     const mode = local ? 'local' : remote ? 'remote' : ref ? 'ref' : undefined;
+    const writePrivate =
+      consumeFlag(cliArgs, '--private') ||
+      consumeFlag(cliArgs, '--incog') ||
+      consumeFlag(cliArgs, '--anonymous');
     const resolvedSecretPath = secretPath ?? 'app.token';
     const promptForMissingValue = await shouldPromptForMissingSecretValue(vault, mode, {
       ...options,
@@ -196,6 +200,7 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
     const rawValue = await resolveSecretSetValue(resolvedSecretPath, tail[1], stdin, promptForMissingValue);
     const result = await setSecret(resolvedSecretPath, rawValue, {
       ...options,
+      writePrivate,
       cliArgs,
       target,
       vault,
@@ -215,8 +220,13 @@ export async function runSecret(argsOrPath: string | string[], options: RuntimeS
   if (action === 'delete') {
     const secretPath = tail[0];
     const target = (consumeOption(cliArgs, '--target') ?? 'local') as 'local' | 'global';
+    const writePrivate =
+      consumeFlag(cliArgs, '--private') ||
+      consumeFlag(cliArgs, '--incog') ||
+      consumeFlag(cliArgs, '--anonymous');
     const result = await deleteSecret(secretPath ?? 'app.token', {
       ...options,
+      writePrivate,
       cliArgs,
       target,
     });

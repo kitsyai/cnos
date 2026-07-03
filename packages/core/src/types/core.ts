@@ -118,6 +118,7 @@ export interface CnosCreateOptions {
   forceRefresh?: boolean;
   secretResolution?: 'eager' | 'lazy' | 'refreshing';
   secretRefreshTtl?: number;
+  usePrivate?: boolean;
   cnosVersion?: string;
   plugins?: CnosPlugin[];
   cliArgs?: string[];

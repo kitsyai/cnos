@@ -74,10 +74,12 @@ export async function ensureFile(filePath: string, content: string): Promise<boo
 export async function ensureGitignore(root: string): Promise<boolean> {
   const gitignorePath = path.join(root, '.gitignore');
   const requiredEntries = [
+    '.cnos/.private',
     '.cnos/env/.env',
     '.cnos/env/.env.*',
     '!.cnos/env/.env.example',
     '!.cnos/env/.env.*.example',
+    '.cnos/workspaces/*/.private',
     '.cnos/workspaces/*/env/.env',
     '.cnos/workspaces/*/env/.env.*',
     '!.cnos/workspaces/*/env/.env.example',
