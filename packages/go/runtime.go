@@ -132,7 +132,7 @@ func Load(options Options) (*Runtime, error) {
 	}
 
 	// Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic suppresses the projection-not-found error.
-	// env.* and args.* reads work; value.* returns nil unless supplied via --cnos-patch.
+	// process.env.* reads work; value.* returns nil unless supplied via --cnos-patch.
 	if isDynamicMode(parsedArgs, env) {
 		return newDynamicRuntime(env, secretHome, options.SecretVaultProviders)
 	}

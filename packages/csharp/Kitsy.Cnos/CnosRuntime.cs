@@ -143,7 +143,7 @@ namespace Kitsy.Cnos
             bool isDynamic = parsedArgs.GetValueOrDefault("--cnos-dynamic") == "true";
             if (!isDynamic)
             {
-                string? dynEnv = env.Get("CNOS_DYNAMIC");
+                string? dynEnv = env.Get("CNOS_DYNAMIC")?.ToLowerInvariant();
                 isDynamic = dynEnv == "1" || dynEnv == "true" || dynEnv == "yes";
             }
             if (isDynamic)

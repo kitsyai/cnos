@@ -101,14 +101,7 @@ function getProcessEnvFlag(env: Record<string, string | undefined>, key: string)
 }
 
 function resolveExplicitProjectionPath(processEnv: Record<string, string | undefined>): string | undefined {
-  const raw = processEnv[CNOS_SERVER_PROJECTION_PATH_ENV_VAR];
-
-  if (raw !== undefined) {
-    const trimmed = raw.trim();
-    if (trimmed) return path.resolve(trimmed);
-  }
-
-  // Also honour --cnos-projection=<path> passed as a runtime argv flag.
+  // --cnos-projection argv flag takes precedence over the env var, matching all other runtimes.
   if (typeof process !== 'undefined') {
     const argv = process.argv ?? [];
     for (let i = 0; i < argv.length; i++) {
@@ -121,6 +114,12 @@ function resolveExplicitProjectionPath(processEnv: Record<string, string | undef
         return path.resolve(argv[i + 1] as string);
       }
     }
+  }
+
+  const raw = processEnv[CNOS_SERVER_PROJECTION_PATH_ENV_VAR];
+  if (raw !== undefined) {
+    const trimmed = raw.trim();
+    if (trimmed) return path.resolve(trimmed);
   }
 
   return undefined;

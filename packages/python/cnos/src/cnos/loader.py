@@ -146,7 +146,7 @@ def load(options: Optional[CnosOptions] = None) -> CnosRuntime:
         return new_runtime(data, env, secret_home, factories)
 
     # 6. Dynamic mode: CNOS_DYNAMIC=1 or --cnos-dynamic — suppress projection-not-found.
-    # env.* and args.* reads work; value.* returns None unless supplied via --cnos-patch.
+    # process.env.* reads work; value.* returns None unless supplied via --cnos-patch.
     if parsed_args.get("--cnos-dynamic") == "true":
         return new_dynamic_runtime(env, secret_home, factories)
     _dv, _dfound = env.get("CNOS_DYNAMIC")
