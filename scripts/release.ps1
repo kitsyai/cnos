@@ -37,7 +37,9 @@ function Invoke-Checked([scriptblock]$cmd) {
 # Use this instead everywhere we update files.
 $_utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 function Write-Utf8NoBom([string]$path, [string]$content) {
-    [System.IO.File]::WriteAllText($path, $content, $_utf8NoBom)
+    # Resolve through PS so relative paths honour Set-Location, not the .NET CWD.
+    $absPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+    [System.IO.File]::WriteAllText($absPath, $content, $_utf8NoBom)
 }
 
 # ── detect current version ────────────────────────────────────────────────────
