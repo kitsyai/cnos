@@ -393,17 +393,17 @@ public final class CnosRuntime {
     public String format(String message) throws CnosError {
         CnosError[] err = {null};
         String result = TEMPLATE_PATTERN.matcher(message).replaceAll(mr -> {
-            if (err[0] != null) return mr.group(0);
+            if (err[0] != null) return Matcher.quoteReplacement(mr.group(0));
             String key = mr.group(1).trim();
-            if (key.isEmpty()) return mr.group(0);
+            if (key.isEmpty()) return Matcher.quoteReplacement(mr.group(0));
             try {
                 Object[] r = readInternal(key, new HashSet<>());
                 boolean found = (Boolean) r[1];
-                if (!found) return mr.group(0);
+                if (!found) return Matcher.quoteReplacement(mr.group(0));
                 return Matcher.quoteReplacement(JsCompat.jsLogStringifyValue(r[0]));
             } catch (CnosError e) {
                 err[0] = e;
-                return mr.group(0);
+                return Matcher.quoteReplacement(mr.group(0));
             }
         });
         if (err[0] != null) throw err[0];

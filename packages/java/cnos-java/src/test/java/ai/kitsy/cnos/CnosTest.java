@@ -195,11 +195,11 @@ class CnosTest {
         assertEquals("App: cnos-java", Cnos.format("App: ${value.app.name}"));
     }
 
-    // NOTE: Cnos.format() with unknown keys is not tested here because Java's
-    // Matcher.replaceAll treats '$' in the replacement as a group back-reference,
-    // causing IllegalArgumentException when the original "${key}" text is returned
-    // unchanged. That is a pre-existing bug in CnosRuntime.format (Java) — tracked
-    // separately, not modified here per CLAUDE.md rule 1.
+    @Test
+    void formatLeavesUnknownKeysUnchanged() throws CnosError {
+        Cnos.setDefaultRuntime(makeRuntime());
+        assertEquals("${value.does.not.exist}", Cnos.format("${value.does.not.exist}"));
+    }
 
     // ================================================================
     // refreshSecrets / refreshSecret
