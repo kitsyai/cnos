@@ -20,8 +20,10 @@ import {
   parseCliArgs,
   resolveOverride,
 } from '../runtime/overrideResolver.js';
+import { isVarKey, resolveVarOverlay } from '../runtime/readVar.js';
 import { toLogicalKey } from '../utils/path.js';
 import { isSecretReference } from '../utils/secretStore.js';
+import { CnosKeyNotFoundError } from '../errors.js';
 
 export function createRuntime(
   manifest: NormalizedManifest,
@@ -156,14 +158,33 @@ export function createRuntime(
     return readLogicalKeyCore(key);
   }
 
+  function readVarKey<T = unknown>(key: string): T | undefined {
+    return resolveVarOverlay(key, {
+      // W1: no runtime tier. readRuntimeVar is intentionally omitted; W3 wires the live
+      // var store here. Overlay falls through to the static value tier and schema default.
+      readValue: (valueKey) => readLogicalKey(valueKey),
+      manifest,
+    }) as T | undefined;
+  }
+
   return {
     manifest,
     plugins,
     graph,
     read(key) {
-      return readLogicalKey(key);
+      return isVarKey(key) ? readVarKey(key) : readLogicalKey(key);
     },
     require<T = unknown>(key: string) {
+      if (isVarKey(key)) {
+        const varValue = readVarKey<T>(key);
+
+        if (varValue === undefined) {
+          throw new CnosKeyNotFoundError(key);
+        }
+
+        return varValue;
+      }
+
       const value = readLogicalKey(key);
 
       if (value === undefined) {
@@ -173,7 +194,7 @@ export function createRuntime(
       return value as T;
     },
     readOr(key, fallback) {
-      const value = readLogicalKey(key);
+      const value = isVarKey(key) ? readVarKey(key) : readLogicalKey(key);
       return (value === undefined ? fallback : value) as typeof fallback;
     },
     value(path) {
@@ -181,6 +202,9 @@ export function createRuntime(
     },
     secret(path) {
       return readLogicalKey(toLogicalKey('secret', path));
+    },
+    var(path) {
+      return readVarKey(toLogicalKey('var', path));
     },
     meta(path) {
       return readLogicalKey(toLogicalKey('meta', path));

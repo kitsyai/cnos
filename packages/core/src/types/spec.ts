@@ -23,6 +23,8 @@ export interface ConfigSpecRule {
   required?: boolean;
   enum?: unknown[];
   pattern?: string;
+  /** Binds a `var.*` key to a declared document schema id (e.g. `agentic-lanes/v1`). */
+  document?: string;
   default?: unknown;
   summary?: string;
   description?: string;

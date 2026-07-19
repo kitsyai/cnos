@@ -150,6 +150,11 @@ export function normalizeSpecRule(
     normalized.pattern = normalizedPattern;
   }
 
+  const normalizedDocument = normalizeOptionalString(candidate.document, 'document', logicalKey);
+  if (normalizedDocument !== undefined) {
+    normalized.document = normalizedDocument;
+  }
+
   const normalizedSummary = normalizeOptionalString(candidate.summary, 'summary', logicalKey);
   if (normalizedSummary !== undefined) {
     normalized.summary = normalizedSummary;

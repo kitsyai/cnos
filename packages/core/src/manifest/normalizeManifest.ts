@@ -1,4 +1,5 @@
 import { CnosManifestError } from '../errors.js';
+import { normalizeDocuments, normalizeVarSources, normalizeVars } from './normalizeVars.js';
 import { normalizeSpecRule } from '../spec/normalizeSpecRule.js';
 import type {
   ManifestFile,
@@ -412,5 +413,8 @@ export function normalizeManifest(manifest: ManifestFile): NormalizedManifest {
       },
     },
     schema: normalizeSchema(manifest.schema),
+    varSources: normalizeVarSources(manifest.varSources),
+    vars: normalizeVars(manifest.vars),
+    documents: normalizeDocuments(manifest.documents),
   };
 }

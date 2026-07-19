@@ -4,6 +4,11 @@ import type { ResolvedGraph, ServerProjection } from '../types/core.js';
 import type { NormalizedManifest, VaultDefinition } from '../types/manifest.js';
 import type { ProjectedVaultDefinition } from '../secrets/types.js';
 import type { OverrideSpec, OverridePrioritySource } from '../types/spec.js';
+import type {
+  DocumentSchemaDefinition,
+  ProjectedVarSourceDefinition,
+  VarGroupDefinition,
+} from '../types/var.js';
 import { assertSecretRefVaultProviderCompatible } from '../secrets/providerCompatibility.js';
 import { isSecretReference } from '../utils/secretStore.js';
 
@@ -165,6 +170,56 @@ function projectReferencedVaults(
   return Object.keys(projected).length > 0 ? projected : undefined;
 }
 
+function projectVarSources(
+  manifest: NormalizedManifest,
+): Record<string, ProjectedVarSourceDefinition> | undefined {
+  const sources = manifest.varSources ?? {};
+
+  if (Object.keys(sources).length === 0) {
+    return undefined;
+  }
+
+  // Refs only: auth/verify values are secret.* references, never resolved material.
+  return stableSortObject(
+    Object.fromEntries(
+      Object.entries(sources).map(([name, source]) => [
+        name,
+        {
+          transport: source.transport,
+          url: source.url,
+          auth: stableSortObject(source.auth) as Record<string, string>,
+          ...(source.pollInterval ? { pollInterval: source.pollInterval } : {}),
+          ...(source.verify ? { verify: source.verify } : {}),
+        } satisfies ProjectedVarSourceDefinition,
+      ]),
+    ),
+  ) as Record<string, ProjectedVarSourceDefinition>;
+}
+
+function projectVars(
+  manifest: NormalizedManifest,
+): Record<string, VarGroupDefinition> | undefined {
+  const vars = manifest.vars ?? {};
+
+  if (Object.keys(vars).length === 0) {
+    return undefined;
+  }
+
+  return stableSortObject(vars) as Record<string, VarGroupDefinition>;
+}
+
+function projectDocuments(
+  manifest: NormalizedManifest,
+): Record<string, DocumentSchemaDefinition> | undefined {
+  const documents = manifest.documents ?? {};
+
+  if (Object.keys(documents).length === 0) {
+    return undefined;
+  }
+
+  return stableSortObject(documents) as Record<string, DocumentSchemaDefinition>;
+}
+
 export function toServerProjection(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
@@ -314,6 +369,9 @@ export function toServerProjection(
   }
 
   const vaults = projectReferencedVaults(manifest, referencedVaultIds);
+  const varSources = projectVarSources(manifest);
+  const vars = projectVars(manifest);
+  const documents = projectDocuments(manifest);
 
   return {
     version: 1,
@@ -325,6 +383,9 @@ export function toServerProjection(
     derived: stableSortObject(derived) as ServerProjection['derived'],
     secretRefs: stableSortObject(secretRefs) as ServerProjection['secretRefs'],
     ...(vaults ? { vaults } : {}),
+    ...(varSources ? { varSources } : {}),
+    ...(vars ? { vars } : {}),
+    ...(documents ? { documents } : {}),
     publicKeys,
     runtimeNamespaces: Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right)),
     ...(Object.keys(valueTypes).length > 0 ? { valueTypes: stableSortObject(valueTypes) as Record<string, string> } : {}),

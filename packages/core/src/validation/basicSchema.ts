@@ -103,6 +103,13 @@ export function applySchemaRules(
   const issues: ValidationIssue[] = [];
 
   for (const [key, rule] of Object.entries(schema).sort(([left], [right]) => left.localeCompare(right))) {
+    // var.* rules are resolved through the runtime overlay (runtime -> value.* -> default),
+    // never injected into the value graph. Skip them here so no bogus `var.*` value entry
+    // is created and no static default leaks into the resolved config.
+    if (key.startsWith('var.')) {
+      continue;
+    }
+
     const resolvedEntry = nextEntries.get(key);
 
     if (!resolvedEntry) {

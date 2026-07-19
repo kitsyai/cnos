@@ -2,6 +2,7 @@ import type { CnosRuntime } from '../types/core.js';
 import type { ValidationIssue, ValidationResult, ValidationSummary, ValidatorPlugin } from '../types/plugin.js';
 import { validateEnvMappingCollisions } from './envMapping.js';
 import { validatePublicSafety } from './publicSafety.js';
+import { validateVarManifest } from './validateVars.js';
 import { validateWorkspaceSafety } from './workspaceSafety.js';
 
 export async function validateRuntime(runtime: CnosRuntime): Promise<ValidationSummary> {
@@ -31,6 +32,11 @@ export async function validateRuntime(runtime: CnosRuntime): Promise<ValidationS
       pluginId: 'workspace-safety',
       valid: true,
       issues: validateWorkspaceSafety(runtime.manifest, runtime.graph),
+    },
+    {
+      pluginId: 'var-manifest',
+      valid: true,
+      issues: validateVarManifest(runtime.manifest),
     },
   ].map((result) => ({
     ...result,

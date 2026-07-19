@@ -5,6 +5,11 @@ import type { SecretCache } from '../secrets/secretCache.js';
 import type { WorkspaceContext } from './workspace.js';
 import type { ProjectedVaultDefinition, SecretReference, SecretVaultProviderFactory } from '../secrets/types.js';
 import type { OverrideSpec } from './spec.js';
+import type {
+  DocumentSchemaDefinition,
+  ProjectedVarSourceDefinition,
+  VarGroupDefinition,
+} from './var.js';
 
 export type LogicalKey = string;
 
@@ -176,6 +181,12 @@ export interface CnosRuntime {
   readOr<T>(key: LogicalKey, fallback: T): T;
   value<T = unknown>(path: string): T | undefined;
   secret<T = unknown>(path: string): T | undefined;
+  /**
+   * Read a `var.*` runtime variable through the overlay precedence
+   * (runtime tier -> static `value.*` -> schema default). Optional on the contract so
+   * runtimes bootstrapped without var support (e.g. browser/singleton) remain assignable.
+   */
+  var?<T = unknown>(path: string): T | undefined;
   meta<T = unknown>(path: string): T | undefined;
   inspect(key: LogicalKey): InspectResult;
   toObject(): Record<string, unknown>;
@@ -204,6 +215,12 @@ export interface ServerProjection {
   derived: Record<string, DerivedFormula>;
   secretRefs: Record<string, SecretReference & { envVar?: string }>;
   vaults?: Record<string, ProjectedVaultDefinition>;
+  /** Declared var sources (refs only — auth values stay as secret-ref strings). */
+  varSources?: Record<string, ProjectedVarSourceDefinition>;
+  /** Declared var groups (group -> source + fetch policy). */
+  vars?: Record<string, VarGroupDefinition>;
+  /** Declared document schemas keyed by `schemaId/version`. */
+  documents?: Record<string, DocumentSchemaDefinition>;
   publicKeys: string[];
   runtimeNamespaces: string[];
   /** Optional format hints for value entries — e.g. { "myapp.public_key": "pem" } */

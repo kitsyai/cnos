@@ -38,6 +38,13 @@ export function ensureProjectionAllowed(
   options: ProjectionPolicyOptions = {},
 ): void {
   const namespace = getNamespaceNameForKey(key);
+
+  if (namespace === 'var') {
+    throw new CnosSecurityError(
+      `Cannot promote ${key} to ${target} because var.* runtime configuration must never reach public or browser surfaces. Remove ${key} from public.promote / env mapping.`,
+    );
+  }
+
   const definition = getNamespaceDefinition(manifest, namespace);
 
   if (definition.kind !== 'data') {

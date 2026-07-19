@@ -1,6 +1,13 @@
 import type { LogicalKey } from './core.js';
 import type { ProfileResolveFrom } from './profile.js';
 import type { ConfigSpecRule } from './spec.js';
+import type {
+  DocumentSchemaDefinition,
+  DocumentSchemaInput,
+  NormalizedVarSourceDefinition,
+  VarGroupDefinition,
+  VarSourceDefinition,
+} from './var.js';
 import type { NormalizedWorkspaceItem, WorkspaceItemConfig } from './workspace.js';
 
 export type ResolutionArrayPolicy = 'replace' | 'append' | 'unique-append';
@@ -123,6 +130,12 @@ export interface ManifestFile {
     };
   };
   schema?: Record<LogicalKey, ConfigSpecRule>;
+  /** Named runtime var sources (`var.*` distribution endpoints). */
+  varSources?: Record<string, VarSourceDefinition>;
+  /** Var group -> source mapping and fetch policy. */
+  vars?: Record<string, VarGroupDefinition>;
+  /** Document schemas keyed by `schemaId/version` (e.g. `agentic-lanes/v1`). */
+  documents?: Record<string, DocumentSchemaInput>;
 }
 
 export interface NormalizedManifest {
@@ -173,6 +186,14 @@ export interface NormalizedManifest {
     };
   };
   schema: Record<LogicalKey, ConfigSpecRule>;
+  /**
+   * Normalized runtime var sections. Optional on the type so manifests constructed
+   * outside `normalizeManifest` (e.g. bootstrapped from a projection) stay valid;
+   * `normalizeManifest` always populates them (as `{}` when absent — backward compatible).
+   */
+  varSources?: Record<string, NormalizedVarSourceDefinition>;
+  vars?: Record<string, VarGroupDefinition>;
+  documents?: Record<string, DocumentSchemaDefinition>;
 }
 
 export interface LoadManifestOptions {
