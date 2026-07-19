@@ -31,6 +31,7 @@ import { runValidate } from './commands/validate.js';
 import { runVault } from './commands/vault.js';
 import { runVersion } from './commands/version.js';
 import { runValue } from './commands/value.js';
+import { runVar } from './commands/var.js';
 import { runWatch } from './commands/watch.js';
 import { runWorkspace } from './commands/workspace.js';
 import { normalizeHelpTopic } from './cli/helpRegistry.js';
@@ -70,6 +71,14 @@ function resolveHelpTopic(command: string, args: string[]): string | undefined {
     ['create', 'add', 'list', 'delete', 'remove'].includes(args[0])
   ) {
     return normalizeHelpTopic([command, args[0] === 'delete' ? 'remove' : args[0] === 'add' ? 'create' : args[0]]);
+  }
+
+  if (
+    command === 'var' &&
+    args[0] &&
+    ['create', 'validate', 'activate', 'deactivate', 'rollback', 'status', 'history', 'replay', 'serve'].includes(args[0])
+  ) {
+    return normalizeHelpTopic([command, args[0]]);
   }
 
   if (
@@ -204,6 +213,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case 'vault':
       process.stdout.write(`${await runVault(args, runtimeOptions)}\n`);
+      return;
+    case 'var':
+      process.stdout.write(`${await runVar(args, runtimeOptions)}\n`);
       return;
     case 'use':
       process.stdout.write(`${await runUse(args, runtimeOptions)}\n`);

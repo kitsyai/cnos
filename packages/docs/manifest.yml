@@ -121,6 +121,8 @@ sidebar:
         label: cnos promote
       - path: cli/vault
         label: cnos vault
+      - path: cli/var
+        label: cnos var
       - path: cli/codegen
         label: cnos codegen
       - path: cli/watch

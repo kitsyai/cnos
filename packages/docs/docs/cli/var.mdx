@@ -1,0 +1,57 @@
+---
+title: cnos var
+description: Author and operate mutable runtime configuration (var.*) via the control plane.
+---
+
+# cnos var
+
+`cnos var` drives the CNOS **var control plane**: mutable, non-secret runtime configuration
+(`var.*`) owned by a remote authority — allow/block lists, entitlements, kill switches,
+execution-lane policies. It exposes immutable revisions, monotonic generations, atomic
+activation, optimistic concurrency, rollback, and an append-only audit log.
+
+```bash
+# Local mode: operate directly on a file-backed (JSONL) log.
+cnos var create agentic.lanes.vinci --document @lane.json --schema agentic-lanes/v1 --store ./.cnos/var-log.jsonl
+cnos var activate agentic.lanes.vinci --revision sha256:… --expect-generation 0 --store ./.cnos/var-log.jsonl
+cnos var status agentic.lanes.vinci --store ./.cnos/var-log.jsonl
+cnos var rollback agentic.lanes.vinci --to-generation 1 --expect-generation 2 --store ./.cnos/var-log.jsonl
+
+# Remote mode: target a running var server.
+cnos var status agentic.lanes.vinci --server https://config.internal/cnos/vars
+
+# Run a standalone var server (thin wrapper over the embeddable library).
+cnos var serve --store ./.cnos/var-log.jsonl --port 8790
+```
+
+## Subcommands
+
+- `create <scope> --document <json|@file> [--schema <schemaId>]` — validate a candidate
+  document against its document schema **before** storing it as a content-addressed revision.
+  An invalid document is recorded as a rejected audit event and the last-known-good head is
+  left untouched.
+- `validate [<scope>] --document <json|@file> [--schema <schemaId>]` — dry-run validation;
+  writes nothing.
+- `activate <scope> --revision <sha256:…> --expect-generation <N>` — atomically point the
+  scope head at a revision and allocate the next monotonic generation. `--expect-generation`
+  is required: a stale value conflicts (revision-conflict) and never overwrites.
+- `deactivate <scope> --expect-generation <N>` — remove the runtime head; consumers cleanly
+  fall back to static `value.*` / schema defaults with no deployment.
+- `rollback <scope> --expect-generation <N> [--to-revision <sha256:…> | --to-generation <N>]`
+  — re-activate a prior revision as a **new** generation (history is append-only).
+- `status <scope>` / `history <scope>` — inspect the current head and the full audit log.
+  Secret material never appears in either.
+- `replay <scope> --to-generation <N>` — reconstruct the head that was active at a past
+  generation (persistent/file-backed stores only).
+- `serve [--store <path>] [--host <h>] [--port <n>] [--bearer-token <token>]` — run a
+  standalone HTTP var server. With `--store` it is durable; without, it uses an ephemeral
+  memory store.
+
+## Targets
+
+Every subcommand except `serve` targets either a local file store (`--store <path>`) or a
+running server (`--server <url>`). A bearer token for a remote server is passed with
+`--bearer-token`.
+
+Secrets never appear in `var.*` documents: a runtime document may carry an opaque `secret.*`
+**reference** only, and the material continues to flow through `secret.*` and vaults.

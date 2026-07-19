@@ -89,6 +89,12 @@
       ],
       "@kitsy/cnos-vault-hashicorp": [
         "packages/vault-hashicorp/src/index.ts"
+      ],
+      "@kitsy/cnos-var-server": [
+        "packages/var-server/src/index.ts"
+      ],
+      "@kitsy/cnos-var-testkit": [
+        "packages/var-testkit/src/index.ts"
       ]
     }
   }

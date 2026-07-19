@@ -74,6 +74,9 @@ importers:
       '@kitsy/cnos-ui':
         specifier: workspace:*
         version: link:../ui
+      '@kitsy/cnos-var-server':
+        specifier: workspace:*
+        version: link:../var-server
       smol-toml:
         specifier: ^1.4.2
         version: 1.6.1
@@ -131,6 +134,21 @@ importers:
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
+
+  packages/var-server:
+    dependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/var-testkit:
+    dependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
+      '@kitsy/cnos-var-server':
+        specifier: workspace:*
+        version: link:../var-server
 
   packages/vault-aws-secrets-manager:
     dependencies:

@@ -61,6 +61,18 @@ const COMMAND_OPTION_KEYS_WITH_VALUE = new Set([
   '--example',
   '--used-by',
   '--deprecation-message',
+  '--document',
+  '--schema',
+  '--store',
+  '--server',
+  '--revision',
+  '--expect-generation',
+  '--actor',
+  '--reason',
+  '--idempotency-key',
+  '--to-revision',
+  '--to-generation',
+  '--bearer-token',
 ]);
 const COMMAND_FLAG_KEYS = new Set([
   '--use-private',
