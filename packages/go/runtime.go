@@ -49,6 +49,7 @@ type Runtime struct {
 	secretFactories   map[string]SecretVaultProviderFactory
 	parsedArgs    map[string]string
 	fileOverrides map[string]any
+	vars          *varRuntime
 }
 
 type runtimeProvenance struct {
@@ -155,6 +156,9 @@ func (runtime *Runtime) Projection() ServerProjection {
 }
 
 func (runtime *Runtime) Read(key string) (any, bool, error) {
+	if strings.HasPrefix(key, "var.") && runtime.vars != nil {
+		return runtime.vars.read(key)
+	}
 	if strings.HasPrefix(key, "value.") && len(runtime.projection.Overrides) > 0 {
 		strippedKey := strings.TrimPrefix(key, "value.")
 		if spec, ok := runtime.projection.Overrides[strippedKey]; ok {
@@ -246,7 +250,7 @@ func (runtime *Runtime) PEM(path string) (string, bool, error) {
 }
 
 func (runtime *Runtime) RegisterRuntimeProvider(namespace string, provider RuntimeProvider) error {
-	if namespace == "process" {
+	if namespace == "process" || namespace == "var" {
 		return fmt.Errorf("cnos: cannot override built-in runtime namespace %q", namespace)
 	}
 	if _, ok := runtime.runtimeNamespaces[namespace]; !ok {
@@ -354,6 +358,7 @@ func newRuntime(source []byte, env environment, secretHome string, factories []S
 		return nil, err
 	}
 	runtime.initializeRuntimeProviders(projection.RuntimeNamespaces)
+	runtime.initVars(projection)
 	if err := runtime.prepareDerivedEntries(); err != nil {
 		return nil, err
 	}
@@ -410,6 +415,7 @@ func newRuntimeFromGraph(source []byte, env environment, secretHome string, fact
 	}
 
 	runtime.initializeRuntimeProviders(sortedRuntimeNamespaces(runtime.manifest.RuntimeNamespaces))
+	runtime.initVars(runtime.projection)
 	if err := runtime.prepareDerivedEntries(); err != nil {
 		return nil, err
 	}
@@ -465,6 +471,7 @@ func newDynamicRuntime(env environment, secretHome string, factories []SecretVau
 		fileOverrides:     loadPatchFile(parsedArgs["--cnos-patch"], os.Getenv("CNOS_PATCH_FILE")),
 	}
 	runtime.initializeRuntimeProviders(sortedRuntimeNamespaces(manifest.RuntimeNamespaces))
+	runtime.initVars(ServerProjection{})
 	return runtime, nil
 }
 

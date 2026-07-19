@@ -1,0 +1,75 @@
+package cnos
+
+import (
+	"sync/atomic"
+	"time"
+)
+
+// varRecord is an immutable committed snapshot plus the group's freshness window
+// inputs. Records are never mutated after commit; a new record replaces the old
+// one via an atomic map swap. Freshness/LeaseExpiresAt are computed at read time
+// (they depend on wall-clock now), everything else is fixed at commit time.
+type varRecord struct {
+	base  Snapshot // Freshness/LeaseExpiresAt left zero; filled per read
+	ttl   time.Duration
+	lease time.Duration
+}
+
+// snapshot returns the record's snapshot with freshness computed against now.
+func (record *varRecord) snapshot(now time.Time) Snapshot {
+	result := record.base
+	result.Freshness, result.LeaseExpiresAt = computeFreshness(result.Source, result.ObservedAt, record.ttl, record.lease, now)
+	return result
+}
+
+type varStoreState struct {
+	records map[string]*varRecord
+}
+
+// varStore holds immutable per-key snapshot records behind a single atomic
+// pointer. Reads are lock-free and always observe a complete, consistent map.
+// A batch commit builds a whole new map and swaps the pointer once, so
+// concurrent readers never see a mixed (partially applied) state.
+type varStore struct {
+	state atomic.Pointer[varStoreState]
+}
+
+func newVarStore() *varStore {
+	store := &varStore{}
+	store.state.Store(&varStoreState{records: map[string]*varRecord{}})
+	return store
+}
+
+func (store *varStore) get(key string) (*varRecord, bool) {
+	record, ok := store.state.Load().records[key]
+	return record, ok
+}
+
+// commit atomically replaces the records for the given keys. The whole map is
+// copied-on-write and swapped in a single atomic operation, so the batch is one
+// transaction: readers see either the entire old set or the entire new set.
+func (store *varStore) commit(updates map[string]*varRecord) {
+	for {
+		old := store.state.Load()
+		next := make(map[string]*varRecord, len(old.records)+len(updates))
+		for key, record := range old.records {
+			next[key] = record
+		}
+		for key, record := range updates {
+			next[key] = record
+		}
+		if store.state.CompareAndSwap(old, &varStoreState{records: next}) {
+			return
+		}
+	}
+}
+
+// keys returns the current set of committed var keys.
+func (store *varStore) keys() []string {
+	records := store.state.Load().records
+	result := make([]string, 0, len(records))
+	for key := range records {
+		result = append(result, key)
+	}
+	return result
+}

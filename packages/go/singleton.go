@@ -1,7 +1,9 @@
 package cnos
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -47,7 +49,10 @@ func Ready(options ...Options) error {
 		if len(loadOptions.SecretVaultProviders) > 0 {
 			runtime.RegisterSecretVaultProviders(loadOptions.SecretVaultProviders...)
 		}
-		return runtime.warmSecrets()
+		if err := runtime.warmSecrets(); err != nil {
+			return err
+		}
+		return runtime.StartVars(context.Background())
 	}
 
 	loaded, err := Load(loadOptions)
@@ -55,6 +60,10 @@ func Ready(options ...Options) error {
 		return err
 	}
 	if err := loaded.warmSecrets(); err != nil {
+		return err
+	}
+	if err := loaded.StartVars(context.Background()); err != nil {
+		loaded.Close()
 		return err
 	}
 	SetDefaultRuntime(loaded)
@@ -241,6 +250,78 @@ func Projection() (ServerProjection, error) {
 		return ServerProjection{}, err
 	}
 	return runtime.ToServerProjection()
+}
+
+// Var reads a var path via the default runtime's overlay precedence.
+func Var(path string) (any, bool, error) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return nil, false, err
+	}
+	return runtime.Var(path)
+}
+
+// VarSnapshot returns the in-memory var snapshot from the default runtime.
+func VarSnapshot(key string) (Snapshot, bool) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return Snapshot{}, false
+	}
+	return runtime.VarSnapshot(key)
+}
+
+// RefreshVar refreshes a var key on the default runtime (honors ttl).
+func RefreshVar(ctx context.Context, key string) error {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return err
+	}
+	return runtime.RefreshVar(ctx, key)
+}
+
+// RefreshVars refreshes all var groups on the default runtime.
+func RefreshVars(ctx context.Context) error {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return err
+	}
+	return runtime.RefreshVars(ctx)
+}
+
+// Watch registers a var watcher on the default runtime.
+func Watch(keyOrPrefix string, fn func(next, prev Snapshot)) (func(), error) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return nil, err
+	}
+	return runtime.Watch(keyOrPrefix, fn), nil
+}
+
+// VarStatus returns the per-scope var observability document from the default runtime.
+func VarStatus() (map[string]VarStatusEntry, error) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return nil, err
+	}
+	return runtime.VarStatus(), nil
+}
+
+// VarReceiver returns a latching push handler for a source from the default runtime.
+func VarReceiver(source string) (http.Handler, error) {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return nil, err
+	}
+	return runtime.VarReceiver(source), nil
+}
+
+// Close stops var pollers/goroutines and releases watchers on the default runtime.
+func Close() error {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return err
+	}
+	return runtime.Close()
 }
 
 func bootstrapDefaultRuntime() {

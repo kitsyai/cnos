@@ -54,6 +54,18 @@ type ServerProjection struct {
 	ValueTypes        map[string]string          `json:"valueTypes,omitempty"`
 	Overrides         map[string]OverrideSpec    `json:"overrides,omitempty"`
 	Meta              ProjectionMeta             `json:"meta"`
+
+	// Runtime variables (var.*) projection blocks. All optional and backward
+	// compatible: an absent block means the feature is unused and nothing about
+	// existing value.*/secret.*/derived resolution changes. Emitted by W1's
+	// toServerProjection.
+	VarSources map[string]VarSourceDef   `json:"varSources,omitempty"`
+	Vars       map[string]VarGroupDef    `json:"vars,omitempty"`
+	Documents  map[string]DocumentSchema `json:"documents,omitempty"`
+	// Schema carries per-key rules for var.<group>.<rest> keys (document,
+	// required, default, plus scalar type/enum/pattern). Keyed by full logical
+	// key (e.g. "var.agentic.lanes.vinci"). Rides the existing schema surface.
+	Schema map[string]VarKeyRule `json:"schema,omitempty"`
 }
 
 func ParseProjection(data []byte) (ServerProjection, error) {
