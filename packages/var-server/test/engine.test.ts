@@ -83,7 +83,8 @@ describe('var engine mutation model', () => {
     await engine.rollback({ scope: SCOPE, toGeneration: 1, expectedGeneration: 2, actor: 'ops', reason: 'revert' });
 
     const head = engine.head(SCOPE);
-    expect(head?.values).toEqual(DOC_A);
+    // Canonical: key-scoped `values` is keyed by the full var key.
+    expect(head?.values).toEqual({ [SCOPE]: DOC_A });
     const activations = engine.history(SCOPE).filter((event) => event.kind === 'activated');
     expect(activations).toHaveLength(3);
     expect(activations.at(-1)?.reason).toBe('revert');
@@ -108,7 +109,7 @@ describe('var engine mutation model', () => {
     expect(status.revision).toBe(a.revision);
     expect(status.generation).toBe(1);
     expect(status.lastRejected?.reason).toContain('unknown-field');
-    expect(engine.head(SCOPE)?.values).toEqual(DOC_A);
+    expect(engine.head(SCOPE)?.values).toEqual({ [SCOPE]: DOC_A });
   });
 
   it('#3 never exposes a mixed snapshot under interleaved reads and activations', async () => {
@@ -123,8 +124,9 @@ describe('var engine mutation model', () => {
       for (let i = 0; i < 200; i += 1) {
         const head = store.head(SCOPE);
         if (head) {
-          // Coherence invariant: the values always hash to the advertised revision.
-          expect(revisionHash(head.values)).toBe(head.revision);
+          // Coherence invariant: the wrapped (key-scoped) value always hashes to the
+          // advertised revision (the revision is the content hash of the as-authored doc).
+          expect(revisionHash((head.values as Record<string, unknown>)[SCOPE])).toBe(head.revision);
           observations.push(head.revision);
         }
         await Promise.resolve();
@@ -191,7 +193,7 @@ describe('fileStore persistence', () => {
     // Fresh store instance over the same log = process restart.
     const resumed = createVarEngine(fileStore(logPath), { documents, clock: counterClock() });
     expect(resumed.status(SCOPE).generation).toBe(2);
-    expect(resumed.head(SCOPE)?.values).toEqual(DOC_B);
+    expect(resumed.head(SCOPE)?.values).toEqual({ [SCOPE]: DOC_B });
     // A further activation continues the monotonic sequence — never from fallback.
     const next = await resumed.activate({ scope: SCOPE, revision: a.revision, expectedGeneration: 2 });
     expect(next.generation).toBe(3);
@@ -205,8 +207,8 @@ describe('fileStore persistence', () => {
     await engine.activate({ scope: SCOPE, revision: a.revision, expectedGeneration: 0 });
     await engine.activate({ scope: SCOPE, revision: b.revision, expectedGeneration: 1 });
 
-    expect(engine.replay(SCOPE, 1)?.values).toEqual(DOC_A);
-    expect(engine.replay(SCOPE, 2)?.values).toEqual(DOC_B);
+    expect(engine.replay(SCOPE, 1)?.values).toEqual({ [SCOPE]: DOC_A });
+    expect(engine.replay(SCOPE, 2)?.values).toEqual({ [SCOPE]: DOC_B });
 
     const ephemeral = createVarEngine(memoryStore(), { documents });
     expect(() => ephemeral.replay(SCOPE, 1)).toThrow(/persistent/);

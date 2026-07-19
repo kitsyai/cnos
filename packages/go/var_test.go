@@ -2,6 +2,9 @@ package cnos
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -239,6 +242,51 @@ func TestVarActivationViaReceiverPush(t *testing.T) {
 	snap, _ := runtime.VarSnapshot("user.plan")
 	if snap.Generation != 7 || snap.Source != VarSourceRuntime {
 		t.Fatalf("unexpected snapshot after push: %+v", snap)
+	}
+}
+
+func TestVarReceiverHMACSignature(t *testing.T) {
+	t.Parallel()
+	projection := baseVarProjection()
+	projection.SecretRefs["ops.verify"] = SecretReference{Provider: "environment", Vault: "env", Ref: "ops.verify", EnvVar: "OPS_VERIFY"}
+	projection.VarSources = map[string]VarSourceDef{"svc": {Transport: "http", URL: "http://unused", Verify: "secret.ops.verify"}}
+	projection.Vars = map[string]VarGroupDef{"user": {Source: "svc", Mode: "ondemand"}}
+
+	runtime := loadVarRuntime(t, projection, map[string]string{"OPS_VERIFY": "push-secret"})
+	defer runtime.Close()
+
+	mux := http.NewServeMux()
+	mux.Handle("/cnos/vars/", runtime.VarReceiver("svc"))
+	pushServer := httptest.NewServer(mux)
+	defer pushServer.Close()
+
+	body := `{"revision":"sha256:p1","generation":7,"values":{"user.plan":"enterprise"}}`
+	mac := hmac.New(sha256.New, []byte("push-secret"))
+	mac.Write([]byte(body))
+	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	// Correct `sha256=<hex>` signature is accepted (204).
+	request, _ := http.NewRequest(http.MethodPost, pushServer.URL+"/cnos/vars/user", strings.NewReader(body))
+	request.Header.Set("X-CNOS-Signature", signature)
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 for valid signature, got %d", resp.StatusCode)
+	}
+
+	// A signature WITHOUT the required `sha256=` prefix must fail (401).
+	unprefixed, _ := http.NewRequest(http.MethodPost, pushServer.URL+"/cnos/vars/user", strings.NewReader(body))
+	unprefixed.Header.Set("X-CNOS-Signature", hex.EncodeToString(mac.Sum(nil)))
+	respBad, err := http.DefaultClient.Do(unprefixed)
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	respBad.Body.Close()
+	if respBad.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unprefixed signature, got %d", respBad.StatusCode)
 	}
 }
 

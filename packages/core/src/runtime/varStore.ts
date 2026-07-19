@@ -55,37 +55,13 @@ export interface IngestResult {
   issues?: ValidationIssue[];
 }
 
-function getRelative(values: Record<string, unknown>, relative: string): unknown {
-  if (Object.prototype.hasOwnProperty.call(values, relative)) {
-    return values[relative];
-  }
-
-  let current: unknown = values;
-
-  for (const segment of relative.split('.')) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) {
-      return undefined;
-    }
-
-    current = (current as Record<string, unknown>)[segment];
-  }
-
-  return current;
-}
-
-/** Extract the value for `path` (var key minus `var.`) from a batch stored under `scope`. */
-function extractForScope(scope: string, path: string, values: Record<string, unknown>): unknown {
-  if (scope === path) {
-    return values;
-  }
-
-  const prefix = `${scope}.`;
-
-  if (path.startsWith(prefix)) {
-    return getRelative(values, path.slice(prefix.length));
-  }
-
-  return undefined;
+/**
+ * Extract the value for `path` (a var key minus the `var.` prefix) from a stored batch.
+ * Canonical uniform keying: every batch — key- OR group-scoped — has its `values` keyed
+ * by the FULL stripped key, so extraction is a single lookup with no scope-relative math.
+ */
+function extractForScope(_scope: string, path: string, values: Record<string, unknown>): unknown {
+  return values[path];
 }
 
 function validateScalar(key: string, rule: ConfigSpecRule, value: unknown): ValidationIssue[] {

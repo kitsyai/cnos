@@ -7,6 +7,7 @@ import type { ProjectedVaultDefinition, SecretReference, SecretVaultProviderFact
 import type { OverrideSpec } from './spec.js';
 import type {
   DocumentSchemaDefinition,
+  ProjectedVarKeyRule,
   ProjectedVarSourceDefinition,
   ResolvedVarSnapshot,
   VarGroupDefinition,
@@ -242,6 +243,12 @@ export interface ServerProjection {
   vars?: Record<string, VarGroupDefinition>;
   /** Declared document schemas keyed by `schemaId/version`. */
   documents?: Record<string, DocumentSchemaDefinition>;
+  /**
+   * Per-key var schema rules keyed by the full var key (e.g. `var.agentic.lanes.vinci`).
+   * Only keys under `var.` are included. Consumed by SDK ingest validation and
+   * required/default enforcement when a runtime is bootstrapped from a projection.
+   */
+  schema?: Record<string, ProjectedVarKeyRule>;
   publicKeys: string[];
   runtimeNamespaces: string[];
   /** Optional format hints for value entries — e.g. { "myapp.public_key": "pem" } */

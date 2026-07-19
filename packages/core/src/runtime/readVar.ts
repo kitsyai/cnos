@@ -7,6 +7,40 @@ export function isVarKey(key: string): boolean {
 }
 
 /**
+ * Scope-kind is syntactically decidable from the prefix-stripped scope string
+ * (the var key/group minus the `var.` prefix): a GROUP is a single segment with no
+ * dot (e.g. `agentic`, `user`); a KEY always contains a dot (e.g. `agentic.lanes.vinci`).
+ * This is the single canonical rule shared by the TS server/SDK and the Go SDK.
+ */
+export function isVarGroupScope(scope: string): boolean {
+  return !scope.includes('.');
+}
+
+/** The complement of {@link isVarGroupScope}: a scope that names a full var key. */
+export function isVarKeyScope(scope: string): boolean {
+  return scope.includes('.');
+}
+
+/**
+ * Build the canonical `values` map for a delivered scope from its as-authored head
+ * document. In every pull response and push payload `values` is ALWAYS keyed by the
+ * full var key minus the `var.` prefix, for BOTH key- and group-scoped batches:
+ *
+ * - key scope (`agentic.lanes.vinci`) → wrap the document: `{ "<scope>": doc }`;
+ * - group scope (`agentic`) → pass the document through (already keyed by full keys;
+ *   the var-server validates that shape at revision-create time).
+ */
+export function toCanonicalVarValues(scope: string, document: unknown): Record<string, unknown> {
+  if (isVarGroupScope(scope)) {
+    return document !== null && typeof document === 'object' && !Array.isArray(document)
+      ? (document as Record<string, unknown>)
+      : {};
+  }
+
+  return { [scope]: document };
+}
+
+/**
  * Map a `var.<group>.<rest>` key to its statically projected `value.<group>.<rest>` twin.
  * The overlay reads the static value tier under the same group/rest path.
  */

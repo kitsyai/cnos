@@ -106,7 +106,7 @@ describe('var http runtime integration', () => {
   it('#9 prefetch refetches the active runtime head on boot (restart recovery)', async () => {
     const server = await startTestVarServer({ documents });
     servers.push(server);
-    await activate(server, 'agentic', { 'lanes.vinci': { enabled: true, model_target_ref: 'runtime-ref' } });
+    await activate(server, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'runtime-ref' } });
     const root = await fixture(server.url);
 
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [httpVarSourceProvider] });
@@ -127,7 +127,7 @@ describe('var http runtime integration', () => {
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [httpVarSourceProvider] });
     expect(runtime.read('var.flags.enabled')).toBe(false); // default, no head yet
 
-    await activate(server, 'flags', { enabled: true });
+    await activate(server, 'flags', { 'flags.enabled': true });
 
     // Poll interval is 60ms; give it a few cycles.
     for (let i = 0; i < 20 && runtime.read('var.flags.enabled') !== true; i += 1) {
@@ -140,7 +140,7 @@ describe('var http runtime integration', () => {
   it('#10 serves last-known-good on network loss and surfaces the error in status', async () => {
     const server = await startTestVarServer({ documents });
     servers.push(server);
-    await activate(server, 'agentic', { 'lanes.vinci': { enabled: true, model_target_ref: 'ref-1' } });
+    await activate(server, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'ref-1' } });
     const root = await fixture(server.url);
 
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [httpVarSourceProvider] });
@@ -161,7 +161,7 @@ describe('var http runtime integration', () => {
   it('#11 reports expired freshness once the lease window elapses', async () => {
     const server = await startTestVarServer({ documents });
     servers.push(server);
-    await activate(server, 'agentic', { 'lanes.vinci': { enabled: true, model_target_ref: 'ref' } });
+    await activate(server, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'ref' } });
     const root = await fixture(server.url);
 
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [httpVarSourceProvider] });
@@ -175,7 +175,7 @@ describe('var http runtime integration', () => {
   it('#13 authenticates with the secret-ref bearer token and never leaks it into status', async () => {
     const server = await startTestVarServer({ documents, authorize: staticBearerAuthorize('workload-token-xyz') });
     servers.push(server);
-    await activate(server, 'flags', { enabled: true });
+    await activate(server, 'flags', { 'flags.enabled': true });
 
     const runtime = await createCnos({
       root: await fixtureWithAuth(server.url),
@@ -192,7 +192,7 @@ describe('var http runtime integration', () => {
   it('#14 ondemand reads serve the fallback tier immediately and trigger exactly one deduped fetch', async () => {
     const server = await startTestVarServer({ documents });
     servers.push(server);
-    await activate(server, 'user', { 'IN.coupon': true });
+    await activate(server, 'user', { 'user.IN.coupon': true });
     let pulls = 0;
     const countingProvider = {
       transport: 'http' as const,

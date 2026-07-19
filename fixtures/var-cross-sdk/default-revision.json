@@ -1,0 +1,7 @@
+{
+  "comment": "When a push omits `revision`, both SDKs derive it as sha256: of canonical JSON (sorted keys, compact, no HTML escaping) of `values`. This asserts identical output across SDKs.",
+  "values": {
+    "user.plan": "pro"
+  },
+  "expectedRevision": "sha256:28d62fa9d84321996b3252aa6dd0c2ad9cd059368d62a359b47af816ea7b7d6e"
+}

@@ -10,6 +10,7 @@ import {
   parseDerivation,
   registerRuntimeProvider,
   type CnosRuntime,
+  type ConfigSpecRule,
   type LogicalKey,
   type NormalizedManifest,
   type ResolvedGraph,
@@ -901,10 +902,17 @@ function attachBootstrappedProjection(
     Object.keys(projection.varSources ?? {}).length > 0 &&
     Object.keys(projection.vars ?? {}).length > 0;
 
+  // Var schema rules from the projection (keyed by full `var.*` key). Consumed for ingest
+  // validation and required/default enforcement — closes W4's projection-bootstrap limitation.
+  const projectionVarSchema = (projection.schema ?? {}) as Record<string, ConfigSpecRule>;
+
   if (hasVarBlocks) {
     manifest.varSources = projection.varSources ?? {};
     manifest.vars = projection.vars ?? {};
     manifest.documents = projection.documents ?? {};
+    // Merge the var schema block into the manifest schema so the overlay's default tier
+    // (resolveVarOverlay → manifest.schema[key].default) resolves for projection-bootstrapped apps.
+    manifest.schema = { ...(manifest.schema ?? {}), ...projectionVarSchema };
   }
 
   const resolveVarSecretForProjection = async (ref: string): Promise<string> => {
@@ -923,7 +931,7 @@ function attachBootstrappedProjection(
         varSources: projection.varSources ?? {},
         vars: projection.vars ?? {},
         documents: projection.documents ?? {},
-        schema: {},
+        schema: projectionVarSchema,
         manifest,
         providerModules: mergeVarSourceProviders(),
         resolveSecret: resolveVarSecretForProjection,

@@ -82,6 +82,24 @@ export interface DocumentSchemaDefinition {
  */
 export type ProjectedVarSourceDefinition = NormalizedVarSourceDefinition;
 
+/**
+ * A per-key var schema rule as carried in the server projection's `schema` block.
+ * Keyed by the FULL var key (e.g. `var.agentic.lanes.vinci`). Only rules for keys
+ * under `var.` are projected. `default` is emitted ONLY when actually declared in the
+ * manifest (JSON absence = not declared) — this mirrors the Go `VarKeyRule` presence
+ * tracking so required/default enforcement round-trips across SDKs.
+ */
+export interface ProjectedVarKeyRule {
+  /** Binds this key to a declared document schema id (e.g. `agentic-lanes/v1`). */
+  document?: string;
+  required?: boolean;
+  type?: DocumentFieldType;
+  enum?: unknown[];
+  pattern?: string;
+  /** Precedence tier-③ fallback; present only when declared in the manifest. */
+  default?: unknown;
+}
+
 /** Which precedence tier produced a var value. */
 export type VarSnapshotSource = 'runtime' | 'static' | 'default';
 

@@ -46,7 +46,8 @@ describe('varServer http protocol', () => {
     expect(read.status).toBe(200);
     expect(read.headers.get('etag')).toBe(created.revision);
     const payload = await read.json();
-    expect(payload).toMatchObject({ generation: 1, revision: created.revision, values: DOC, schemaId: 'agentic-lanes/v1' });
+    // Canonical wire shape: key-scoped `values` wraps the document under its full var key.
+    expect(payload).toMatchObject({ generation: 1, revision: created.revision, values: { [SCOPE]: DOC }, schemaId: 'agentic-lanes/v1' });
 
     // If-None-Match matching the revision yields 304.
     const notModified = await fetch(`${base}?key=${SCOPE}`, { headers: { 'if-none-match': created.revision } });

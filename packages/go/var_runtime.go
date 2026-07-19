@@ -32,10 +32,12 @@ type varScopeStatus struct {
 	lastRejected      *VarRejection
 }
 
-// VarRejection records the last rejected revision and why.
+// VarRejection records the last rejected revision, why, and when. `At` is an ISO-8601
+// timestamp, matching the Node SDK's `lastRejected: { revision, reason, at }` shape.
 type VarRejection struct {
 	Revision string `json:"revision"`
 	Reason   string `json:"reason"`
+	At       string `json:"at"`
 }
 
 // VarStatusEntry is the per-scope observability document. It carries only
@@ -567,7 +569,7 @@ func (variables *varRuntime) recordRejection(group, revision, reason string) {
 	variables.mu.Lock()
 	defer variables.mu.Unlock()
 	status := variables.statusFor(group)
-	status.lastRejected = &VarRejection{Revision: revision, Reason: reason}
+	status.lastRejected = &VarRejection{Revision: revision, Reason: reason, At: time.Now().UTC().Format(time.RFC3339)}
 	status.lastError = reason
 }
 

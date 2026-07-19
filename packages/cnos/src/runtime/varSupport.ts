@@ -5,6 +5,7 @@ import {
   toValueOverlayKey,
   type ConfigSpecRule,
   type DocumentSchemaDefinition,
+  type IngestResult,
   type NormalizedManifest,
   type NormalizedVarSourceDefinition,
   type ProjectedVarSourceDefinition,
@@ -31,7 +32,7 @@ export interface SingletonVarSupport {
   readVar(key: string, throwIfRequired?: boolean): unknown;
   varSnapshot(key: string): ResolvedVarSnapshot;
   varSource(sourceId: string): NormalizedVarSourceDefinition | undefined;
-  ingest(sourceId: string, scope: string, batch: VarSnapshotBatch): void;
+  ingest(sourceId: string, scope: string, batch: VarSnapshotBatch): IngestResult;
   resolveSecret(ref: string): Promise<string>;
   start(): Promise<void>;
 }

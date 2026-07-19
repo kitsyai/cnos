@@ -281,6 +281,79 @@ describe('@kitsy/cnos root runtime entry', () => {
     expect(cnos.meta('profile')).toBe('base');
   });
 
+  it('consumes the projection var `schema` block after projection bootstrap (default tier + ingest validation)', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-var-boot-'));
+    fixtureRoots.push(root);
+    await mkdir(path.join(root, 'cnos'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: var-boot',
+        'varSources:',
+        '  svc: { transport: http, url: "http://unused.local" }',
+        'vars:',
+        '  agentic: { source: svc, mode: ondemand }',
+        '  user: { source: svc, mode: ondemand }',
+        'documents:',
+        '  agentic-lanes/v1:',
+        '    fields:',
+        '      enabled: { type: boolean, required: true }',
+        '    additionalProperties: false',
+        'schema:',
+        '  var.agentic.lanes.vinci: { document: agentic-lanes/v1 }',
+        '  var.user.IN.coupon_allowed: { type: boolean, default: false }',
+        '',
+      ].join('\n'),
+    );
+
+    const authoring = await createCnos({ root, processEnv: {} });
+    const projection = authoring.toServerProjection();
+    // The projection actually carries the var schema block (decision 2).
+    expect(projection.schema?.['var.user.IN.coupon_allowed']).toEqual({ type: 'boolean', default: false });
+    await authoring.close?.();
+
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+    const { varReceiver } = await import('../src/varReceiver.js');
+
+    // Default tier resolves from the projection schema — previously blocked (schema was empty).
+    expect(cnos.var?.('user.IN.coupon_allowed')).toBe(false);
+
+    // Ingest validation now works from a projection bootstrap: route pushes through the
+    // receiver (source has no `verify`, so verification is skipped) and assert the schema
+    // rejects an invalid document (422) while accepting a valid one (204).
+    const handler = varReceiver('svc');
+    const post = async (body: unknown): Promise<number> => {
+      let status = 0;
+      const res = {
+        headersSent: false,
+        writeHead(code: number) {
+          status = code;
+          this.headersSent = true;
+          return this;
+        },
+        end() {
+          /* noop */
+        },
+      };
+      handler({ method: 'POST', url: '/cnos/vars/agentic', headers: {}, body } as never, res as never);
+      for (let i = 0; i < 50 && status === 0; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return status;
+    };
+
+    expect(await post({ values: { 'agentic.lanes.vinci': { enabled: 'not-a-boolean' } } })).toBe(422);
+    expect(await post({ values: { 'agentic.lanes.vinci': { enabled: true } } })).toBe(204);
+    expect(cnos.var?.('agentic.lanes.vinci')).toEqual({ enabled: true });
+
+    await cnos.close?.();
+  });
+
   it('autoloads from .cnos-server.json before full authoring resolution', async () => {
     const root = await createFixtureRoot();
     const runtime = await createCnos({

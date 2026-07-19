@@ -1,3 +1,5 @@
+import { toCanonicalVarValues } from '@kitsy/cnos-core';
+
 import type {
   MutationRecord,
   ScopeHead,
@@ -161,11 +163,10 @@ export function headOf(state: ScopeState | undefined): ScopeHead | undefined {
     return undefined;
   }
 
-  const document = stored.document;
-  const values =
-    document !== null && typeof document === 'object' && !Array.isArray(document)
-      ? (document as Record<string, unknown>)
-      : { value: document };
+  // Canonical wire shape: `values` is ALWAYS keyed by the full var key minus `var.`.
+  // Key scope wraps the as-authored document under its own key; group scope passes the
+  // (create-time validated) full-key-keyed document straight through.
+  const values = toCanonicalVarValues(state.scope, stored.document);
 
   return {
     scope: state.scope,

@@ -13,7 +13,7 @@ import type {
   VarWatchCallback,
 } from '../types/var.js';
 import { parseDuration } from '../utils/duration.js';
-import { LiveVarStore } from './varStore.js';
+import { LiveVarStore, type IngestResult } from './varStore.js';
 import { VAR_NAMESPACE_PREFIX } from './readVar.js';
 
 export interface VarManagerOptions {
@@ -204,11 +204,20 @@ export class VarManager {
     return this.store.status()[scopeString]?.revision;
   }
 
-  /** Receiver / push path: route an inbound batch through the SAME validated ingest. */
-  ingest(_sourceId: string, scope: string, batch: VarSnapshotBatch): void {
+  /**
+   * Receiver / push path: route an inbound batch through the SAME validated ingest.
+   * Returns the {@link IngestResult} so a receiver can map a validation-rejected batch
+   * to a 422 response; a successful ingest also records the refresh/desired generation.
+   */
+  ingest(_sourceId: string, scope: string, batch: VarSnapshotBatch): IngestResult {
     const group = scope.split('.')[0] ?? scope;
-    this.store.ingest(scope, group, batch);
-    this.store.recordRefresh(scope, group, batch.generation);
+    const result = this.store.ingest(scope, group, batch);
+
+    if (result.ok) {
+      this.store.recordRefresh(scope, group, batch.generation);
+    }
+
+    return result;
   }
 
   // ---- Lifecycle ---------------------------------------------------------

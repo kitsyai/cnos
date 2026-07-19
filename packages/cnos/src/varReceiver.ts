@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type * as http from 'node:http';
 
-import type { NormalizedVarSourceDefinition, VarSnapshotBatch } from '@kitsy/cnos-core';
+import type { IngestResult, NormalizedVarSourceDefinition, VarSnapshotBatch } from '@kitsy/cnos-core';
 
 type IncomingMessage = http.IncomingMessage;
 type ServerResponse = http.ServerResponse;
@@ -13,16 +13,17 @@ import { getSingletonRuntime } from './runtime/state.js';
  * The receiver reaches them through the singleton — never a direct store dependency.
  */
 interface VarRuntimeHooks {
-  __ingestVar?: (sourceId: string, scope: string, batch: VarSnapshotBatch) => void;
+  __ingestVar?: (sourceId: string, scope: string, batch: VarSnapshotBatch) => IngestResult | void;
   __varSource?: (sourceId: string) => NormalizedVarSourceDefinition | undefined;
   __resolveVarSecret?: (ref: string) => Promise<string>;
 }
 
 export interface VarReceiverOptions {
   /**
-   * Header carrying the HMAC-SHA256 hex signature of the raw request body. Defaults to
-   * `x-cnos-signature`. When present the body is verified by HMAC; otherwise a bearer token is
-   * compared against the source's `verify` secret.
+   * Header carrying the signature of the raw request body, formatted as
+   * `sha256=<hex hmac-sha256>` (the `sha256=` prefix is REQUIRED). Defaults to
+   * `x-cnos-signature`. When present the body is verified by HMAC; otherwise a bearer token
+   * is compared against the source's `verify` secret. Identical to the Go SDK receiver.
    */
   signatureHeader?: string;
   /** Called for a rejected/failed receive; defaults to a stderr warning. */
@@ -148,7 +149,8 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
       let verified = false;
 
       if (typeof signature === 'string') {
-        const expected = createHmac('sha256', secret).update(raw).digest('hex');
+        // `x-cnos-signature: sha256=<hex hmac-sha256 of raw body>` — prefix required.
+        const expected = `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`;
         verified = safeEqual(signature, expected);
       } else {
         const token = bearer(req);
@@ -162,7 +164,13 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
       }
     }
 
-    let payload: { revision?: unknown; generation?: unknown; values?: unknown };
+    let payload: {
+      revision?: unknown;
+      generation?: unknown;
+      schemaId?: unknown;
+      effectiveAt?: unknown;
+      values?: unknown;
+    };
 
     try {
       payload = raw.trim() ? (JSON.parse(raw) as typeof payload) : {};
@@ -172,17 +180,37 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
       return;
     }
 
-    const values = (payload.values && typeof payload.values === 'object'
-      ? payload.values
-      : {}) as Record<string, unknown>;
+    if (!payload.values || typeof payload.values !== 'object' || Array.isArray(payload.values)) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Push payload must carry a `values` object.', code: 'bad-request' }));
+      return;
+    }
+
+    const values = payload.values as Record<string, unknown>;
+    // Defaults when absent — identical to the Go SDK receiver:
+    //   revision   = `sha256:` of canonical JSON of values
+    //   generation = current unix millis
     const batch: VarSnapshotBatch = {
       generation: typeof payload.generation === 'number' ? payload.generation : Date.now(),
       revision: typeof payload.revision === 'string' ? payload.revision : revisionOf(values),
-      effectiveAt: new Date().toISOString(),
+      ...(typeof payload.schemaId === 'string' ? { schemaId: payload.schemaId } : {}),
+      effectiveAt:
+        typeof payload.effectiveAt === 'string' && payload.effectiveAt
+          ? payload.effectiveAt
+          : new Date().toISOString(),
       values,
     };
 
-    runtime.__ingestVar(sourceId, scope, batch);
+    const result = runtime.__ingestVar(sourceId, scope, batch);
+
+    // A validation-rejected batch keeps last-known-good and reports 422.
+    if (result && result.ok === false) {
+      res.writeHead(422, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({ error: 'Var push rejected by validation.', code: 'validation-rejected', issues: result.issues ?? [] }),
+      );
+      return;
+    }
 
     res.writeHead(204);
     res.end();

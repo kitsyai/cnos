@@ -1,0 +1,9 @@
+{
+  "revision": "sha256:1112131415161718191a1b1c1d1e1f20",
+  "generation": 42,
+  "schemaId": "user-policy/v1",
+  "effectiveAt": "2026-07-20T00:00:00.000Z",
+  "values": {
+    "user.IN.coupon_allowed": true
+  }
+}

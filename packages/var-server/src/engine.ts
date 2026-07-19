@@ -1,4 +1,9 @@
-import { validateDocumentValue, type DocumentSchemaDefinition, type ValidationIssue } from '@kitsy/cnos-core';
+import {
+  isVarGroupScope,
+  validateDocumentValue,
+  type DocumentSchemaDefinition,
+  type ValidationIssue,
+} from '@kitsy/cnos-core';
 
 import { CnosVarConflictError, CnosVarNotFoundError, CnosVarValidationError } from './errors.js';
 import { revisionHash } from './hash.js';
@@ -143,9 +148,43 @@ export class VarEngine {
     return validateDocumentValue(document, schema, { ...(schemaId ? { schemaId } : {}), path: scope });
   }
 
+  /**
+   * Structural guard for GROUP-scoped revisions: the document must be an object whose every
+   * top-level key is a full var key under `<group>.` (the canonical uniform-keying rule).
+   * Key-scoped revisions are leaf documents and are exempt (they validate against their
+   * bound document schema instead).
+   */
+  private validateGroupScopeShape(scope: string, document: unknown): ValidationIssue[] {
+    if (!isVarGroupScope(scope)) {
+      return [];
+    }
+
+    if (!document || typeof document !== 'object' || Array.isArray(document)) {
+      return [
+        {
+          code: 'var.group-scope-shape',
+          key: scope,
+          message: `Group-scoped revision for "${scope}" must be an object keyed by full var keys (e.g. "${scope}.<rest>").`,
+        },
+      ];
+    }
+
+    const prefix = `${scope}.`;
+    return Object.keys(document as Record<string, unknown>)
+      .filter((key) => !key.startsWith(prefix))
+      .map((key) => ({
+        code: 'var.group-scope-shape',
+        key: scope,
+        message: `Group-scoped revision for "${scope}" has top-level key "${key}" that does not start with "${prefix}". Group documents are keyed by full var keys.`,
+      }));
+  }
+
   /** Dry-run validation of a candidate revision. Never touches the store. */
   validateRevision(document: unknown, schemaId?: string, scope = 'candidate'): ValidateResult {
-    const issues = this.validateDocument(scope, document, schemaId);
+    const issues = [
+      ...this.validateDocument(scope, document, schemaId),
+      ...this.validateGroupScopeShape(scope, document),
+    ];
     return { valid: issues.length === 0, issues };
   }
 
@@ -169,7 +208,10 @@ export class VarEngine {
         }
       }
 
-      const issues = this.validateDocument(input.scope, input.document, input.schemaId);
+      const issues = [
+        ...this.validateDocument(input.scope, input.document, input.schemaId),
+        ...this.validateGroupScopeShape(input.scope, input.document),
+      ];
 
       if (issues.length > 0) {
         await this.store.append(

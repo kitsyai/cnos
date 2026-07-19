@@ -1,0 +1,12 @@
+{
+  "generation": 7,
+  "revision": "sha256:0f0e0d0c0b0a09080706050403020100",
+  "schemaId": "agentic-lanes/v1",
+  "effectiveAt": "2026-07-20T00:00:00.000Z",
+  "values": {
+    "agentic.lanes.vinci": {
+      "enabled": true,
+      "model_target_ref": "secret.ops.model"
+    }
+  }
+}

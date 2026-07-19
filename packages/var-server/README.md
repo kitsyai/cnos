@@ -45,6 +45,15 @@ Base defaults to `/cnos/vars`. Mutations live under `{base}/admin/*`.
 | GET | `{base}/admin/history?scope=<scope>` | — | `200 { scope, events: VarEvent[] }` | `400 bad-request` |
 | GET | `{base}/admin/replay?scope=<scope>&toGeneration=<n>` | — | `200 <ScopeHead>` (persistent stores only) | `404 not-found`; `400 store-unsupported` (ephemeral store) |
 
+**Values keying (canonical).** In every read response `values` is ALWAYS a JSON object keyed by
+the **full var key minus `var.`**. Scope kind is decided syntactically: a **group** is a single
+segment with no dot (`agentic`); a **key** contains a dot (`agentic.lanes.vinci`).
+
+- Key-scoped read wraps the as-authored document: `values = { "<scope>": doc }`.
+- Group-scoped read passes the document through; a group revision must be an object whose every
+  top-level key starts with `"<group>."` — enforced at `revisions`/`validate` time (issue code
+  `var.group-scope-shape`), so a malformed group document is rejected before it can activate.
+
 **ETag / 304.** The `ETag` value is the content-addressed revision (`sha256:...`). A consumer
 sends `If-None-Match: <revision>`; an unchanged head returns `304` with no body.
 

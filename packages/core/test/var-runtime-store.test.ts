@@ -80,7 +80,7 @@ describe('LiveVarStore', () => {
     let clock = 0;
     const store = new LiveVarStore({ ...baseOptions(), clockMs: () => clock, now: () => new Date(clock).toISOString() });
 
-    expect(store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:a', effectiveAt: 't', values: { mode: 'x' } }).ok).toBe(true);
+    expect(store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:a', effectiveAt: 't', values: { 'flags.mode': 'x' } }).ok).toBe(true);
     expect(store.readRuntimeVar('var.flags.mode')).toBe('x');
 
     clock = 50;
@@ -103,13 +103,13 @@ describe('LiveVarStore', () => {
     });
 
     // A valid number establishes LKG.
-    expect(store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:good', effectiveAt: 't', values: { mode: 7 } }).ok).toBe(true);
+    expect(store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:good', effectiveAt: 't', values: { 'flags.mode': 7 } }).ok).toBe(true);
     // A string violates the rule -> rejected, LKG retained.
-    const rejected = store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:bad', effectiveAt: 't', values: { mode: 'nope' } });
+    const rejected = store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:bad', effectiveAt: 't', values: { 'flags.mode': 'nope' } });
     expect(rejected.ok).toBe(false);
     expect(store.readRuntimeVar('var.flags.mode')).toBe(7);
     // Warn once per revision.
-    store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:bad', effectiveAt: 't', values: { mode: 'nope' } });
+    store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:bad', effectiveAt: 't', values: { 'flags.mode': 'nope' } });
     expect(warn).toHaveBeenCalledTimes(1);
 
     const status = store.status().flags;
@@ -125,10 +125,10 @@ describe('LiveVarStore', () => {
     const events: Array<{ next: unknown; prev: unknown }> = [];
     const stop = store.watch('var.flags.mode', (next, prev) => events.push({ next: next.value, prev: prev?.value }));
 
-    store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:a', effectiveAt: 't', values: { mode: 'x' } });
-    store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:b', effectiveAt: 't', values: { mode: 'y' } });
+    store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:a', effectiveAt: 't', values: { 'flags.mode': 'x' } });
+    store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:b', effectiveAt: 't', values: { 'flags.mode': 'y' } });
     stop();
-    store.ingest('flags', 'flags', { generation: 3, revision: 'sha256:c', effectiveAt: 't', values: { mode: 'z' } });
+    store.ingest('flags', 'flags', { generation: 3, revision: 'sha256:c', effectiveAt: 't', values: { 'flags.mode': 'z' } });
 
     expect(events).toEqual([
       { next: 'x', prev: undefined },
@@ -142,7 +142,7 @@ describe('LiveVarStore', () => {
     store.watch('var.flags.mode', () => {
       throw new Error('boom');
     });
-    expect(() => store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:a', effectiveAt: 't', values: { mode: 'x' } })).not.toThrow();
+    expect(() => store.ingest('flags', 'flags', { generation: 1, revision: 'sha256:a', effectiveAt: 't', values: { 'flags.mode': 'x' } })).not.toThrow();
     expect(store.readRuntimeVar('var.flags.mode')).toBe('x');
     expect(warn).toHaveBeenCalled();
   });
@@ -173,8 +173,8 @@ describe('var runtime through createCnos', () => {
   it('serves runtime -> static -> default and reflects a pushed change without caching in derived reads', async () => {
     const root = await createFixtureRoot(RUNTIME_MANIFEST);
     const batches = new Map<string, VarSnapshotBatch>([
-      ['flags', { generation: 1, revision: 'sha256:f1', effectiveAt: 't', values: { mode: 'live' } }],
-      ['agentic', { generation: 1, revision: 'sha256:a1', effectiveAt: 't', values: { 'lanes.vinci': { enabled: true, model_target_ref: 'ref' } } }],
+      ['flags', { generation: 1, revision: 'sha256:f1', effectiveAt: 't', values: { 'flags.mode': 'live' } }],
+      ['agentic', { generation: 1, revision: 'sha256:a1', effectiveAt: 't', values: { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'ref' } } }],
     ]);
     const runtime = await createCnos({
       root,
@@ -191,7 +191,7 @@ describe('var runtime through createCnos', () => {
     (runtime as unknown as { __ingestVar: (s: string, scope: string, b: VarSnapshotBatch) => void }).__ingestVar(
       'svc',
       'flags',
-      { generation: 2, revision: 'sha256:f2', effectiveAt: 't', values: { mode: 'changed' } },
+      { generation: 2, revision: 'sha256:f2', effectiveAt: 't', values: { 'flags.mode': 'changed' } },
     );
     expect(runtime.read('var.flags.mode')).toBe('changed');
     expect(runtime.read('value.decision')).toBe('changed');
@@ -232,8 +232,8 @@ describe('var runtime through createCnos', () => {
   it('close() leaves no open handles (pollers/timers cleared)', async () => {
     const root = await createFixtureRoot(RUNTIME_MANIFEST.replace('mode: prefetch', 'mode: prefetch'));
     const batches = new Map<string, VarSnapshotBatch>([
-      ['flags', { generation: 1, revision: 'sha256:f1', effectiveAt: 't', values: { mode: 'live' } }],
-      ['agentic', { generation: 1, revision: 'sha256:a1', effectiveAt: 't', values: { 'lanes.vinci': { enabled: true, model_target_ref: 'ref' } } }],
+      ['flags', { generation: 1, revision: 'sha256:f1', effectiveAt: 't', values: { 'flags.mode': 'live' } }],
+      ['agentic', { generation: 1, revision: 'sha256:a1', effectiveAt: 't', values: { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'ref' } } }],
     ]);
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [inlineProvider(batches)] });
     expect(runtime.read('var.agentic.lanes.vinci')).toEqual({ enabled: true, model_target_ref: 'ref' });

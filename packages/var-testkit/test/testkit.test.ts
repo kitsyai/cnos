@@ -31,7 +31,8 @@ describe('startTestVarServer', () => {
     const read = await fetch(`${server.url}?key=${SCOPE}`);
     expect(read.status).toBe(200);
     const payload = await read.json();
-    expect(payload.values).toEqual(DOC);
+    // Canonical: key-scoped `values` is keyed by the full var key.
+    expect(payload.values).toEqual({ [SCOPE]: DOC });
     expect(read.headers.get('etag')).toBe(created.revision);
   });
 });
@@ -43,13 +44,13 @@ describe('createInMemoryVarSource', () => {
     await source.engine.activate({ scope: SCOPE, revision: created.revision, expectedGeneration: 0 });
 
     const batch = await source.provider.pull({ key: SCOPE });
-    expect(batch.values).toEqual(DOC);
+    expect(batch.values).toEqual({ [SCOPE]: DOC });
     expect(batch.generation).toBe(1);
 
     const received: unknown[] = [];
     const stop = source.provider.subscribe?.([{ key: SCOPE }], (next) => received.push(next.values));
     source.emit(SCOPE);
-    expect(received).toEqual([DOC]);
+    expect(received).toEqual([{ [SCOPE]: DOC }]);
     stop?.();
 
     await expect(source.provider.pull({ key: 'unmapped.scope' })).rejects.toThrow(/no active runtime head/i);

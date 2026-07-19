@@ -221,7 +221,7 @@ Operations (exposed via `cnos var` CLI + control API; Ops UI / Boss CLI are clie
     "freshness": "fresh",
     "lastRefreshAt": "…",
     "lastError": null,
-    "lastRejected": { "revision": "sha256:…", "reason": "unknown field 'budgets2'" }
+    "lastRejected": { "revision": "sha256:…", "reason": "unknown field 'budgets2'", "at": "…" }
   }
 }
 ```
@@ -230,14 +230,55 @@ Logs and status never expose secret material or entire sensitive documents (mask
 
 ## Distribution protocol
 
-CNOS-defined, per transport; the reference var server implements all, and any service can implement it directly:
+CNOS-defined, per transport; the reference var server implements all, and any service can implement it directly. The wire shapes below are **canonical across every SDK** (TypeScript server/SDK, Go SDK) — reconciled in W4.5 and pinned by shared fixtures under `fixtures/var-cross-sdk/` asserted parse-equivalent in both toolchains.
+
+### `values` keying convention (uniform)
+
+In **every** pull response and push payload, `values` is ALWAYS a JSON object keyed by the **full var key minus the `var.` prefix** — e.g. `{ "agentic.lanes.vinci": { …document… } }` — for BOTH key-scoped and group-scoped batches. There is no scope-relative or bare-document form on the wire.
+
+**Scope kind is syntactically decidable** from the prefix-stripped scope string: a **group** is a single segment with no dot (`agentic`, `user`); a **key** always contains a dot (`agentic.lanes.vinci`). Shared helpers encode this (`isVarGroupScope`/`isVarKeyScope` in core; `groupFromVarKey` + the same dot rule in Go).
+
+- **Key-scoped** GET wraps the as-authored head document under its own key: `values = { "<scope>": doc }`.
+- **Group-scoped** GET passes the head document through unchanged. The var server validates at revision-create time that a group document is an object whose every top-level key starts with `"<group>."` (else rejected with issue code `var.group-scope-shape`); key-scoped revisions keep validating against their bound document schema.
+- SDK ingest extracts uniformly: each `values` entry (keyed by full stripped key) becomes that key's snapshot.
+
+### Transports
 
 - **rpc (gRPC, `cnos.var.v1`, first)**: `Pull(scope, knownRevision) → SnapshotBatch`; `Subscribe(scopes) → stream SnapshotBatch`. Proto shipped in `packages/var-rpc`.
-- **http**: `GET {url}/cnos/vars?key=|group=` → `200 { generation, revision, schemaId, effectiveAt, values }`, `304` on `If-None-Match: <revision>`.
+- **http**: `GET {url}/cnos/vars?key=|group=` → `200 { generation, revision, schemaId?, effectiveAt, values }`, `304` on `If-None-Match: <revision>`, `404 {code:"no-head"}` → overlay fallback.
 - **ws / sse**: subscribe scopes on connect; server emits snapshot-batch events.
-- **Consumer-side receiver (latching)**: optional inbound push for http-only environments — `POST /cnos/vars/:scope` handled by the mounted adapter → same ingest path. HMAC/bearer verification via secret refs.
+- **Consumer-side receiver (latching)**: optional inbound push for http-only environments — `POST /cnos/vars/:scope` handled by the mounted adapter → same ingest path.
+
+### Receiver contract (both SDKs, identical)
+
+- **Payload**: `{ revision?, generation?, schemaId?, effectiveAt?, values }` with `values` per the keying convention above.
+- **Signature**: `x-cnos-signature: sha256=<hex hmac-sha256 of the raw body>` — the `sha256=` prefix is REQUIRED; compared in constant time. A bearer token (`Authorization: Bearer <token>`) compared against the source `verify` secret is the alternative.
+- **Response codes**: `204` accepted · `401` verification failure · `422` validation-rejected batch (last-known-good retained) · `400` malformed.
+- **Defaults when absent**: `revision` = `sha256:` of the canonical JSON (sorted keys, compact, no HTML escaping) of `values`; `generation` = current unix millis. Implemented identically in both SDKs.
+
+### On-demand scoping
+
+Both SDKs fetch on-demand at **group** scope, with one deduped in-flight fetch per group (a first sync read of any key in the group serves the static/default tier immediately and triggers a single background group fetch).
+
+### Freshness transitions (canonical)
+
+Age is measured from the snapshot's `observedAt`. Static/default tiers never expire.
+
+| ttl | lease | age condition | freshness |
+|-----|-------|---------------|-----------|
+| set | set | `age ≤ ttl` | `fresh` |
+| set | set | `ttl < age ≤ lease` | `stale` |
+| set | set | `age > lease` | `expired` |
+| set | — | `age ≤ ttl` | `fresh` |
+| set | — | `age > ttl` | `stale` (never expires) |
+| — | set | `age ≤ lease` | `fresh` |
+| — | set | `age > lease` | `expired` (no stale tier) |
 
 Reconnect/resume with backoff+jitter; on reconnect, re-pull subscribed scopes with known revisions to converge. All SDK-owned.
+
+### Projection `schema` block
+
+`toServerProjection` emits an optional var-only `schema` block keyed by the **full var key** (e.g. `var.agentic.lanes.vinci`), carrying `{ document?, required?, type?, enum?, pattern?, default? }`. `default` is emitted ONLY when declared in the manifest (JSON absence = not declared; the Go SDK tracks presence via `HasDefault`). Only keys under `var.` are included; nothing else in the projection changes. Both SDKs consume it when bootstrapped from a projection so ingest validation and required/default enforcement work without the authoring manifest.
 
 ## Provider contract (core)
 

@@ -6,9 +6,11 @@ import type { ProjectedVaultDefinition } from '../secrets/types.js';
 import type { OverrideSpec, OverridePrioritySource } from '../types/spec.js';
 import type {
   DocumentSchemaDefinition,
+  ProjectedVarKeyRule,
   ProjectedVarSourceDefinition,
   VarGroupDefinition,
 } from '../types/var.js';
+import { VAR_NAMESPACE_PREFIX } from './readVar.js';
 import { assertSecretRefVaultProviderCompatible } from '../secrets/providerCompatibility.js';
 import { isSecretReference } from '../utils/secretStore.js';
 
@@ -220,6 +222,37 @@ function projectDocuments(
   return stableSortObject(documents) as Record<string, DocumentSchemaDefinition>;
 }
 
+/**
+ * Project the per-key var schema block: only keys under `var.`, carrying
+ * `document`/`required`/`type`/`enum`/`pattern` and `default` (the latter ONLY when
+ * declared, so `default` absence in JSON round-trips as "not declared" in both SDKs).
+ */
+function projectVarSchema(
+  manifest: NormalizedManifest,
+): Record<string, ProjectedVarKeyRule> | undefined {
+  const projected: Record<string, ProjectedVarKeyRule> = {};
+
+  for (const [key, rule] of Object.entries(manifest.schema)) {
+    if (!key.startsWith(VAR_NAMESPACE_PREFIX) || !rule) {
+      continue;
+    }
+
+    projected[key] = {
+      ...(rule.document !== undefined ? { document: rule.document } : {}),
+      ...(rule.required !== undefined ? { required: rule.required } : {}),
+      ...(rule.type !== undefined ? { type: rule.type } : {}),
+      ...(rule.enum !== undefined ? { enum: rule.enum } : {}),
+      ...(rule.pattern !== undefined ? { pattern: rule.pattern } : {}),
+      // `default` is emitted only when declared (undefined = not declared).
+      ...(rule.default !== undefined ? { default: rule.default } : {}),
+    };
+  }
+
+  return Object.keys(projected).length > 0
+    ? (stableSortObject(projected) as Record<string, ProjectedVarKeyRule>)
+    : undefined;
+}
+
 export function toServerProjection(
   graph: ResolvedGraph,
   manifest: NormalizedManifest,
@@ -372,6 +405,7 @@ export function toServerProjection(
   const varSources = projectVarSources(manifest);
   const vars = projectVars(manifest);
   const documents = projectDocuments(manifest);
+  const varSchema = projectVarSchema(manifest);
 
   return {
     version: 1,
@@ -386,6 +420,7 @@ export function toServerProjection(
     ...(varSources ? { varSources } : {}),
     ...(vars ? { vars } : {}),
     ...(documents ? { documents } : {}),
+    ...(varSchema ? { schema: varSchema } : {}),
     publicKeys,
     runtimeNamespaces: Array.from(runtimeNamespaces).sort((left, right) => left.localeCompare(right)),
     ...(Object.keys(valueTypes).length > 0 ? { valueTypes: stableSortObject(valueTypes) as Record<string, string> } : {}),

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -101,11 +102,44 @@ describe('varReceiver (latching push)', () => {
       method: 'POST',
       url: '/cnos/vars/receive/flags',
       headers: { authorization: 'Bearer push-secret' },
-      body: { values: { enabled: true } },
+      body: { values: { 'flags.enabled': true } },
     });
 
     expect(res.statusCode).toBe(204);
     expect(runtime.read('var.flags.enabled')).toBe(true);
+    await runtime.close?.();
+  });
+
+  it('verifies an HMAC push via the `x-cnos-signature: sha256=<hex>` header (prefix required)', async () => {
+    const root = await fixture(MANIFEST);
+    const runtime = await createCnos({
+      root,
+      plugins: [loader([{ key: 'secret.ops.verify', value: 'push-secret' }])],
+    });
+
+    const body = { values: { 'flags.enabled': true } };
+    const raw = JSON.stringify(body);
+    const signature = `sha256=${createHmac('sha256', 'push-secret').update(raw).digest('hex')}`;
+
+    const handler = varReceiver('svc');
+    const accepted = await invoke(handler, {
+      method: 'POST',
+      url: '/cnos/vars/receive/flags',
+      headers: { 'x-cnos-signature': signature },
+      body,
+    });
+    expect(accepted.statusCode).toBe(204);
+    expect(runtime.read('var.flags.enabled')).toBe(true);
+
+    // A signature WITHOUT the required `sha256=` prefix must fail verification.
+    const unprefixed = await invoke(handler, {
+      method: 'POST',
+      url: '/cnos/vars/receive/flags',
+      headers: { 'x-cnos-signature': createHmac('sha256', 'push-secret').update(raw).digest('hex') },
+      body,
+    });
+    expect(unprefixed.statusCode).toBe(401);
+
     await runtime.close?.();
   });
 
@@ -121,7 +155,7 @@ describe('varReceiver (latching push)', () => {
       method: 'POST',
       url: '/cnos/vars/receive/flags',
       headers: { authorization: 'Bearer wrong-token' },
-      body: { values: { enabled: true } },
+      body: { values: { 'flags.enabled': true } },
     });
 
     expect(res.statusCode).toBe(401);

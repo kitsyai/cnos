@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "workspace": "base",
+  "profile": "default",
+  "resolvedAt": "2026-07-20T00:00:00.000Z",
+  "configHash": "cross-sdk-fixture",
+  "values": {},
+  "derived": {},
+  "secretRefs": {},
+  "varSources": {
+    "ops": {
+      "transport": "http",
+      "url": "https://cnos-vars.internal",
+      "auth": {
+        "bearer": "secret.ops.token"
+      },
+      "verify": "secret.ops.verify"
+    }
+  },
+  "vars": {
+    "agentic": {
+      "source": "ops",
+      "mode": "prefetch",
+      "lease": "10m"
+    },
+    "user": {
+      "source": "ops",
+      "mode": "ondemand",
+      "ttl": "60s"
+    }
+  },
+  "documents": {
+    "agentic-lanes/v1": {
+      "fields": {
+        "enabled": {
+          "type": "boolean",
+          "required": true
+        },
+        "model_target_ref": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "schema": {
+    "var.agentic.lanes.vinci": {
+      "document": "agentic-lanes/v1",
+      "required": true
+    },
+    "var.user.IN.coupon_allowed": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "publicKeys": [],
+  "runtimeNamespaces": [],
+  "meta": {
+    "workspace": "base",
+    "profile": "default",
+    "cnos_version": "1.17.0"
+  }
+}

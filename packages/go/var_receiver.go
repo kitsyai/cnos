@@ -1,6 +1,7 @@
 package cnos
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // receiverBody is the inbound push wire shape (values scoped to a key/group):
@@ -59,12 +61,28 @@ func (variables *varRuntime) receiver(sourceName string) http.Handler {
 			return
 		}
 
+		// Defaults when absent — identical to the Node SDK receiver:
+		//   revision   = "sha256:" + hex(sha256(canonical JSON of values))
+		//   generation = current unix millis
+		revision := payload.Revision
+		if revision == "" {
+			revision = defaultVarRevision(payload.Values)
+		}
+		generation := payload.Generation
+		if generation == 0 {
+			generation = time.Now().UnixMilli()
+		}
+		effectiveAt := payload.EffectiveAt
+		if effectiveAt == "" {
+			effectiveAt = time.Now().UTC().Format(time.RFC3339)
+		}
+
 		batch := varBatch{
 			group:       groupFromVarKey(scope),
-			generation:  payload.Generation,
-			revision:    payload.Revision,
+			generation:  generation,
+			revision:    revision,
 			schemaId:    payload.SchemaId,
-			effectiveAt: payload.EffectiveAt,
+			effectiveAt: effectiveAt,
 			values:      payload.Values,
 		}
 		if err := variables.ingest(batch, "push"); err != nil {
@@ -113,6 +131,28 @@ func (variables *varRuntime) verifyInbound(source VarSourceDef, request *http.Re
 	}
 
 	return fmt.Errorf("cnos: var receiver missing credentials")
+}
+
+// defaultVarRevision derives a content-addressed revision for a values map when a
+// push omits one: "sha256:" + hex(sha256(canonical JSON of values)). Canonical JSON
+// sorts object keys and emits compact output with HTML escaping off, matching the
+// Node SDK receiver so an omitted revision hashes identically across SDKs.
+func defaultVarRevision(values map[string]any) string {
+	sum := sha256.Sum256([]byte(canonicalVarJSON(values)))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// canonicalVarJSON serializes a value with sorted object keys, compact, no HTML
+// escaping. Go's encoding/json already sorts map keys; disabling HTML escaping keeps
+// parity with the Node canonicalizer (which does not escape <, >, &).
+func canonicalVarJSON(value any) string {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return ""
+	}
+	return strings.TrimRight(buffer.String(), "\n")
 }
 
 // scopeFromPath extracts the scope segment after "/cnos/vars/".
