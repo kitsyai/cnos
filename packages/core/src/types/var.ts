@@ -157,3 +157,58 @@ export type VarSourceProviderFactory = (
   def: ProjectedVarSourceDefinition,
   ctx: VarSourceProviderContext,
 ) => VarSourceProvider;
+
+/**
+ * A transport-keyed provider module, registered like a secret vault provider factory.
+ * The runtime selects the module whose `transport` matches a var source's declared transport.
+ */
+export interface VarSourceProviderModule {
+  readonly transport: VarTransport;
+  create: VarSourceProviderFactory;
+}
+
+/**
+ * A resolved var value plus its snapshot metadata, returned by `varSnapshot(path)`.
+ * A cheap, in-memory read usable per request. When the value comes from a static/default
+ * tier, `generation`/`revision`/`effectiveAt`/`observedAt` are absent.
+ */
+export interface ResolvedVarSnapshot {
+  value: unknown;
+  /** Monotonic per scope; present only when the runtime tier produced the value. */
+  generation?: number;
+  /** Immutable content hash; present only for the runtime tier. */
+  revision?: string;
+  schemaId?: string;
+  schemaVersion?: string;
+  effectiveAt?: string;
+  observedAt?: string;
+  source: VarSnapshotSource;
+  freshness: VarSnapshotFreshness;
+  leaseExpiresAt?: string;
+  lastKnownGood?: VarSnapshotLastKnownGood;
+}
+
+/** Per-scope observability record. Never carries secret material or full sensitive documents. */
+export interface VarScopeStatus {
+  /** Server head generation when known (last successful pull); absent for static/default-only scopes. */
+  desiredGeneration?: number;
+  /** Generation this process currently serves; 0 when no runtime head has been applied. */
+  appliedGeneration: number;
+  revision?: string;
+  source: VarSnapshotSource | 'none';
+  /** Age of the applied snapshot in seconds. */
+  snapshotAge?: number;
+  freshness: VarSnapshotFreshness | 'none';
+  lastRefreshAt?: string;
+  lastError: string | null;
+  lastRejected?: { revision?: string; reason: string; at: string };
+}
+
+/** Full observability report keyed by scope. */
+export type VarStatusReport = Record<string, VarScopeStatus>;
+
+/** Watch callback fired only after a validated commit. */
+export type VarWatchCallback = (
+  next: ResolvedVarSnapshot,
+  prev: ResolvedVarSnapshot | undefined,
+) => void;

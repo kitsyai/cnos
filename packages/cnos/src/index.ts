@@ -20,3 +20,16 @@ export type {
   VaultAuthConfig,
   VaultDefinition,
 } from '@kitsy/cnos-core';
+export type {
+  ResolvedVarSnapshot,
+  VarScopeStatus,
+  VarStatusReport,
+  VarWatchCallback,
+  VarSourceProvider,
+  VarSourceProviderModule,
+  VarSnapshotBatch,
+} from '@kitsy/cnos-core';
+
+export { varReceiver, type VarReceiverHandler, type VarReceiverOptions } from './varReceiver.js';
+export { defaultVarSourceProviders } from './defaultVarSourceProviders.js';
+export { httpVarSourceProvider } from '@kitsy/cnos-var-http';

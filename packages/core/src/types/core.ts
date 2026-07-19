@@ -8,7 +8,11 @@ import type { OverrideSpec } from './spec.js';
 import type {
   DocumentSchemaDefinition,
   ProjectedVarSourceDefinition,
+  ResolvedVarSnapshot,
   VarGroupDefinition,
+  VarSourceProviderModule,
+  VarStatusReport,
+  VarWatchCallback,
 } from './var.js';
 
 export type LogicalKey = string;
@@ -136,6 +140,8 @@ export interface CnosCreateOptions {
   patchFile?: string;
   /** Additional secret vault provider factories, usually supplied by provider packages. */
   secretVaultProviders?: SecretVaultProviderFactory[];
+  /** Transport-keyed var source provider modules (e.g. the http module), usually from provider packages. */
+  varSourceProviders?: VarSourceProviderModule[];
 }
 
 export interface ToEnvOptions {
@@ -187,6 +193,21 @@ export interface CnosRuntime {
    * runtimes bootstrapped without var support (e.g. browser/singleton) remain assignable.
    */
   var?<T = unknown>(path: string): T | undefined;
+  /**
+   * Runtime variable snapshot (value + metadata) for a `var.*` path — a cheap in-memory read.
+   * Optional on the contract so var-less runtimes stay assignable.
+   */
+  varSnapshot?(path: string): ResolvedVarSnapshot;
+  /** Per-scope var observability report. Never carries secret material. */
+  varStatus?(): VarStatusReport;
+  /** Refresh a single `var.*` key from its source, honoring the group ttl. Mirrors `refreshSecret`. */
+  refreshVar?(key: LogicalKey): Promise<void>;
+  /** Refresh all prefetch var groups. Mirrors `refreshSecrets`. */
+  refreshVars?(): Promise<void>;
+  /** Subscribe to validated var activations for a key or `var.<group>.*` prefix. Returns an unsubscribe. */
+  watch?(keyOrPrefix: string, callback: VarWatchCallback): () => void;
+  /** Stop var pollers/timers and release watchers. Safe to call when no var support is active. */
+  close?(): Promise<void>;
   meta<T = unknown>(path: string): T | undefined;
   inspect(key: LogicalKey): InspectResult;
   toObject(): Record<string, unknown>;

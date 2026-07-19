@@ -71,6 +71,16 @@
       "types": "./dist/plugin/env-export.d.ts",
       "import": "./dist/plugin/env-export.js",
       "require": "./dist/plugin/env-export.cjs"
+    },
+    "./plugins/var-http": {
+      "types": "./dist/plugin/var-http.d.ts",
+      "import": "./dist/plugin/var-http.js",
+      "require": "./dist/plugin/var-http.cjs"
+    },
+    "./receiver": {
+      "types": "./dist/varReceiver.d.ts",
+      "import": "./dist/varReceiver.js",
+      "require": "./dist/varReceiver.cjs"
     }
   },
   "files": [
@@ -95,7 +105,12 @@
     "access": "public"
   },
   "dependencies": {
+    "@kitsy/cnos-var-http": "workspace:*",
     "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@kitsy/cnos-var-server": "workspace:*",
+    "@kitsy/cnos-var-testkit": "workspace:*"
   },
   "scripts": {
     "build": "rimraf dist && tsup --config tsup.config.ts",

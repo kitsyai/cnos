@@ -50,8 +50,22 @@ export interface DerivedRuntimeSupport {
   derivedKeys: string[];
 }
 
+/**
+ * The `var.*` namespace holds mutable runtime configuration served through the overlay store.
+ * A derived expression that references any `var.*` key is runtime-dependent by definition
+ * (Critical Rule 9): it is never cached and is re-evaluated on every read so a pushed change is
+ * immediately visible, and — like a serverOnly runtime namespace — it cannot be promoted to
+ * browser/public/env surfaces.
+ */
+const VAR_NAMESPACE = 'var';
+
 function namespaceForKey(key: string): string {
   return key.split('.')[0] ?? '';
+}
+
+/** Whether a namespace makes a referencing derivation runtime-dependent (never cached). */
+function isRuntimeDependentNamespace(manifest: NormalizedManifest, namespace: string): boolean {
+  return Boolean(manifest.runtimeNamespaces[namespace]) || namespace === VAR_NAMESPACE;
 }
 
 function dependencyNamespaces(
@@ -110,7 +124,7 @@ function isRuntimeDependentKey(
   for (const ref of entry.parsed.refs) {
     const namespace = namespaceForKey(ref);
 
-    if (manifest.runtimeNamespaces[namespace]) {
+    if (isRuntimeDependentNamespace(manifest, namespace)) {
       memo.set(key, true);
       return true;
     }
@@ -163,10 +177,10 @@ function prepareEntries(graph: ResolvedGraph, manifest: NormalizedManifest): Map
 
   for (const entry of entries.values()) {
     entry.parsed.isRuntimeDependent = isRuntimeDependentKey(entry.key, entries, manifest, runtimeMemo);
-    entry.parsed.runtimeRefs = entry.parsed.refs.filter((ref) => manifest.runtimeNamespaces[namespaceForKey(ref)]);
+    entry.parsed.runtimeRefs = entry.parsed.refs.filter((ref) => isRuntimeDependentNamespace(manifest, namespaceForKey(ref)));
     if (entry.parsed.runtimeRefs.length === 0 && entry.parsed.isRuntimeDependent) {
       entry.parsed.runtimeRefs = dependencyNamespaces(entry.key, entries, namespaceMemo)
-        .filter((namespace) => manifest.runtimeNamespaces[namespace])
+        .filter((namespace) => isRuntimeDependentNamespace(manifest, namespace))
         .map((namespace) => `${namespace}.*`);
     }
   }
@@ -211,7 +225,7 @@ export function createDerivedRuntimeSupport(
         new Set(
           entry.parsed.refs
             .map((ref) => namespaceForKey(ref))
-            .filter((namespace) => manifest.runtimeNamespaces[namespace]),
+            .filter((namespace) => isRuntimeDependentNamespace(manifest, namespace)),
         ),
       ).sort((left, right) => left.localeCompare(right));
 
@@ -269,6 +283,14 @@ export function createDerivedRuntimeSupport(
 
       for (const ref of entry.parsed.refs) {
         const namespace = namespaceForKey(ref);
+
+        if (namespace === VAR_NAMESPACE) {
+          throw new CnosDerivedResolutionError(
+            key,
+            `Cannot resolve ${key} for ${mode} output because it depends on runtime variables (${ref}). var.* never reaches public/browser/env surfaces.`,
+          );
+        }
+
         const runtimeNamespace = manifest.runtimeNamespaces[namespace];
 
         if (!runtimeNamespace) {
@@ -305,8 +327,8 @@ export function createDerivedRuntimeSupport(
 
       return {
         expr: entry.parsed.raw,
-        deps: entry.parsed.refs.filter((ref) => !manifest.runtimeNamespaces[namespaceForKey(ref)]),
-        runtimeRefs: entry.parsed.refs.filter((ref) => manifest.runtimeNamespaces[namespaceForKey(ref)]),
+        deps: entry.parsed.refs.filter((ref) => !isRuntimeDependentNamespace(manifest, namespaceForKey(ref))),
+        runtimeRefs: entry.parsed.refs.filter((ref) => isRuntimeDependentNamespace(manifest, namespaceForKey(ref))),
       };
     },
     derivedKeys: Array.from(entries.keys()).sort((left, right) => left.localeCompare(right)),

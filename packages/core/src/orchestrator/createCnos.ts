@@ -177,7 +177,7 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
           options.secretVaultProviders,
         );
 
-  return createRuntime(
+  const runtime = createRuntime(
     loadedManifest.manifest,
     appendMetaEntries({
       ...promotedGraph,
@@ -190,5 +190,15 @@ export async function createCnos(options: CnosCreateOptions = {}): Promise<CnosR
     options.secretVaultProviders,
     options.cliArgs,
     options.patchFile,
+    options.varSourceProviders,
   );
+
+  // Prefetch var groups + start pollers during ready() (required-group failure rejects here).
+  const startVars = (runtime as { __startVars?: () => Promise<void> }).__startVars;
+
+  if (typeof startVars === 'function') {
+    await startVars();
+  }
+
+  return runtime;
 }

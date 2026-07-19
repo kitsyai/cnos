@@ -20,6 +20,11 @@ import {
   type SecretReference,
   type SecretVaultProviderFactory,
   type VaultDefinition,
+  type ResolvedVarSnapshot,
+  type VarSnapshotBatch,
+  type VarSourceProviderModule,
+  type VarStatusReport,
+  type VarWatchCallback,
   readValue,
   requireValue,
   toEnv,
@@ -31,6 +36,8 @@ import { createSecretVaultProvider } from '@kitsy/cnos-core';
 import { resolveVaultAuth } from '@kitsy/cnos-core';
 
 import { createCnos } from '../createCnos.js';
+import { defaultVarSourceProviders } from '../defaultVarSourceProviders.js';
+import { createSingletonVarSupport } from './varSupport.js';
 import {
   CNOS_GRAPH_ENV_VAR,
   CNOS_PROJECTION_ENV_VAR,
@@ -74,8 +81,24 @@ export interface CnosSingleton {
   registerRuntimeProvider(namespace: string, provider: Parameters<CnosRuntime['registerRuntimeProvider']>[1]): void;
   registerSecretVaultProvider(factory: SecretVaultProviderFactory): void;
   registerSecretVaultProviders(factories: SecretVaultProviderFactory[]): void;
+  registerVarSourceProvider(module: VarSourceProviderModule): void;
+  registerVarSourceProviders(modules: VarSourceProviderModule[]): void;
   refreshSecrets(): Promise<void>;
   refreshSecret(key: LogicalKey): Promise<void>;
+  /** Read a `var.*` runtime variable through the overlay precedence (runtime -> value.* -> default). */
+  var<T = unknown>(path: string): T | undefined;
+  /** Runtime variable snapshot (value + metadata) for a `var.*` path. */
+  varSnapshot(path: string): ResolvedVarSnapshot;
+  /** Per-scope var observability report. Never carries secret material. */
+  varStatus(): VarStatusReport;
+  /** Refresh a single `var.*` key, honoring the group ttl. Mirrors `refreshSecret`. */
+  refreshVar(key: LogicalKey): Promise<void>;
+  /** Refresh all prefetch var groups. Mirrors `refreshSecrets`. */
+  refreshVars(): Promise<void>;
+  /** Subscribe to validated var activations for a key or `var.<group>.*` prefix. */
+  watch(keyOrPrefix: string, callback: VarWatchCallback): () => void;
+  /** Stop var pollers/timers and release watchers. */
+  close(): Promise<void>;
   ready(options?: CnosCreateOptions): Promise<void>;
 }
 
@@ -88,6 +111,7 @@ export interface CnosSingletonProjectionOptions {
 let bootstrappedProjection: ServerProjection | undefined;
 const singletonRuntimeProviders = new Map<string, RuntimeProvider>();
 const singletonSecretVaultProviders = new Map<string, SecretVaultProviderFactory>();
+const singletonVarSourceProviders = new Map<string, VarSourceProviderModule>();
 const maxProjectionDiscoveryDepth = 8;
 const truthyEnvValues = new Set(['1', 'true', 'yes', 'on']);
 
@@ -176,6 +200,24 @@ function mergeSecretVaultProviders(
   return Array.from(merged.values());
 }
 
+function mergeVarSourceProviders(modules: VarSourceProviderModule[] = []): VarSourceProviderModule[] {
+  const merged = new Map<string, VarSourceProviderModule>();
+
+  for (const module of defaultVarSourceProviders()) {
+    merged.set(module.transport, module);
+  }
+
+  for (const module of singletonVarSourceProviders.values()) {
+    merged.set(module.transport, module);
+  }
+
+  for (const module of modules) {
+    merged.set(module.transport, module);
+  }
+
+  return Array.from(merged.values());
+}
+
 function getRuntimeOrThrow(): CnosRuntime {
   const runtime = getSingletonRuntime();
 
@@ -184,6 +226,18 @@ function getRuntimeOrThrow(): CnosRuntime {
   }
 
   return runtime;
+}
+
+const startedVarRuntimes = new WeakSet<object>();
+
+/** Kick off var prefetch + pollers once per runtime (projection-bootstrap path). */
+async function maybeStartVars(runtime: CnosRuntime): Promise<void> {
+  const start = (runtime as { __startVars?: () => Promise<void> }).__startVars;
+
+  if (typeof start === 'function' && !startedVarRuntimes.has(runtime)) {
+    startedVarRuntimes.add(runtime);
+    await start();
+  }
 }
 
 function requireLogicalKey<T = unknown>(runtime: CnosRuntime, key: LogicalKey): T {
@@ -826,24 +880,91 @@ function attachBootstrappedProjection(
     }
   };
 
+  const baseEntryRead = (ref: string): unknown => {
+    const entry = graph.entries.get(ref);
+
+    if (!entry) {
+      return undefined;
+    }
+
+    if (entry.namespace === 'secret') {
+      return hydratedSecrets.get(ref);
+    }
+
+    return entry.value;
+  };
+
+  // Wire the var runtime only when the projection actually declares var sources + groups.
+  const hasVarBlocks =
+    Boolean(projection.varSources) &&
+    Boolean(projection.vars) &&
+    Object.keys(projection.varSources ?? {}).length > 0 &&
+    Object.keys(projection.vars ?? {}).length > 0;
+
+  if (hasVarBlocks) {
+    manifest.varSources = projection.varSources ?? {};
+    manifest.vars = projection.vars ?? {};
+    manifest.documents = projection.documents ?? {};
+  }
+
+  const resolveVarSecretForProjection = async (ref: string): Promise<string> => {
+    if (!hydratedSecrets.has(ref)) {
+      await hydrateProjectedSecrets([ref]);
+    }
+    const value = hydratedSecrets.get(ref);
+    if (value === undefined) {
+      throw new Error(`Cannot resolve var source auth secret "${ref}".`);
+    }
+    return typeof value === 'string' ? value : String(value);
+  };
+
+  const varSupport = hasVarBlocks
+    ? createSingletonVarSupport({
+        varSources: projection.varSources ?? {},
+        vars: projection.vars ?? {},
+        documents: projection.documents ?? {},
+        schema: {},
+        manifest,
+        providerModules: mergeVarSourceProviders(),
+        resolveSecret: resolveVarSecretForProjection,
+        readStaticValue: (valueKey) => derivedSupport.read(valueKey, baseEntryRead),
+      })
+    : undefined;
+
   const runtime = {
     manifest,
     plugins: [],
     graph,
     read<T = unknown>(key: LogicalKey): T | undefined {
-      return derivedSupport.read(key, (ref) => {
-        const entry = graph.entries.get(ref);
-
-        if (!entry) {
-          return undefined;
-        }
-
-        if (entry.namespace === 'secret') {
-          return hydratedSecrets.get(ref);
-        }
-
-        return entry.value;
-      }) as T | undefined;
+      if (varSupport && key.startsWith('var.')) {
+        return varSupport.readVar(key) as T | undefined;
+      }
+      return derivedSupport.read(key, (ref) =>
+        varSupport && ref.startsWith('var.') ? varSupport.readVar(ref, false) : baseEntryRead(ref),
+      ) as T | undefined;
+    },
+    var<T = unknown>(path: string): T | undefined {
+      return varSupport ? (varSupport.readVar(`var.${path}`) as T | undefined) : undefined;
+    },
+    varSnapshot(path: string): ResolvedVarSnapshot {
+      return (
+        varSupport?.varSnapshot(`var.${path}`) ?? { value: undefined, source: 'default', freshness: 'fresh' }
+      );
+    },
+    varStatus(): VarStatusReport {
+      return varSupport?.manager.status() ?? {};
+    },
+    async refreshVar(key: LogicalKey): Promise<void> {
+      await varSupport?.manager.refreshVar(key);
+    },
+    async refreshVars(): Promise<void> {
+      await varSupport?.manager.refreshVars();
+    },
+    watch(keyOrPrefix: string, callback: VarWatchCallback): () => void {
+      return varSupport?.manager.watch(keyOrPrefix, callback) ?? (() => undefined);
+    },
+    async close(): Promise<void> {
+      await varSupport?.manager.close();
     },
     require<T = unknown>(key: LogicalKey): T {
       const value = this.read<T>(key);
@@ -953,6 +1074,23 @@ function attachBootstrappedProjection(
       await hydrateProjectedSecrets([key]);
     },
   } satisfies CnosRuntime;
+
+  if (varSupport) {
+    Object.defineProperty(runtime, '__startVars', { value: () => varSupport.start(), enumerable: false });
+    Object.defineProperty(runtime, '__ingestVar', {
+      value: (sourceId: string, scope: string, batch: VarSnapshotBatch) =>
+        varSupport.ingest(sourceId, scope, batch),
+      enumerable: false,
+    });
+    Object.defineProperty(runtime, '__varSource', {
+      value: (sourceId: string) => varSupport.varSource(sourceId),
+      enumerable: false,
+    });
+    Object.defineProperty(runtime, '__resolveVarSecret', {
+      value: (ref: string) => varSupport.resolveSecret(ref),
+      enumerable: false,
+    });
+  }
 
   setSingletonRuntime(runtime);
   setBootstrappedSecretHydrationRequired(Object.keys(projection.secretRefs).length > 0);
@@ -1228,6 +1366,35 @@ const cnos = Object.assign(
         registerSingletonSecretVaultProvider(factory);
       }
     },
+    registerVarSourceProvider(module: VarSourceProviderModule): void {
+      singletonVarSourceProviders.set(module.transport, module);
+    },
+    registerVarSourceProviders(modules: VarSourceProviderModule[]): void {
+      for (const module of modules) {
+        singletonVarSourceProviders.set(module.transport, module);
+      }
+    },
+    var<T = unknown>(path: string): T | undefined {
+      return getRuntimeOrThrow().var?.<T>(path);
+    },
+    varSnapshot(path: string): ResolvedVarSnapshot {
+      return getRuntimeOrThrow().varSnapshot?.(path) ?? { value: undefined, source: 'default', freshness: 'fresh' };
+    },
+    varStatus(): VarStatusReport {
+      return getRuntimeOrThrow().varStatus?.() ?? {};
+    },
+    async refreshVar(key: LogicalKey): Promise<void> {
+      await getRuntimeOrThrow().refreshVar?.(key);
+    },
+    async refreshVars(): Promise<void> {
+      await getRuntimeOrThrow().refreshVars?.();
+    },
+    watch(keyOrPrefix: string, callback: VarWatchCallback): () => void {
+      return getRuntimeOrThrow().watch?.(keyOrPrefix, callback) ?? (() => undefined);
+    },
+    async close(): Promise<void> {
+      await getRuntimeOrThrow().close?.();
+    },
     async refreshSecrets(): Promise<void> {
       await getRuntimeOrThrow().refreshSecrets();
       setBootstrappedSecretHydrationRequired(false);
@@ -1256,10 +1423,12 @@ const cnos = Object.assign(
 
         await runtimeToHydrate.refreshSecrets();
         setBootstrappedSecretHydrationRequired(false);
+        await maybeStartVars(runtimeToHydrate);
         return;
       }
 
       if (runtime && !getBootstrappedSecretHydrationRequired()) {
+        await maybeStartVars(runtime);
         return;
       }
 
@@ -1273,6 +1442,7 @@ const cnos = Object.assign(
       const readyPromise = createCnos({
         ...options,
         secretVaultProviders,
+        varSourceProviders: mergeVarSourceProviders(options.varSourceProviders),
       }).then((runtime) => {
         setSingletonRuntime(runtime);
         setBootstrappedSecretHydrationRequired(false);

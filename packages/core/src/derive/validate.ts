@@ -33,6 +33,12 @@ export function validateParsedDerivation(
       continue;
     }
 
+    // `var.*` is a valid, runtime-dependent reference (resolved through the overlay store);
+    // derivations that reference it are never cached (Critical Rule 9).
+    if (namespace === 'var') {
+      continue;
+    }
+
     if (!manifest.namespaces[namespace] && namespace !== 'value' && namespace !== 'meta') {
       throw new CnosDerivedExpressionError(`Unknown derive reference namespace: ${namespace}`, parsed.raw);
     }

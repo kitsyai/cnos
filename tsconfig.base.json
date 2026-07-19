@@ -95,6 +95,9 @@
       ],
       "@kitsy/cnos-var-testkit": [
         "packages/var-testkit/src/index.ts"
+      ],
+      "@kitsy/cnos-var-http": [
+        "packages/var-http/src/index.ts"
       ]
     }
   }

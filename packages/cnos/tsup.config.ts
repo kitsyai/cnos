@@ -8,6 +8,7 @@ const internalPackages = [
   '@kitsy/cnos-plugin-env-export',
   '@kitsy/cnos-plugin-filesystem',
   '@kitsy/cnos-plugin-process-env',
+  '@kitsy/cnos-var-http',
 ];
 
 export default defineConfig({
@@ -25,6 +26,8 @@ export default defineConfig({
     'src/plugin/env-export.ts',
     'src/plugin/filesystem.ts',
     'src/plugin/process-env.ts',
+    'src/plugin/var-http.ts',
+    'src/varReceiver.ts',
   ],
   format: ['esm', 'cjs'],
   dts: {

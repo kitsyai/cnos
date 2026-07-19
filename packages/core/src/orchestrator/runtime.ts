@@ -20,10 +20,12 @@ import {
   parseCliArgs,
   resolveOverride,
 } from '../runtime/overrideResolver.js';
-import { isVarKey, resolveVarOverlay } from '../runtime/readVar.js';
+import { isVarKey, resolveVarOverlay, toValueOverlayKey } from '../runtime/readVar.js';
+import { VarManager } from '../runtime/varManager.js';
+import type { ResolvedVarSnapshot, VarSourceProviderModule } from '../types/var.js';
 import { toLogicalKey } from '../utils/path.js';
 import { isSecretReference } from '../utils/secretStore.js';
-import { CnosKeyNotFoundError } from '../errors.js';
+import { CnosKeyNotFoundError, CnosVarRequiredError } from '../errors.js';
 
 export function createRuntime(
   manifest: NormalizedManifest,
@@ -35,6 +37,7 @@ export function createRuntime(
   secretVaultProviders: SecretVaultProviderFactory[] = [],
   cliArgs?: string[],
   patchFile?: string,
+  varSourceProviders: VarSourceProviderModule[] = [],
 ): CnosRuntime {
   const runtimeProviders = createDefaultRuntimeProviders(manifest, processEnv);
   const derivedSupport = createDerivedRuntimeSupport(graph, manifest, runtimeProviders);
@@ -107,8 +110,39 @@ export function createRuntime(
     activeSecretCache = refreshed;
   }
 
+  async function resolveVarSecret(ref: string): Promise<string> {
+    const value = readLogicalKey(ref);
+
+    if (value === undefined) {
+      throw new Error(`Cannot resolve var source auth secret "${ref}".`);
+    }
+
+    return typeof value === 'string' ? value : String(value);
+  }
+
+  const hasVarRuntime =
+    !!manifest.varSources &&
+    !!manifest.vars &&
+    Object.keys(manifest.varSources).length > 0 &&
+    Object.keys(manifest.vars).length > 0;
+
+  const varManager = hasVarRuntime
+    ? new VarManager({
+        varSources: manifest.varSources ?? {},
+        vars: manifest.vars ?? {},
+        documents: manifest.documents ?? {},
+        schema: manifest.schema,
+        providerModules: varSourceProviders,
+        resolveSecret: resolveVarSecret,
+      })
+    : undefined;
+
   function readLogicalKeyCore<T = unknown>(key: string): T | undefined {
     const resolved = derivedSupport.read(key, (ref) => {
+      if (isVarKey(ref)) {
+        return readVarKey(ref, false);
+      }
+
       const entry = graph.entries.get(ref);
 
       if (!entry) {
@@ -158,16 +192,39 @@ export function createRuntime(
     return readLogicalKeyCore(key);
   }
 
-  function readVarKey<T = unknown>(key: string): T | undefined {
-    return resolveVarOverlay(key, {
-      // W1: no runtime tier. readRuntimeVar is intentionally omitted; W3 wires the live
-      // var store here. Overlay falls through to the static value tier and schema default.
+  function readVarKey<T = unknown>(key: string, throwIfRequired = true): T | undefined {
+    const value = resolveVarOverlay(key, {
+      // Runtime tier: the live var store (undefined when no var runtime is configured). The
+      // overlay then falls through to the static value tier and the schema default.
+      ...(varManager ? { readRuntimeVar: (varKey) => varManager.readRuntimeVar(varKey) } : {}),
       readValue: (valueKey) => readLogicalKey(valueKey),
       manifest,
     }) as T | undefined;
+
+    if (value === undefined && throwIfRequired && manifest.schema[key]?.required === true) {
+      throw new CnosVarRequiredError(key);
+    }
+
+    return value;
   }
 
-  return {
+  function varSnapshotForKey(key: string): ResolvedVarSnapshot {
+    const runtimeSnapshot = varManager?.snapshot(key);
+
+    if (runtimeSnapshot) {
+      return runtimeSnapshot;
+    }
+
+    const staticValue = readLogicalKey(toValueOverlayKey(key));
+
+    if (staticValue !== undefined) {
+      return { value: staticValue, source: 'static', freshness: 'fresh' };
+    }
+
+    return { value: manifest.schema[key]?.default, source: 'default', freshness: 'fresh' };
+  }
+
+  const runtime: CnosRuntime = {
     manifest,
     plugins,
     graph,
@@ -194,7 +251,7 @@ export function createRuntime(
       return value as T;
     },
     readOr(key, fallback) {
-      const value = isVarKey(key) ? readVarKey(key) : readLogicalKey(key);
+      const value = isVarKey(key) ? readVarKey(key, false) : readLogicalKey(key);
       return (value === undefined ? fallback : value) as typeof fallback;
     },
     value(path) {
@@ -205,6 +262,24 @@ export function createRuntime(
     },
     var(path) {
       return readVarKey(toLogicalKey('var', path));
+    },
+    varSnapshot(path) {
+      return varSnapshotForKey(toLogicalKey('var', path));
+    },
+    varStatus() {
+      return varManager?.status() ?? {};
+    },
+    async refreshVar(key) {
+      await varManager?.refreshVar(key);
+    },
+    async refreshVars() {
+      await varManager?.refreshVars();
+    },
+    watch(keyOrPrefix, callback) {
+      return varManager?.watch(keyOrPrefix, callback) ?? (() => undefined);
+    },
+    async close() {
+      await varManager?.close();
     },
     meta(path) {
       return readLogicalKey(toLogicalKey('meta', path));
@@ -267,4 +342,32 @@ export function createRuntime(
       await refreshSecretEntry(key);
     },
   };
+
+  if (varManager) {
+    varManager.setOverlayReader((key) => readVarKey(key, false));
+    // Internal hook awaited by createCnos during ready(): prefetch groups then start pollers.
+    Object.defineProperty(runtime, '__startVars', {
+      value: async () => {
+        await varManager.prefetch();
+        varManager.startPollers();
+      },
+      enumerable: false,
+    });
+    // Internal hook used by the push receiver to route inbound batches through ingest.
+    Object.defineProperty(runtime, '__ingestVar', {
+      value: (sourceId: string, scope: string, batch: unknown) =>
+        varManager.ingest(sourceId, scope, batch as never),
+      enumerable: false,
+    });
+    Object.defineProperty(runtime, '__varSource', {
+      value: (sourceId: string) => manifest.varSources?.[sourceId],
+      enumerable: false,
+    });
+    Object.defineProperty(runtime, '__resolveVarSecret', {
+      value: (ref: string) => resolveVarSecret(ref),
+      enumerable: false,
+    });
+  }
+
+  return runtime;
 }
