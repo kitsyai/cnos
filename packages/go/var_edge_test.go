@@ -102,7 +102,7 @@ func TestVarFreshnessBoundaryIsStrictlyGreaterThan(t *testing.T) {
 		{lease + time.Nanosecond, FreshnessExpired},
 	}
 	for _, testCase := range cases {
-		got, _ := computeFreshness(VarSourceRuntime, observed, ttl, lease, observed.Add(testCase.age))
+		got, _ := computeFreshness(VarSourceRuntime, observed, ttl, lease, true, observed.Add(testCase.age))
 		if got != testCase.want {
 			t.Fatalf("age %v: expected %v, got %v", testCase.age, testCase.want, got)
 		}
@@ -112,7 +112,7 @@ func TestVarFreshnessBoundaryIsStrictlyGreaterThan(t *testing.T) {
 func TestVarFreshnessNoWindowsNeverAgesOut(t *testing.T) {
 	t.Parallel()
 	observed := time.Unix(0, 0)
-	got, expires := computeFreshness(VarSourceRuntime, observed, 0, 0, observed.Add(1000*time.Hour))
+	got, expires := computeFreshness(VarSourceRuntime, observed, 0, 0, false, observed.Add(1000*time.Hour))
 	if got != FreshnessFresh {
 		t.Fatalf("with no ttl/lease expected fresh forever, got %v", got)
 	}
@@ -125,7 +125,7 @@ func TestVarFreshnessStaticAndDefaultTiersNeverExpire(t *testing.T) {
 	t.Parallel()
 	observed := time.Unix(0, 0)
 	for _, source := range []VarSource{VarSourceStatic, VarSourceDefault} {
-		got, expires := computeFreshness(source, observed, time.Millisecond, time.Millisecond, observed.Add(time.Hour))
+		got, expires := computeFreshness(source, observed, time.Millisecond, time.Millisecond, true, observed.Add(time.Hour))
 		if got != FreshnessFresh || expires != nil {
 			t.Fatalf("source %v: expected fresh/no-expiry, got %v/%v", source, got, expires)
 		}
@@ -137,25 +137,51 @@ func TestVarFreshnessClockSkewObservedInFuture(t *testing.T) {
 	// Pinned: a negative age (wall clock jumped backwards) reports fresh rather than
 	// wrapping into stale/expired.
 	observed := time.Unix(1000, 0)
-	got, _ := computeFreshness(VarSourceRuntime, observed, time.Millisecond, time.Millisecond, time.Unix(0, 0))
+	got, _ := computeFreshness(VarSourceRuntime, observed, time.Millisecond, time.Millisecond, true, time.Unix(0, 0))
 	if got != FreshnessFresh {
 		t.Fatalf("expected fresh under negative age, got %v", got)
 	}
 }
 
-func TestVarFreshnessDivergenceZeroLeaseVsNodeSDK(t *testing.T) {
+func TestVarFreshnessZeroLeaseExpiresImmediately(t *testing.T) {
 	t.Parallel()
-	// DIVERGENCE (Go vs Node): with lease == 0 the Go SDK treats the lease as ABSENT
-	// (`lease > 0` guard), so the snapshot never expires. The Node LiveVarStore uses
-	// `leaseMs !== undefined`, and parseDuration("0ms") === 0, so a zero lease there
-	// expires the snapshot on the very next tick. See the W5b report.
+	// W5d/D9 CANONICAL (both SDKs): an ABSENT lease never expires; an explicitly declared
+	// `lease: 0` expires immediately. Presence is carried by the leaseSet flag, derived from
+	// the manifest duration STRING, so it survives the parse the way `default`-presence does.
 	observed := time.Unix(0, 0)
-	got, expires := computeFreshness(VarSourceRuntime, observed, 0, 0, observed.Add(time.Hour))
+
+	got, expires := computeFreshness(VarSourceRuntime, observed, 0, 0, false, observed.Add(time.Hour))
 	if got != FreshnessFresh {
-		t.Fatalf("Go: zero lease should behave as absent (fresh), got %v", got)
+		t.Fatalf("absent lease must never expire, got %v", got)
 	}
 	if expires != nil {
-		t.Fatalf("Go: zero lease should emit no leaseExpiresAt, got %v", expires)
+		t.Fatalf("absent lease must emit no leaseExpiresAt, got %v", expires)
+	}
+
+	got, expires = computeFreshness(VarSourceRuntime, observed, 0, 0, true, observed.Add(time.Nanosecond))
+	if got != FreshnessExpired {
+		t.Fatalf("a declared zero lease must expire on the next tick, got %v", got)
+	}
+	if expires == nil || !expires.Equal(observed) {
+		t.Fatalf("a declared zero lease must expire AT observedAt, got %v", expires)
+	}
+	// At exactly age 0 it is still fresh — the boundary is strictly-greater-than, as elsewhere.
+	if got, _ := computeFreshness(VarSourceRuntime, observed, 0, 0, true, observed); got != FreshnessFresh {
+		t.Fatalf("a declared zero lease at age 0 should still be fresh, got %v", got)
+	}
+}
+
+func TestVarZeroLeaseFromManifestExpiresImmediately(t *testing.T) {
+	t.Parallel()
+	// End-to-end: `lease: "0s"` in the projection must reach the record as leaseSet=true.
+	runtime, _ := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand", Lease: "0s"}}, nil, false)
+	if err := runtime.vars.ingest(varBatch{group: "user", generation: 1, revision: "sha256:one", values: map[string]any{"user.plan": "pro"}}, "test"); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	snapshot, _ := runtime.VarSnapshot("user.plan")
+	if snapshot.Freshness != FreshnessExpired {
+		t.Fatalf("a declared zero lease should report expired, got %v", snapshot.Freshness)
 	}
 }
 
@@ -182,19 +208,19 @@ func TestVarPinnedOutOfOrderIngestIsLastWriteWins(t *testing.T) {
 	if snapshot.Generation != 2 {
 		t.Fatalf("expected generation 2 after the out-of-order write, got %d", snapshot.Generation)
 	}
-	// NOTE (cross-SDK divergence): Go's VarStatus() is keyed by the prefix-stripped KEY,
-	// while Node's varStatus() is keyed by the SCOPE (group). See the W5b report.
+	// W5d/D9 CANONICAL (both SDKs): status is keyed by the prefix-stripped FULL KEY, the
+	// same keying every wire `values` payload uses. The Node SDK was fixed to match.
 	if status := runtime.VarStatus()["user.plan"]; status.AppliedGeneration != 2 {
 		t.Fatalf("expected applied generation 2 in status, got %d", status.AppliedGeneration)
 	}
 }
 
-func TestVarDivergenceReplayedIdenticalBatchStillFiresWatchers(t *testing.T) {
+func TestVarReplayedIdenticalBatchIsSilent(t *testing.T) {
 	t.Parallel()
-	// DIVERGENCE (Go vs Node): the Node LiveVarStore gates watcher dispatch on
-	// (revision, generation) changing, so an exact replay is silent. Go's `notify`
-	// fires unconditionally for every committed key. A replayed push therefore wakes
-	// every Go watcher. Pinned as today's Go behavior — see the W5b report.
+	// W5d/D9 CANONICAL (both SDKs): watcher dispatch is gated on (revision, generation)
+	// changing, so an EXACT replay of an already-applied batch wakes nobody. Idempotent
+	// push is a core protocol property, so a replay must be invisible to consumers.
+	// (A same-revision/different-generation commit still fires — asserted below.)
 	runtime, _ := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand"}}, nil, false)
 
 	var mu sync.Mutex
@@ -214,18 +240,32 @@ func TestVarDivergenceReplayedIdenticalBatchStillFiresWatchers(t *testing.T) {
 	}
 
 	mu.Lock()
+	got := fires
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("an exact replay must not wake watchers; expected 1 fire, got %d", got)
+	}
+
+	// A new generation for the same revision IS a real activation and does fire.
+	bumped := batch
+	bumped.generation = 6
+	if err := runtime.vars.ingest(bumped, "test"); err != nil {
+		t.Fatalf("ingest bumped: %v", err)
+	}
+	mu.Lock()
 	defer mu.Unlock()
-	if fires != 3 {
-		t.Fatalf("Go fires on every commit; expected 3, got %d", fires)
+	if fires != 2 {
+		t.Fatalf("a new generation must fire; expected 2 fires, got %d", fires)
 	}
 }
 
-func TestVarDivergenceLastKnownGoodPointsAtPriorRevision(t *testing.T) {
+func TestVarLastKnownGoodPointsAtPriorRevision(t *testing.T) {
 	t.Parallel()
-	// DIVERGENCE (Go vs Node): Go stamps LastKnownGood with the PREVIOUS runtime
-	// revision at commit time. Node fills lastKnownGood with the CURRENT snapshot's
-	// own generation/revision, and only once freshness is no longer `fresh`. The two
-	// fields mean different things across SDKs. Pinned — see the W5b report.
+	// W5d/D9 CANONICAL (both SDKs): LastKnownGood names the last revision that was
+	// successfully validated and served while fresh — i.e. the revision this commit
+	// DISPLACED. Stamped at commit time from the outgoing snapshot, absent on a scope's
+	// first commit, independent of the current freshness. The Node SDK was fixed to match
+	// (it used to echo the snapshot's OWN gen/rev, and only once not fresh).
 	runtime, _ := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand"}}, nil, false)
 
 	_ = runtime.vars.ingest(varBatch{group: "user", generation: 1, revision: "sha256:one", values: map[string]any{"user.plan": "free"}}, "test")
@@ -354,14 +394,15 @@ func TestVarReceiverPinnedFailsClosedWithoutVerifySecret(t *testing.T) {
 
 func TestVarReceiverPinnedBodyLimitIsOneMiB(t *testing.T) {
 	// Not parallel: allocates several MiB.
-	// PINNED: the Go receiver reads at most 1 MiB (io.LimitReader). A larger body is
-	// truncated, so HMAC verification over the truncated bytes fails first and the push
-	// is rejected 401. The Node receiver has NO limit at all — see the W5b report.
+	// W5d/D3 CANONICAL (both SDKs): the receiver caps the inbound body at 1 MiB and rejects
+	// anything larger with 413 payload-too-large — DETECTED, not silently truncated into a
+	// signature mismatch (which is what the old io.LimitReader(1<<20) produced). The Node
+	// receiver now enforces the same cap and returns the same status.
 	_, base := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand"}}, nil, true)
 
 	oversized := fmt.Sprintf(`{"values":{"user.blob":%q}}`, strings.Repeat("q", 2*1024*1024))
-	if status := pushSigned(t, base+"/cnos/vars/user", oversized); status != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for a >1MiB truncated body, got %d", status)
+	if status := pushSigned(t, base+"/cnos/vars/user", oversized); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for a >1MiB body, got %d", status)
 	}
 
 	// A body comfortably under the limit still commits.
@@ -393,26 +434,43 @@ func TestVarReceiverSignatureEdgeCases(t *testing.T) {
 	}
 }
 
-func TestVarReceiverPinnedBearerHeaderShortCircuitsSignature(t *testing.T) {
+func TestVarReceiverSignaturePresenceDecidesTheScheme(t *testing.T) {
 	t.Parallel()
-	// PINNED: `verifyInbound` checks Authorization: Bearer FIRST and returns on mismatch,
-	// so a request carrying BOTH a wrong bearer and a valid signature is rejected. The Node
-	// receiver has the opposite precedence (signature first). Cross-SDK divergence.
+	// W5d/D9 CANONICAL (both SDKs): scheme selection is PRESENCE-based. If a signature
+	// header is present the signature decides — a valid signature wins even alongside a
+	// wrong bearer, and a wrong signature is a 401 even alongside a VALID bearer. Only when
+	// the header is absent does the bearer decide. One rule, no silent either-or acceptance.
 	_, base := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand"}}, nil, true)
 	body := `{"values":{"user.plan":"pro"}}`
 	mac := hmac.New(sha256.New, []byte("push-secret"))
 	mac.Write([]byte(body))
+	valid := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	request, _ := http.NewRequest(http.MethodPost, base+"/cnos/vars/user", strings.NewReader(body))
-	request.Header.Set("Authorization", "Bearer wrong-token")
-	request.Header.Set("X-CNOS-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatalf("push: %v", err)
+	cases := []struct {
+		name      string
+		bearer    string
+		signature string
+		want      int
+	}{
+		{"valid signature beats a wrong bearer", "Bearer wrong-token", valid, http.StatusNoContent},
+		{"wrong signature loses to a valid bearer", "Bearer push-secret", "sha256=deadbeef", http.StatusUnauthorized},
+		{"bearer decides when no signature header is present", "Bearer push-secret", "", http.StatusNoContent},
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when the bearer is wrong, got %d", response.StatusCode)
+
+	for _, testCase := range cases {
+		request, _ := http.NewRequest(http.MethodPost, base+"/cnos/vars/user", strings.NewReader(body))
+		request.Header.Set("Authorization", testCase.bearer)
+		if testCase.signature != "" {
+			request.Header.Set("X-CNOS-Signature", testCase.signature)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("%s: push: %v", testCase.name, err)
+		}
+		response.Body.Close()
+		if response.StatusCode != testCase.want {
+			t.Fatalf("%s: expected %d, got %d", testCase.name, testCase.want, response.StatusCode)
+		}
 	}
 }
 

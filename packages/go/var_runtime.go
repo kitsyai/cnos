@@ -30,6 +30,25 @@ type varScopeStatus struct {
 	lastRefreshAt     time.Time
 	lastError         string
 	lastRejected      *VarRejection
+	subscription      *VarSubscriptionStatus
+}
+
+// Var subscription lifecycle states, mirroring the TypeScript VarSubscriptionState.
+const (
+	VarSubscriptionActive   = "active"
+	VarSubscriptionRetrying = "retrying"
+	VarSubscriptionFailed   = "failed"
+)
+
+// VarSubscriptionStatus is the observable state of a source's push subscription.
+// "failed" is TERMINAL: the transport provider has stopped reconnecting (an
+// authentication/permission rejection, or the consecutive-failure cap was reached)
+// and the scope receives no further pushes until the process re-subscribes.
+type VarSubscriptionStatus struct {
+	State     string `json:"state"`
+	LastError string `json:"lastError,omitempty"`
+	Attempts  int    `json:"attempts,omitempty"`
+	At        string `json:"at,omitempty"`
 }
 
 // VarRejection records the last rejected revision, why, and when. `At` is an ISO-8601
@@ -53,6 +72,9 @@ type VarStatusEntry struct {
 	LastRefreshAt     string        `json:"lastRefreshAt,omitempty"`
 	LastError         string        `json:"lastError,omitempty"`
 	LastRejected      *VarRejection `json:"lastRejected,omitempty"`
+	// Subscription is the push-subscription state for this key's source, when a
+	// subscribing transport (e.g. rpc) is in use.
+	Subscription *VarSubscriptionStatus `json:"subscription,omitempty"`
 }
 
 // varRuntime owns the live var store, fetch/watch/poll machinery, and lifecycle
@@ -196,6 +218,9 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 	def := variables.groups[batch.group]
 	ttl := parseVarDuration(def.TTL)
 	lease := parseVarDuration(def.Lease)
+	// Presence of the manifest duration STRING, not the parsed value: `lease: 0s` is a
+	// declared zero (expire immediately), an omitted lease is absent (never expires).
+	leaseSet := def.Lease != ""
 	now := time.Now()
 
 	for rel, value := range batch.values {
@@ -230,8 +255,9 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 				Source:        VarSourceRuntime,
 				LastKnownGood: lastKnownGood,
 			},
-			ttl:   ttl,
-			lease: lease,
+			ttl:      ttl,
+			lease:    lease,
+			leaseSet: leaseSet,
 		}
 	}
 
@@ -244,19 +270,40 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 // notify fires matching watchers after a committed update. Callbacks run
 // synchronously with panics contained; a callback error never rolls back the
 // store (the snapshot is already active).
+//
+// Dispatch is IDEMPOTENT: a commit that reproduces the key's existing
+// (revision, generation) — an exact replay of an already-applied push — wakes no
+// watcher. Idempotent push is a core property of the protocol, so a replay must be
+// invisible to consumers. Matches the Node LiveVarStore's watcher gate.
+//
+// The watcher registry is snapshotted before dispatch (so a watcher registered from
+// inside a callback is not visited by the pass that is already running) and each entry
+// is re-checked against the live registry (so unsubscribing from inside a callback
+// suppresses a not-yet-visited fire). Both match the Node SDK.
 func (variables *varRuntime) notify(updates map[string]*varRecord, prev map[string]Snapshot, now time.Time) {
 	variables.mu.Lock()
-	watchers := make([]*varWatcher, 0, len(variables.watchers))
-	for _, watcher := range variables.watchers {
-		watchers = append(watchers, watcher)
+	ids := make([]int, 0, len(variables.watchers))
+	for id := range variables.watchers {
+		ids = append(ids, id)
 	}
 	variables.mu.Unlock()
 
 	for key, record := range updates {
 		next := record.snapshot(now)
 		previous := prev[key]
-		for _, watcher := range watchers {
-			if watcher.match(key) {
+
+		if previous.Source == VarSourceRuntime &&
+			previous.Revision == next.Revision &&
+			previous.Generation == next.Generation {
+			continue
+		}
+
+		for _, id := range ids {
+			variables.mu.Lock()
+			watcher, live := variables.watchers[id]
+			variables.mu.Unlock()
+
+			if live && watcher.match(key) {
 				invokeWatcher(watcher.fn, next, previous)
 			}
 		}
@@ -599,6 +646,24 @@ func (variables *varRuntime) recordRejection(group, revision, reason string) {
 	status.lastError = reason
 }
 
+// recordSubscription stores the transport-reported state of a group's push
+// subscription for VarStatus(). A background stream failure is never returned to the
+// caller and never panics the host process — it surfaces here.
+func (variables *varRuntime) recordSubscription(group, state, message string, attempts int) {
+	variables.mu.Lock()
+	defer variables.mu.Unlock()
+	status := variables.statusFor(group)
+	status.subscription = &VarSubscriptionStatus{
+		State:     state,
+		LastError: message,
+		Attempts:  attempts,
+		At:        time.Now().UTC().Format(time.RFC3339),
+	}
+	if message != "" {
+		status.lastError = message
+	}
+}
+
 func (variables *varRuntime) recordError(group, message string) {
 	variables.mu.Lock()
 	defer variables.mu.Unlock()
@@ -644,6 +709,7 @@ func (variables *varRuntime) statusDoc() map[string]VarStatusEntry {
 			}
 			entry.LastError = status.lastError
 			entry.LastRejected = status.lastRejected
+			entry.Subscription = status.subscription
 		}
 		result[strings.TrimPrefix(fullKey, "var.")] = entry
 	}
@@ -712,11 +778,11 @@ func (runtime *Runtime) VarStatus() map[string]VarStatusEntry {
 // VarReceiver returns an http.Handler that latches inbound pushes for a source
 // onto the host's existing mux (e.g. mux.Handle("/cnos/vars/", h)). It never
 // starts its own server.
-func (runtime *Runtime) VarReceiver(source string) http.Handler {
+func (runtime *Runtime) VarReceiver(source string, options ...VarReceiverOption) http.Handler {
 	if runtime.vars == nil {
 		return http.NotFoundHandler()
 	}
-	return runtime.vars.receiver(source)
+	return runtime.vars.receiver(source, options...)
 }
 
 // StartVars runs prefetch resolution and launches pollers. Called by Ready();

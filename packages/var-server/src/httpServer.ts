@@ -3,14 +3,26 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DocumentSchemaDefinition } from '@kitsy/cnos-core';
 
 import { allowAllWithWarning, type VarAuthorize } from './authorize.js';
-import { createVarEngine, VarEngine } from './engine.js';
+import { createVarEngine, type VarEngine } from './engine.js';
 import {
+  CnosVarBadRequestError,
   CnosVarConflictError,
   CnosVarNotFoundError,
   CnosVarStoreError,
   CnosVarValidationError,
 } from './errors.js';
 import type { VarStore } from './types.js';
+
+/** Default request body cap. Bodies are read BEFORE authorization, so this bound is load-bearing. */
+export const DEFAULT_MAX_VAR_REQUEST_BYTES = 1024 * 1024;
+
+/** Internal sentinel: the request body exceeded the configured cap. */
+class BodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`Request body exceeds the ${limit}-byte var-server limit.`);
+    this.name = 'BodyTooLargeError';
+  }
+}
 
 export interface VarServerOptions {
   /** Route base. Defaults to `/cnos/vars`. Read plane is `{base}`, mutations `{base}/admin/*`. */
@@ -23,6 +35,11 @@ export interface VarServerOptions {
   authorize?: VarAuthorize;
   /** Pre-built engine to share store state/locks with a test harness. */
   engine?: VarEngine;
+  /**
+   * Maximum accepted request body in bytes. A larger body is rejected with `413`
+   * (`payload-too-large`). Defaults to {@link DEFAULT_MAX_VAR_REQUEST_BYTES} (1 MiB).
+   */
+  maxBodyBytes?: number;
 }
 
 /** Node request handler produced by {@link varServer}: `(req, res) => void`. */
@@ -55,18 +72,53 @@ function bearer(req: IncomingMessage): string | undefined {
   return match ? match[1] : undefined;
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
+/**
+ * Drain the body, stopping as soon as the accumulated bytes exceed `limit`. Over-limit
+ * requests stop being buffered immediately; the stream is paused rather than destroyed so the
+ * 413 response can still reach the client (destroying it mid-request resets the connection).
+ */
+async function readBody(req: IncomingMessage, limit: number): Promise<unknown> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
 
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
-  }
+    const finish = (fn: () => void): void => {
+      if (settled) {
+        return;
+      }
 
-  if (chunks.length === 0) {
-    return {};
-  }
+      settled = true;
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      fn();
+    };
 
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
+    function onData(chunk: Buffer): void {
+      total += chunk.length;
+
+      if (total > limit) {
+        req.pause();
+        finish(() => reject(new BodyTooLargeError(limit)));
+        return;
+      }
+
+      chunks.push(chunk);
+    }
+
+    function onEnd(): void {
+      finish(() => resolve(Buffer.concat(chunks).toString('utf8').trim()));
+    }
+
+    function onError(error: Error): void {
+      finish(() => reject(error));
+    }
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+  });
 
   if (!raw) {
     return {};
@@ -82,6 +134,14 @@ function sendJson(res: ServerResponse, status: number, body: unknown, headers: R
 }
 
 function errorStatus(error: unknown): { status: number; body: Record<string, unknown> } {
+  if (error instanceof BodyTooLargeError) {
+    return { status: 413, body: { error: error.message, code: 'payload-too-large' } };
+  }
+
+  if (error instanceof CnosVarBadRequestError) {
+    return { status: 400, body: { error: error.message, code: error.code } };
+  }
+
   if (error instanceof CnosVarConflictError) {
     return {
       status: 409,
@@ -122,7 +182,7 @@ function requireString(body: Record<string, unknown>, field: string): string {
   const value = body[field];
 
   if (typeof value !== 'string' || value.length === 0) {
-    throw new CnosVarStoreError(`Missing required field "${field}" in request body.`);
+    throw new CnosVarBadRequestError(`Missing required field "${field}" in request body.`);
   }
 
   return value;
@@ -132,7 +192,7 @@ function requireNumber(body: Record<string, unknown>, field: string): number {
   const value = body[field];
 
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new CnosVarStoreError(`Missing required numeric field "${field}" in request body.`);
+    throw new CnosVarBadRequestError(`Missing required numeric field "${field}" in request body.`);
   }
 
   return value;
@@ -146,6 +206,7 @@ function requireNumber(body: Record<string, unknown>, field: string): number {
 export function varServer(store: VarStore, options: VarServerOptions = {}): VarServerHandler {
   const base = options.base ?? '/cnos/vars';
   const authorize = options.authorize ?? allowAllWithWarning;
+  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_VAR_REQUEST_BYTES;
   const engine =
     options.engine ??
     createVarEngine(store, {
@@ -171,13 +232,26 @@ export function varServer(store: VarStore, options: VarServerOptions = {}): VarS
     }
 
     const { method, pathname, query } = parsed;
-    const isMutation = pathname.startsWith(adminBase) && method === 'POST';
+    const isAdmin = pathname.startsWith(adminBase);
+    const isMutation = isAdmin && method === 'POST';
     const token = bearer(req);
     const scopeHint = query.get('key') ?? query.get('group') ?? query.get('scope') ?? undefined;
 
+    // A mutation carries its scope in the JSON BODY, so the body must be read BEFORE the
+    // authorize hook runs — otherwise scoped (business/environment/component) authorization
+    // is structurally impossible on writes. The read is bounded by `maxBodyBytes`, so parsing
+    // an as-yet-unauthorized request cannot be turned into a memory-exhaustion vector.
+    const body = isMutation ? asRecord(await readBody(req, maxBodyBytes)) : {};
+    const scope = isMutation && typeof body.scope === 'string' && body.scope.length > 0 ? body.scope : scopeHint;
+
+    // Admin GETs (`status`/`history`/`replay`) expose the append-only audit log — actors,
+    // reasons, past document bodies — which is strictly more sensitive than the data-plane
+    // read. They get their own kind so an authorizer can guard them separately.
+    const kind = isMutation ? 'mutate' : isAdmin && method === 'GET' ? 'audit' : 'read';
+
     const permitted = await authorize({
-      kind: isMutation ? 'mutate' : 'read',
-      ...(scopeHint !== undefined ? { scope: scopeHint } : {}),
+      kind,
+      ...(scope !== undefined ? { scope } : {}),
       ...(token !== undefined ? { token } : {}),
     });
 
@@ -193,7 +267,6 @@ export function varServer(store: VarStore, options: VarServerOptions = {}): VarS
     }
 
     if (pathname === `${adminBase}/revisions` && method === 'POST') {
-      const body = asRecord(await readBody(req));
       const result = await engine.createRevision({
         scope: requireString(body, 'scope'),
         document: body.document,
@@ -206,7 +279,6 @@ export function varServer(store: VarStore, options: VarServerOptions = {}): VarS
     }
 
     if (pathname === `${adminBase}/validate` && method === 'POST') {
-      const body = asRecord(await readBody(req));
       const result = engine.validateRevision(
         body.document,
         typeof body.schemaId === 'string' ? body.schemaId : undefined,
@@ -217,7 +289,6 @@ export function varServer(store: VarStore, options: VarServerOptions = {}): VarS
     }
 
     if (pathname === `${adminBase}/activate` && method === 'POST') {
-      const body = asRecord(await readBody(req));
       const result = await engine.activate({
         scope: requireString(body, 'scope'),
         revision: requireString(body, 'revision'),
@@ -229,7 +300,6 @@ export function varServer(store: VarStore, options: VarServerOptions = {}): VarS
     }
 
     if (pathname === `${adminBase}/deactivate` && method === 'POST') {
-      const body = asRecord(await readBody(req));
       const result = await engine.deactivate({
         scope: requireString(body, 'scope'),
         expectedGeneration: requireNumber(body, 'expectedGeneration'),
@@ -240,7 +310,6 @@ export function varServer(store: VarStore, options: VarServerOptions = {}): VarS
     }
 
     if (pathname === `${adminBase}/rollback` && method === 'POST') {
-      const body = asRecord(await readBody(req));
       const result = await engine.rollback({
         scope: requireString(body, 'scope'),
         expectedGeneration: requireNumber(body, 'expectedGeneration'),

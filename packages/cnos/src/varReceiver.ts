@@ -18,16 +18,35 @@ interface VarRuntimeHooks {
   __resolveVarSecret?: (ref: string) => Promise<string>;
 }
 
+/** Default inbound push body cap. Matches the Go receiver's `maxVarReceiverBody`. */
+export const DEFAULT_MAX_VAR_BODY_BYTES = 1024 * 1024;
+
 export interface VarReceiverOptions {
   /**
    * Header carrying the signature of the raw request body, formatted as
    * `sha256=<hex hmac-sha256>` (the `sha256=` prefix is REQUIRED). Defaults to
-   * `x-cnos-signature`. When present the body is verified by HMAC; otherwise a bearer token
-   * is compared against the source's `verify` secret. Identical to the Go SDK receiver.
+   * `x-cnos-signature`. Presence decides the scheme: when the header is present the body is
+   * verified by HMAC and the bearer fallback is NOT consulted; when it is absent the
+   * `Authorization: Bearer` token is compared against the source's `verify` secret.
+   * Identical rule in the Go SDK receiver.
    */
   signatureHeader?: string;
+  /**
+   * Maximum accepted request body in bytes. A larger body is rejected with `413`
+   * (`payload-too-large`) and the stream is destroyed rather than buffered.
+   * Defaults to {@link DEFAULT_MAX_VAR_BODY_BYTES} (1 MiB), matching the Go receiver.
+   */
+  maxBodyBytes?: number;
   /** Called for a rejected/failed receive; defaults to a stderr warning. */
   onError?: (error: Error) => void;
+}
+
+/** Internal sentinel: the inbound body exceeded the configured cap. */
+class BodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`Var push body exceeds the ${limit}-byte receiver limit.`);
+    this.name = 'BodyTooLargeError';
+  }
 }
 
 /** Node-style handler returned by {@link varReceiver}. Works with `http.createServer` and express. */
@@ -79,20 +98,88 @@ function safeEqual(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-async function readRawBody(req: IncomingMessage): Promise<string> {
+/**
+ * Drain the request body, aborting as soon as the accumulated bytes exceed `limit`. The
+ * over-limit stream is destroyed instead of being read to completion, so an oversized (or
+ * endless) push never becomes a memory-exhaustion vector on a public mount.
+ */
+async function readRawBody(req: IncomingMessage, limit: number): Promise<string> {
   const preParsed = (req as IncomingMessage & { body?: unknown }).body;
 
   if (preParsed !== undefined && preParsed !== null && typeof preParsed === 'object') {
-    return JSON.stringify(preParsed);
+    const serialized = JSON.stringify(preParsed);
+
+    if (Buffer.byteLength(serialized, 'utf8') > limit) {
+      throw new BodyTooLargeError(limit);
+    }
+
+    return serialized;
   }
 
-  const chunks: Buffer[] = [];
+  // Async-iterable-only sources (express-style doubles, non-http streams) have no event
+  // API — read them with `for await`, still bounded.
+  if (typeof req.on !== 'function') {
+    const chunks: Buffer[] = [];
+    let total = 0;
 
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+    for await (const chunk of req) {
+      const buffer = chunk as Buffer;
+      total += buffer.length;
+
+      if (total > limit) {
+        throw new BodyTooLargeError(limit);
+      }
+
+      chunks.push(buffer);
+    }
+
+    return Buffer.concat(chunks).toString('utf8');
   }
 
-  return Buffer.concat(chunks).toString('utf8');
+  // Event-driven rather than `for await`: exiting a `for await` loop early destroys the
+  // request stream, which resets the connection before the 413 can be written. Pausing stops
+  // the buffering just as promptly while leaving the response path intact.
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+
+    const finish = (fn: () => void): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      fn();
+    };
+
+    function onData(chunk: Buffer): void {
+      total += chunk.length;
+
+      if (total > limit) {
+        req.pause();
+        finish(() => reject(new BodyTooLargeError(limit)));
+        return;
+      }
+
+      chunks.push(chunk);
+    }
+
+    function onEnd(): void {
+      finish(() => resolve(Buffer.concat(chunks).toString('utf8')));
+    }
+
+    function onError(error: Error): void {
+      finish(() => reject(error));
+    }
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+  });
 }
 
 /**
@@ -103,16 +190,26 @@ async function readRawBody(req: IncomingMessage): Promise<string> {
  */
 export function varReceiver(sourceId: string, options: VarReceiverOptions = {}): VarReceiverHandler {
   const signatureHeader = (options.signatureHeader ?? 'x-cnos-signature').toLowerCase();
+  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_VAR_BODY_BYTES;
   const onError = options.onError ?? ((error: Error) => console.warn(`[cnos:var] receiver: ${error.message}`));
 
   return (req, res) => {
     void handle(req, res).catch((error: unknown) => {
       const err = error instanceof Error ? error : new Error(String(error));
       onError(err);
-      if (!res.headersSent) {
-        res.writeHead(500, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message, code: 'internal' }));
+
+      if (res.headersSent) {
+        return;
       }
+
+      if (err instanceof BodyTooLargeError) {
+        res.writeHead(413, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message, code: 'payload-too-large' }));
+        return;
+      }
+
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message, code: 'internal' }));
     });
   };
 
@@ -139,29 +236,58 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
       return;
     }
 
-    const raw = await readRawBody(req);
+    const raw = await readRawBody(req, maxBodyBytes);
     const source = runtime.__varSource(sourceId);
 
-    // Verify the source's `verify` secret when declared.
-    if (source?.verify && runtime.__resolveVarSecret) {
-      const secret = await runtime.__resolveVarSecret(source.verify);
-      const signature = req.headers[signatureHeader];
-      let verified = false;
+    if (!source) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: `No var source "${sourceId}" is declared in the manifest; declare it under varSources or unmount this receiver.`,
+          code: 'unknown-source',
+        }),
+      );
+      return;
+    }
 
-      if (typeof signature === 'string') {
-        // `x-cnos-signature: sha256=<hex hmac-sha256 of raw body>` — prefix required.
-        const expected = `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`;
-        verified = safeEqual(signature, expected);
-      } else {
-        const token = bearer(req);
-        verified = token !== undefined && safeEqual(token, secret);
-      }
+    // FAIL CLOSED. A receiver is an inbound write path, so an undeclared `verify` secret is a
+    // misconfiguration, never an invitation to accept unauthenticated pushes. Matches the Go
+    // receiver, which 401s the same case.
+    const unauthorized = (): void => {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Var push signature verification failed.', code: 'unauthorized' }));
+    };
 
-      if (!verified) {
-        res.writeHead(401, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Var push signature verification failed.', code: 'unauthorized' }));
-        return;
-      }
+    if (!source.verify || !runtime.__resolveVarSecret) {
+      onError(
+        new Error(
+          `Var source "${sourceId}" declares no \`verify\` secret; rejecting the push. ` +
+            `Add \`verify: secret.<...>\` to varSources.${sourceId} in the manifest.`,
+        ),
+      );
+      unauthorized();
+      return;
+    }
+
+    const secret = await runtime.__resolveVarSecret(source.verify);
+    const signature = req.headers[signatureHeader];
+    let verified = false;
+
+    // Presence-based scheme selection: a signature header present means the signature decides,
+    // full stop (a wrong signature is a 401 even alongside a valid bearer). Absent, the bearer
+    // token decides. One rule, no silent either-or acceptance. Identical in the Go receiver.
+    if (typeof signature === 'string') {
+      // `x-cnos-signature: sha256=<hex hmac-sha256 of raw body>` — prefix required.
+      const expected = `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`;
+      verified = safeEqual(signature, expected);
+    } else {
+      const token = bearer(req);
+      verified = token !== undefined && secret.length > 0 && safeEqual(token, secret);
+    }
+
+    if (!verified) {
+      unauthorized();
+      return;
     }
 
     let payload: {

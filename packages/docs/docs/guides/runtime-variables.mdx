@@ -170,6 +170,16 @@ const snap = cnos.varSnapshot('agentic.lanes.vinci');
 `effectiveAt` / `observedAt` are only present when `source === 'runtime'`; a static/default
 read reports `{ value, source, freshness: 'fresh' }` with no generation/revision.
 
+:::caution Generation range in the Node SDK
+`generation` is an int64 on the wire, but the Node SDK carries it as a JS number and is exact
+only up to `Number.MAX_SAFE_INTEGER` (2^53-1). A batch whose generation falls outside
+`0..2^53-1` is **rejected** at ingest (`var.generation-range`) and the last-known-good revision
+is kept — it is never committed with a silently rounded value. The rpc transport raises the
+same failure one step earlier, while it still holds the exact decimal text from the wire. The
+Go SDK carries a native `int64` and has no such limit, so keep your authority's generations
+below 2^53 if you serve both SDKs.
+:::
+
 ### Freshness: fresh / stale / expired, ttl vs lease
 
 Freshness is derived from the age of the applied snapshot against the group's `ttl` and
@@ -181,9 +191,17 @@ Freshness is derived from the age of the applied snapshot against the group's `t
 
 `ttl` is the **staleness window** for `ondemand` groups — past it, a read still serves the
 cached value but is eligible for a background refresh. `lease` is the **fail-closed window**:
-during a transient outage the SDK keeps serving last-known-good (`lastKnownGood: { generation,
-revision }` on the snapshot) until the lease expires, after which the snapshot reports
-`expired`.
+during a transient outage the SDK keeps serving the applied snapshot until the lease expires,
+after which it reports `expired`.
+
+An **absent** `lease` never expires. An explicitly declared `lease: 0` (`0s`, `0ms`) means
+"expires immediately" — absence and zero are distinct, and both SDKs agree.
+
+`lastKnownGood: { generation, revision }` on a snapshot names **the last revision that was
+successfully validated and served while fresh** — i.e. the revision the current one displaced.
+It is stamped at commit time from the outgoing snapshot, is absent on a scope's first commit,
+and does not depend on the current freshness. It is a pointer for diagnostics and rollback
+decisions, not the value being served (the served value is always the applied revision).
 
 **CNOS reports freshness; it never enforces a safety policy.** Whether an `expired` var means
 "fail closed and refuse the request" or "proceed with a warning" is your call — check
@@ -219,6 +237,12 @@ stop();
 A callback error is caught and logged — it never rolls back the store; the snapshot is
 already active. Apply-failure handling is the consumer's responsibility.
 
+Dispatch is **idempotent**: a commit that reproduces a key's existing `(revision, generation)`
+— an exact replay of an already-applied push — wakes no watcher, in both SDKs. A commit with
+the same revision but a NEW generation is a real activation and does fire. A watcher
+registered from inside a callback is not visited by the notify pass already running; it starts
+observing at the next commit.
+
 ### Refresh
 
 ```ts
@@ -241,10 +265,22 @@ const status = cnos.varStatus();
 //     snapshotAge: 3,
 //     freshness: "fresh",
 //     lastRefreshAt: "2026-07-20T00:00:03.120Z",
-//     lastError: null
+//     lastError: null,
+//     // present only for push (subscribing) transports such as rpc:
+//     subscription: { state: "active", at: "2026-07-20T00:00:00.100Z" }
 //   }
 // }
 ```
+
+The report is keyed by the **full var key minus the `var.` prefix** — the same keying every
+wire `values` payload uses, and the same keying Go's `VarStatus()` uses.
+
+`subscription.state` is `active`, `retrying`, or `failed`. **`failed` is terminal**: the
+transport has stopped reconnecting, either because the server authoritatively refused the
+credentials (gRPC `UNAUTHENTICATED` / `PERMISSION_DENIED`) or because the bounded reconnect
+policy hit its consecutive-failure cap. A terminal subscription does not silently fall back to
+polling — the state exists precisely so you can alert on it; `refreshVar()` remains available
+as an explicit pull. A background stream failure never throws into your process.
 
 Never carries secret material or a full sensitive document — see [Safety](#safety).
 
@@ -299,14 +335,26 @@ When `revision`/`generation` are omitted, both are derived deterministically (`r
 sha256:` of the canonical JSON of `values`; `generation = Date.now()`), identical to the Go
 receiver.
 
-Verification (only enforced when the source declares `verify`):
+Verification **always** runs, and **fails closed**. A source that declares no `verify` secret
+cannot accept pushes at all — every request to its receiver is `401`. Mounting a receiver is a
+deliberate act, so an omitted `verify` is a misconfiguration, never an invitation.
 
-- `x-cnos-signature: sha256=<hex hmac-sha256 of the raw body>` header, verified against the
-  `verify` secret — **or**, if that header is absent,
-- a bearer token in `Authorization: Bearer <token>` compared against the same secret.
+Scheme selection is **presence-based**, identically in both SDKs:
 
-Responses: `204` on accepted, `401` on failed verification, `422` on a validation-rejected
-batch (last-known-good is kept), `400` on a malformed request.
+- if the `x-cnos-signature: sha256=<hex hmac-sha256 of the raw body>` header is **present**,
+  the signature decides — a valid signature is accepted even alongside a wrong bearer, and a
+  wrong signature is rejected even alongside a valid one (the bearer is not a fallback);
+- if that header is **absent**, the `Authorization: Bearer <token>` value is compared against
+  the same `verify` secret.
+
+The inbound body is capped at **1 MiB** by default; a larger body is rejected with `413`
+without being buffered past the cap. Raise it deliberately if you push large documents —
+`varReceiver('ops', { maxBodyBytes: 8 * 1024 * 1024 })` in Node,
+`runtime.VarReceiver("ops", cnos.WithVarReceiverMaxBody(8<<20))` in Go.
+
+Responses: `204` on accepted, `401` on failed verification (or no `verify` secret), `413` on an
+oversized body, `422` on a validation-rejected batch (last-known-good is kept), `400` on a
+malformed request, `404` when the receiver names an undeclared source, `405` on a non-POST.
 
 ### Go (`net/http`)
 

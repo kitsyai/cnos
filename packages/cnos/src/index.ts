@@ -30,6 +30,11 @@ export type {
   VarSnapshotBatch,
 } from '@kitsy/cnos-core';
 
-export { varReceiver, type VarReceiverHandler, type VarReceiverOptions } from './varReceiver.js';
+export {
+  varReceiver,
+  DEFAULT_MAX_VAR_BODY_BYTES,
+  type VarReceiverHandler,
+  type VarReceiverOptions,
+} from './varReceiver.js';
 export { defaultVarSourceProviders } from './defaultVarSourceProviders.js';
 export { httpVarSourceProvider } from '@kitsy/cnos-var-http';

@@ -80,6 +80,20 @@ function noHeadMessage(scope: string): WireSnapshotBatch {
   };
 }
 
+/**
+ * Terminate a server stream with a gRPC status the CLIENT can observe. grpc-js delivers a
+ * status for a server-streaming call through an emitted `error`; `call.destroy(status)` only
+ * tears down the local call object, which is why an auth-rejected Subscribe used to leave the
+ * client silently hanging (W5d/D1).
+ */
+function endWithStatus(
+  call: grpc.ServerWritableStream<WireSubscribeRequest, WireSnapshotBatch>,
+  code: grpc.status,
+  details: string,
+): void {
+  call.emit('error', Object.assign(new Error(details), { code, details }) as grpc.ServiceError);
+}
+
 /** Whether an activation/deactivation on `committedScope` matches a subscribed scope string. */
 function scopeMatches(subscribed: string, committedScope: string): boolean {
   return committedScope === subscribed || committedScope.startsWith(`${subscribed}.`);
@@ -155,10 +169,11 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
         });
 
         if (!permitted) {
-          call.destroy({
-            code: grpc.status.UNAUTHENTICATED,
-            details: 'Not authorized for this var scope.',
-          } as grpc.ServiceError);
+          // `call.destroy(status)` tears the stream down LOCALLY without ever putting a
+          // status on the wire — the client sees no data, no error and no end, and hangs for
+          // the process lifetime. Emitting 'error' is grpc-js's supported way to terminate a
+          // server stream with a status the client can actually observe and classify.
+          endWithStatus(call, grpc.status.UNAUTHENTICATED, 'Not authorized for this var scope.');
           return;
         }
 
@@ -183,10 +198,7 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
         call.on('close', cleanup);
         call.on('error', cleanup);
       })().catch((error: unknown) => {
-        call.destroy({
-          code: grpc.status.INTERNAL,
-          details: error instanceof Error ? error.message : String(error),
-        } as grpc.ServiceError);
+        endWithStatus(call, grpc.status.INTERNAL, error instanceof Error ? error.message : String(error));
       });
     },
   };

@@ -487,13 +487,13 @@ func TestVarFreshnessTransitions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		now := base.Add(tc.age)
-		got, _ := computeFreshness(VarSourceRuntime, base, tc.ttl, tc.lease, now)
+		got, _ := computeFreshness(VarSourceRuntime, base, tc.ttl, tc.lease, tc.lease != 0, now)
 		if got != tc.expect {
 			t.Errorf("%s: expected %v, got %v", tc.name, tc.expect, got)
 		}
 	}
 	// static/default never expire
-	if got, _ := computeFreshness(VarSourceStatic, base, time.Minute, time.Minute, base.Add(time.Hour)); got != FreshnessFresh {
+	if got, _ := computeFreshness(VarSourceStatic, base, time.Minute, time.Minute, true, base.Add(time.Hour)); got != FreshnessFresh {
 		t.Errorf("static should stay fresh, got %v", got)
 	}
 }
@@ -509,8 +509,9 @@ func TestVarExpiredStateVisibleInStatus(t *testing.T) {
 	// Commit a record with a backdated ObservedAt so it is already expired.
 	variables.store.commit(map[string]*varRecord{
 		"var.user.plan": {
-			base:  Snapshot{Key: "var.user.plan", Value: "pro", Generation: 1, Revision: "sha256:x", Source: VarSourceRuntime, ObservedAt: time.Now().Add(-time.Hour)},
-			lease: 10 * time.Millisecond,
+			base:     Snapshot{Key: "var.user.plan", Value: "pro", Generation: 1, Revision: "sha256:x", Source: VarSourceRuntime, ObservedAt: time.Now().Add(-time.Hour)},
+			lease:    10 * time.Millisecond,
+			leaseSet: true,
 		},
 	})
 	snap, _ := runtime.VarSnapshot("user.plan")

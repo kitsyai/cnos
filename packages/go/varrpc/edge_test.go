@@ -3,13 +3,42 @@ package varrpc
 import (
 	"context"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	cnos "github.com/kitsyai/cnos/packages/go"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+// newProviderReporting builds a provider whose SDK-side OnSubscriptionError seam is
+// observable, so a test can assert that failures reach the runtime (and thus VarStatus()).
+func newProviderReporting(
+	t *testing.T,
+	target string,
+	auth map[string]string,
+	token string,
+	onSubscriptionError func(err error, terminal bool, scopes []string),
+	configure ...Option,
+) *Provider {
+	t.Helper()
+
+	def := cnos.VarSourceDef{Transport: "rpc", URL: target, Auth: auth}
+	providerCtx := cnos.VarProviderContext{
+		ResolveSecret:       func(string) (string, error) { return token, nil },
+		OnSubscriptionError: onSubscriptionError,
+	}
+
+	provider, err := New(def, providerCtx, configure...)
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Close() })
+	return provider
+}
 
 // serveOnCounting mirrors serveOn but accepts any VarServiceServer implementation so a
 // test can wrap the service and observe call counts.
@@ -44,12 +73,11 @@ func (server *authCounter) Subscribe(request *SubscribeRequest, stream VarServic
 	return server.testServer.Subscribe(request, stream)
 }
 
-func TestSubscribePinnedAuthFailureRetriesForever(t *testing.T) {
-	// DIVERGENCE + DEFECT-PIN: the Go provider's subscribeLoop treats an UNAUTHENTICATED
-	// stream exactly like any other stream end — it backs off and reconnects, forever, with
-	// no attempt cap and no terminal-error classification. (The Node provider has the
-	// opposite bug: it never retries an auth-rejected Subscribe at all.) Neither SDK
-	// surfaces the failure to the consumer. Pinned — see the W5b report.
+func TestSubscribeAuthFailureIsTerminalAndReported(t *testing.T) {
+	// W5d/D1+D2 CANONICAL (both SDKs): an UNAUTHENTICATED / PERMISSION_DENIED Subscribe is
+	// TERMINAL — the provider does not reconnect (retrying with the same credentials can only
+	// repeat the refusal) and it REPORTS the failure through the observable seams instead of
+	// dying quietly (Node) or hammering forever (Go, previously).
 	service := newTestServer()
 	service.requiredToken = "correct-token"
 	counter := &authCounter{testServer: service}
@@ -57,8 +85,28 @@ func TestSubscribePinnedAuthFailureRetriesForever(t *testing.T) {
 	server := serveOnCounting(t, counter)
 	defer server.stop()
 
-	provider := newProvider(t, server.target, map[string]string{"bearer": "secret.ops.token"}, "wrong-token",
-		WithBackoff(20*time.Millisecond, 60*time.Millisecond))
+	var mu sync.Mutex
+	var terminalErrors []error
+	var sdkTerminal int
+
+	provider := newProviderReporting(t, server.target, map[string]string{"bearer": "secret.ops.token"}, "wrong-token",
+		func(err error, terminal bool, scopes []string) {
+			mu.Lock()
+			defer mu.Unlock()
+			if terminal {
+				sdkTerminal++
+			}
+		},
+		WithBackoff(20*time.Millisecond, 60*time.Millisecond),
+		WithOnError(func(err error, terminal bool, scopes []string) {
+			mu.Lock()
+			defer mu.Unlock()
+			if terminal {
+				terminalErrors = append(terminalErrors, err)
+			}
+		}),
+	)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -69,30 +117,102 @@ func TestSubscribePinnedAuthFailureRetriesForever(t *testing.T) {
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
+	defer stop()
 
-	// Condition-poll: the retry loop must drive the attempt count well past one.
+	// The failure is reported promptly through BOTH seams.
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && atomic.LoadInt64(&counter.subscribeAttempts) < 3 {
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		reported := len(terminalErrors) > 0 && sdkTerminal > 0
+		mu.Unlock()
+		if reported {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	attempts := atomic.LoadInt64(&counter.subscribeAttempts)
-	if attempts < 3 {
-		t.Fatalf("expected the auth-rejected subscription to keep retrying, saw %d attempts", attempts)
+
+	mu.Lock()
+	if len(terminalErrors) == 0 {
+		mu.Unlock()
+		t.Fatalf("an auth-rejected subscription must report a TERMINAL error to onError")
+	}
+	if status.Code(terminalErrors[0]) != codes.Unauthenticated {
+		mu.Unlock()
+		t.Fatalf("expected an UNAUTHENTICATED terminal error, got %v", terminalErrors[0])
+	}
+	if sdkTerminal == 0 {
+		mu.Unlock()
+		t.Fatalf("the terminal failure must also reach the SDK OnSubscriptionError seam")
+	}
+	mu.Unlock()
+
+	// And it does NOT reconnect: the attempt count settles at one.
+	settled := atomic.LoadInt64(&counter.subscribeAttempts)
+	time.Sleep(500 * time.Millisecond)
+	if grew := atomic.LoadInt64(&counter.subscribeAttempts) - settled; grew != 0 {
+		t.Fatalf("a terminal auth failure must not reconnect, saw %d further attempts", grew)
+	}
+	if attempts := atomic.LoadInt64(&counter.subscribeAttempts); attempts != 1 {
+		t.Fatalf("expected exactly one Subscribe attempt, got %d", attempts)
 	}
 
-	// Nothing was ever delivered, and no error reached the caller.
 	select {
 	case batch := <-delivered:
 		t.Fatalf("unexpected delivery on an unauthorized subscription: %#v", batch)
 	default:
 	}
+}
 
-	// Cancelling stops the loop for good.
-	stop()
-	settled := atomic.LoadInt64(&counter.subscribeAttempts)
-	time.Sleep(300 * time.Millisecond)
-	if grew := atomic.LoadInt64(&counter.subscribeAttempts) - settled; grew > 1 {
-		t.Fatalf("retry loop kept running %d attempts after stop()", grew)
+func TestSubscribeRetriesAreBoundedByTheFailureCap(t *testing.T) {
+	// W5d/D2 CANONICAL: transport failures stay retryable, but BOUNDED. After
+	// maxFailures consecutive failures the subscription goes terminal instead of
+	// reconnecting forever.
+	var mu sync.Mutex
+	var retrying, terminal int
+
+	// Nothing is listening on this target, so every attempt fails at the transport layer.
+	provider := newProviderReporting(t, "127.0.0.1:1", nil, "",
+		nil,
+		WithBackoff(time.Millisecond, 2*time.Millisecond),
+		WithMaxSubscribeFailures(3),
+		WithOnError(func(err error, isTerminal bool, scopes []string) {
+			mu.Lock()
+			defer mu.Unlock()
+			if isTerminal {
+				terminal++
+			} else {
+				retrying++
+			}
+		}),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stop, err := provider.Subscribe(ctx, []cnos.VarScope{{Group: "agentic"}}, func(cnos.VarBatchResult) {})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer stop()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		done := terminal > 0
+		mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if terminal != 1 {
+		t.Fatalf("expected exactly one terminal report after the cap, got %d", terminal)
+	}
+	if retrying != 2 {
+		t.Fatalf("expected 2 retryable reports before the cap of 3, got %d", retrying)
 	}
 }
 
@@ -170,9 +290,9 @@ func TestPullAgainstUnreachableTargetFailsFast(t *testing.T) {
 
 func TestPullInt64GenerationAtTheSafeBoundary(t *testing.T) {
 	t.Parallel()
-	// Go carries `generation` as a native int64, so values that the Node provider would round
-	// (it converts the decimal string with Number()) survive intact here. Pinned as the
-	// cross-SDK asymmetry — see the W5b report.
+	// Go carries `generation` as a native int64, so values beyond 2^53 survive intact here.
+	// The Node provider cannot represent them and now REJECTS such a batch outright
+	// (W5d/D5) rather than silently rounding it — see packages/var-rpc/src/client.ts.
 	service := newTestServer()
 	server := serveOn(t, service, nil)
 	defer server.stop()

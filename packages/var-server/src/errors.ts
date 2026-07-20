@@ -60,3 +60,17 @@ export class CnosVarStoreError extends CnosVarError {
     super(message);
   }
 }
+
+/**
+ * Thrown when the REQUEST is malformed — a missing or wrongly typed field in the body, or an
+ * unparseable payload. Distinct from {@link CnosVarStoreError}, which means the store cannot
+ * serve an otherwise well-formed operation; conflating the two labelled every malformed
+ * request `store-unsupported`.
+ */
+export class CnosVarBadRequestError extends CnosVarError {
+  readonly code = 'bad-request';
+
+  constructor(message: string) {
+    super(message);
+  }
+}

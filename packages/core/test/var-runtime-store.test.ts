@@ -90,7 +90,15 @@ describe('LiveVarStore', () => {
     clock = 250;
     const expired = store.runtimeSnapshot('var.flags.mode');
     expect(expired?.freshness).toBe('expired');
-    expect(expired?.lastKnownGood).toEqual({ generation: 1, revision: 'sha256:a' });
+    // W5d/D9: `lastKnownGood` names the revision this commit DISPLACED — the last one
+    // validated and served while fresh. The first commit for a scope displaces nothing.
+    expect(expired?.lastKnownGood).toBeUndefined();
+
+    clock = 300;
+    store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:b', effectiveAt: 't', values: { 'flags.mode': 'y' } });
+    expect(store.runtimeSnapshot('var.flags.mode')?.lastKnownGood).toEqual({ generation: 1, revision: 'sha256:a' });
+    // It is a property of the commit, not of the freshness: still there while fresh.
+    expect(store.runtimeSnapshot('var.flags.mode')?.freshness).toBe('fresh');
   });
 
   it('rejects an invalid batch, keeps last-known-good, and records lastRejected (warn once per revision)', () => {
@@ -112,7 +120,8 @@ describe('LiveVarStore', () => {
     store.ingest('flags', 'flags', { generation: 2, revision: 'sha256:bad', effectiveAt: 't', values: { 'flags.mode': 'nope' } });
     expect(warn).toHaveBeenCalledTimes(1);
 
-    const status = store.status().flags;
+    // W5d/D9: varStatus() is keyed by the prefix-stripped FULL KEY, matching the Go SDK.
+    const status = store.status()['flags.mode'];
     expect(status?.lastRejected?.revision).toBe('sha256:bad');
     expect(status?.appliedGeneration).toBe(1);
     // Status never carries the ingested values themselves (only metadata/reasons).

@@ -284,15 +284,26 @@ describe('@kitsy/cnos root runtime entry', () => {
   it('consumes the projection var `schema` block after projection bootstrap (default tier + ingest validation)', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-var-boot-'));
     fixtureRoots.push(root);
-    await mkdir(path.join(root, 'cnos'), { recursive: true });
+    await mkdir(path.join(root, 'cnos', 'secrets'), { recursive: true });
+    process.env.OPS_VERIFY = 'var-boot-push-secret';
+    await writeFile(
+      path.join(root, 'cnos', 'secrets', 'ops.yml'),
+      ['ops:', '  verify:', '    provider: environment', '    ref: ops.verify', '    vault: ops'].join('\n'),
+    );
     await writeFile(
       path.join(root, 'cnos', 'cnos.yml'),
       [
         'version: 1',
         'project:',
         '  name: var-boot',
+        'vaults:',
+        '  ops:',
+        '    provider: environment',
+        '    mapping:',
+        '      OPS_VERIFY: ops.verify',
+        // The receiver fails CLOSED without a `verify` secret (W5d/D4), so declare one.
         'varSources:',
-        '  svc: { transport: http, url: "http://unused.local" }',
+        '  svc: { transport: http, url: "http://unused.local", verify: secret.ops.verify }',
         'vars:',
         '  agentic: { source: svc, mode: ondemand }',
         '  user: { source: svc, mode: ondemand }',
@@ -323,11 +334,11 @@ describe('@kitsy/cnos root runtime entry', () => {
     // Default tier resolves from the projection schema — previously blocked (schema was empty).
     expect(cnos.var?.('user.IN.coupon_allowed')).toBe(false);
 
-    // Ingest validation now works from a projection bootstrap: route pushes through the
-    // receiver (source has no `verify`, so verification is skipped) and assert the schema
-    // rejects an invalid document (422) while accepting a valid one (204).
+    // Ingest validation now works from a projection bootstrap: route authenticated pushes
+    // through the receiver and assert the schema rejects an invalid document (422) while
+    // accepting a valid one (204).
     const handler = varReceiver('svc');
-    const post = async (body: unknown): Promise<number> => {
+    const post = async (body: unknown, authenticated = true): Promise<number> => {
       let status = 0;
       const res = {
         headersSent: false,
@@ -340,7 +351,15 @@ describe('@kitsy/cnos root runtime entry', () => {
           /* noop */
         },
       };
-      handler({ method: 'POST', url: '/cnos/vars/agentic', headers: {}, body } as never, res as never);
+      handler(
+        {
+          method: 'POST',
+          url: '/cnos/vars/agentic',
+          headers: authenticated ? { authorization: `Bearer ${process.env.OPS_VERIFY}` } : {},
+          body,
+        } as never,
+        res as never,
+      );
       for (let i = 0; i < 50 && status === 0; i += 1) {
         await new Promise((resolve) => setImmediate(resolve));
       }
@@ -351,7 +370,11 @@ describe('@kitsy/cnos root runtime entry', () => {
     expect(await post({ values: { 'agentic.lanes.vinci': { enabled: true } } })).toBe(204);
     expect(cnos.var?.('agentic.lanes.vinci')).toEqual({ enabled: true });
 
+    // W5d/D4: the same receiver rejects an unauthenticated push outright.
+    expect(await post({ values: { 'agentic.lanes.vinci': { enabled: false } } }, false)).toBe(401);
+
     await cnos.close?.();
+    delete process.env.OPS_VERIFY;
   });
 
   it('autoloads from .cnos-server.json before full authoring resolution', async () => {

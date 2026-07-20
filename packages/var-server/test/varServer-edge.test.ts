@@ -278,14 +278,39 @@ describe('acceptance #12: authorize hook contract (scoped authz is NOT yet imple
 
     expect(calls[0]).toEqual({ kind: 'read', scope: 'a.b', token: 'tok-1' });
     expect(calls[1]).toEqual({ kind: 'read', scope: 'a', token: 'tok-2' }); // case-insensitive scheme
-    expect(calls[2]).toEqual({ kind: 'read', scope: 'a.b' }); // no token → key omitted entirely
-    // GAP: mutations carry their scope in the JSON BODY, so the hook sees no scope for them.
-    // Scoped (business/environment/component) authz therefore cannot be enforced on writes
-    // with the v1 hook — see the W5b report.
-    expect(calls[3]).toEqual({ kind: 'mutate' });
+    // W5d/D6: an admin GET reads the audit log, so it authorizes as `audit`, not `read`.
+    expect(calls[2]).toEqual({ kind: 'audit', scope: 'a.b' }); // no token → key omitted entirely
+    // W5d/D7: a mutation carries its scope in the JSON BODY. The body is parsed BEFORE the
+    // hook runs, so scoped (business/environment/component) authz applies to writes too.
+    expect(calls[3]).toEqual({ kind: 'mutate', scope: SCOPE });
   });
 
-  it('DEFECT-PIN: only POST under /admin is classified as a mutation; admin GETs are `read`', async () => {
+  it('acceptance #12: a scoped authorizer can DENY a cross-scope mutation (scope comes from the body)', async () => {
+    const store = memoryStore();
+    // Only scopes under `agentic.` may be mutated; everything else is refused.
+    running = await serveVarServer(store, {
+      documents,
+      authorize: (ctx) => ctx.kind !== 'mutate' || (ctx.scope ?? '').startsWith('agentic.'),
+    });
+
+    const denied = await post(running.url, '/admin/revisions', {
+      scope: 'billing.plans',
+      document: { 'billing.plans': { tier: 'gold' } },
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.json.code).toBe('forbidden');
+    expect(store.history('billing.plans')).toEqual([]);
+
+    // The permitted scope still goes through, proving the hook is not simply denying all.
+    const allowed = await post(running.url, '/admin/revisions', {
+      scope: SCOPE,
+      document: DOC,
+      schemaId: 'agentic-lanes/v1',
+    });
+    expect(allowed.status).toBe(201);
+  });
+
+  it('W5d/D6: admin GETs authorize as `audit`, distinctly from a data-plane `read`', async () => {
     const calls: VarAuthContext[] = [];
     running = await serveVarServer(memoryStore(), {
       documents,
@@ -295,11 +320,24 @@ describe('acceptance #12: authorize hook contract (scoped authz is NOT yet imple
       },
     });
 
-    // /admin/status, /admin/history and /admin/replay expose the full audit log but are
-    // authorized as `read`. An authorizer that only guards `mutate` leaks the audit trail.
+    // /admin/status, /admin/history and /admin/replay expose the full audit log — actors,
+    // reasons, past document bodies — so they carry their own kind and can be denied without
+    // denying the data plane.
+    await fetch(`${running.url}/admin/status?scope=${encodeURIComponent(SCOPE)}`);
     await fetch(`${running.url}/admin/history?scope=${encodeURIComponent(SCOPE)}`);
     await fetch(`${running.url}/admin/replay?scope=${encodeURIComponent(SCOPE)}&toGeneration=1`);
-    expect(calls.map((call) => call.kind)).toEqual(['read', 'read']);
+    await fetch(`${running.url}?key=${encodeURIComponent(SCOPE)}`);
+    expect(calls.map((call) => call.kind)).toEqual(['audit', 'audit', 'audit', 'read']);
+  });
+
+  it('W5d/D6: an authorizer can deny the audit plane while still allowing data-plane reads', async () => {
+    running = await serveVarServer(memoryStore(), { documents, authorize: (ctx) => ctx.kind !== 'audit' });
+
+    const audit = await fetch(`${running.url}/admin/history?scope=${encodeURIComponent(SCOPE)}`);
+    expect(audit.status).toBe(403);
+    // The data plane is untouched: no head yet, so 404 — but definitively not 403.
+    const read = await fetch(`${running.url}?key=${encodeURIComponent(SCOPE)}`);
+    expect(read.status).toBe(404);
   });
 
   it('a bearer authorizer that resolves to an empty token denies rather than allows', async () => {
@@ -377,9 +415,10 @@ describe('adversarial request handling', () => {
         body,
       });
       expect(res.status).toBe(400);
-      // PINNED: missing/!invalid-field errors surface as CnosVarStoreError, whose wire code is
-      // `store-unsupported` — a misleading label for a malformed request. Pinned, not fixed.
-      expect(res.json.code).toBe('store-unsupported');
+      // W5d/D10: a malformed REQUEST is `bad-request`. `store-unsupported` now means only
+      // what it says — the active store cannot serve an otherwise well-formed operation
+      // (e.g. replay against an ephemeral memoryStore).
+      expect(res.json.code).toBe('bad-request');
     }
   });
 
@@ -442,8 +481,20 @@ describe('adversarial request handling', () => {
     expect(head).toMatchObject({ generation: 1, values: { [scope]: { ok: true } } });
   });
 
-  it('SLOW-ISH: accepts a multi-megabyte revision document and serves it back intact', async () => {
+  it('W5d/D3: a request body past the cap is rejected 413 instead of being buffered', async () => {
     running = await serveVarServer(memoryStore(), { documents });
+    const res = await raw(running.url, '/admin/revisions', {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'big.doc', document: { blob: 'y'.repeat(2 * 1024 * 1024) } }),
+    });
+    expect(res.status).toBe(413);
+    expect(res.json.code).toBe('payload-too-large');
+  }, 20_000);
+
+  it('SLOW-ISH: accepts a multi-megabyte revision document and serves it back intact', async () => {
+    // Bodies are read BEFORE authorization, so the 1 MiB default is deliberate. A deployment
+    // that genuinely pushes large documents raises it explicitly.
+    running = await serveVarServer(memoryStore(), { documents, maxBodyBytes: 8 * 1024 * 1024 });
     const blob = 'y'.repeat(2 * 1024 * 1024); // 2 MiB
     const created = await post(running.url, '/admin/revisions', { scope: 'big.doc', document: { blob } });
     expect(created.status).toBe(201);

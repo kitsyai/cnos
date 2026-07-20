@@ -164,9 +164,40 @@ export class VarManager {
       );
     }
 
-    const provider = module.create(def, { resolveSecret: (ref) => this.resolveSecret(ref) });
+    const provider = module.create(def, {
+      resolveSecret: (ref) => this.resolveSecret(ref),
+      onSubscriptionError: (error, info) => this.recordSubscriptionFailure(sourceId, error, info),
+    });
     this.providers.set(sourceId, provider);
     return provider;
+  }
+
+  /**
+   * A background subscription failure reported by a transport provider. It never propagates as
+   * an exception (a stream error must not crash the host process); it lands in `varStatus()`
+   * as the scope's `subscription` state so a consumer can alert on `failed`.
+   */
+  private recordSubscriptionFailure(
+    sourceId: string,
+    error: Error,
+    info: { terminal: boolean; scopes: string[] },
+  ): void {
+    const scopes = info.scopes.length > 0 ? info.scopes : this.groupsForSource(sourceId);
+
+    for (const scope of scopes) {
+      const group = scope.split('.')[0] ?? scope;
+      this.store.recordSubscription(scope, group, info.terminal ? 'failed' : 'retrying', error);
+    }
+
+    this.warn(
+      `[cnos:var] subscription for source "${sourceId}" ${info.terminal ? 'FAILED (terminal, no further reconnects)' : 'dropped (retrying)'}: ${error.message}`,
+    );
+  }
+
+  private groupsForSource(sourceId: string): string[] {
+    return Object.entries(this.vars)
+      .filter(([, definition]) => definition.source === sourceId)
+      .map(([group]) => group);
   }
 
   // ---- Fetch / ingest ----------------------------------------------------
@@ -202,7 +233,7 @@ export class VarManager {
   }
 
   private appliedRevision(scopeString: string): string | undefined {
-    return this.store.status()[scopeString]?.revision;
+    return this.store.appliedRevision(scopeString);
   }
 
   /**
@@ -347,6 +378,13 @@ export class VarManager {
       const stop = provider.subscribe(scopes, (batch) => {
         this.ingestSubscribed(batch);
       });
+
+      for (const scope of scopes) {
+        const group = scope.group ?? scope.key ?? '';
+        if (group) {
+          this.store.recordSubscription(group, group.split('.')[0] ?? group, 'active');
+        }
+      }
 
       this.subscriptions.add(stop);
     }

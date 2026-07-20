@@ -152,9 +152,11 @@ describe('var http runtime integration', () => {
     await runtime.refreshVars?.();
 
     expect(runtime.read('var.agentic.lanes.vinci')).toEqual({ enabled: true, model_target_ref: 'ref-1' });
+    // W5d/D9: varStatus() is keyed by the prefix-stripped FULL KEY (matching the Go SDK and
+    // every wire `values` payload), not by the scope/group.
     const status = runtime.varStatus?.();
-    expect(status?.agentic?.appliedGeneration).toBe(1);
-    expect(status?.agentic?.lastError).toBeTruthy();
+    expect(status?.['agentic.lanes.vinci']?.appliedGeneration).toBe(1);
+    expect(status?.['agentic.lanes.vinci']?.lastError).toBeTruthy();
     await runtime.close?.();
   });
 

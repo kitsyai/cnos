@@ -1,6 +1,9 @@
 export {
   createRpcVarProvider,
+  createRpcVarSourceProvider,
   rpcVarSourceProvider,
+  MAX_CONSECUTIVE_SUBSCRIBE_FAILURES,
+  type RpcVarProviderOptions,
 } from './client.js';
 export {
   attachVarRpc,

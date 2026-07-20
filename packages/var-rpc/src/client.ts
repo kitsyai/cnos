@@ -21,9 +21,59 @@ import {
 const DEFAULT_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
 
+/**
+ * Consecutive failed Subscribe attempts after which the subscription becomes TERMINAL.
+ * Bounds the reconnect loop so a permanently broken endpoint stops burning connections and
+ * starts reporting instead. Identical constant in the Go provider (`maxConsecutiveFailures`).
+ */
+export const MAX_CONSECUTIVE_SUBSCRIBE_FAILURES = 8;
+
+/**
+ * gRPC statuses that are NEVER retried: the server has authoritatively refused this identity,
+ * and reconnecting with the same credentials can only repeat the refusal. Canonical policy,
+ * identical in the Go provider.
+ */
+const TERMINAL_STATUSES: ReadonlySet<number> = new Set([
+  grpc.status.UNAUTHENTICATED,
+  grpc.status.PERMISSION_DENIED,
+]);
+
+function isTerminalStatus(error: unknown): boolean {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  return typeof code === 'number' && TERMINAL_STATUSES.has(code);
+}
+
 function nextBackoff(attempt: number): number {
   const capped = Math.min(DEFAULT_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
   return capped / 2 + Math.random() * (capped / 2);
+}
+
+export interface RpcVarProviderOptions {
+  /**
+   * Called for every background subscription failure, terminal or not. A terminal failure
+   * means the provider has stopped reconnecting. The provider never throws out of a stream.
+   */
+  onError?: (error: Error, info: { terminal: boolean; scopes: string[] }) => void;
+}
+
+/**
+ * The wire carries `generation` as an exact decimal string (`longs: String`). A JS number is
+ * exact only to `Number.MAX_SAFE_INTEGER`, so converting a larger value silently corrupts it.
+ * Detect that here — at the one edge that still holds the exact text — and fail loudly.
+ * (Go carries the same field as a native int64 and round-trips it exactly.)
+ */
+function toGeneration(raw: string | number): number {
+  const value = typeof raw === 'string' ? Number(raw) : raw;
+
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      `Var rpc batch carries generation ${String(raw)}, which is outside the exactly ` +
+        `representable range 0..${Number.MAX_SAFE_INTEGER} for this SDK. ` +
+        'Configure the var authority to allocate generations below 2^53.',
+    );
+  }
+
+  return value;
 }
 
 /** Strip a URL scheme so the manifest `url` maps onto a bare gRPC `host:port` target. */
@@ -47,7 +97,7 @@ function toBatch(msg: WireSnapshotBatch): VarSnapshotBatch {
   const values = (text ? JSON.parse(text) : {}) as Record<string, unknown>;
 
   return {
-    generation: typeof msg.generation === 'string' ? Number(msg.generation) : msg.generation,
+    generation: toGeneration(msg.generation),
     revision: msg.revision,
     ...(msg.schema_id ? { schemaId: msg.schema_id } : {}),
     effectiveAt: msg.effective_at || new Date().toISOString(),
@@ -66,6 +116,7 @@ function toBatch(msg: WireSnapshotBatch): VarSnapshotBatch {
 export function createRpcVarProvider(
   def: ProjectedVarSourceDefinition,
   ctx: VarSourceProviderContext,
+  options: RpcVarProviderOptions = {},
 ): VarSourceProvider {
   const target = grpcTarget(def.url);
   const bearerRef = def.auth?.bearer;
@@ -117,11 +168,66 @@ export function createRpcVarProvider(
     return toBatch(msg);
   }
 
+  /**
+   * Canonical Subscribe failure policy (identical in the Go provider):
+   *
+   * - `UNAUTHENTICATED` / `PERMISSION_DENIED` are TERMINAL — never reconnected.
+   * - Transport/network failures are retryable with capped exponential backoff + jitter, but
+   *   bounded: after {@link MAX_CONSECUTIVE_SUBSCRIBE_FAILURES} consecutive failures the
+   *   subscription becomes terminal too. A stream that delivered a batch resets the counter.
+   * - Every failure is REPORTED (provider `onError` + the SDK's `onSubscriptionError` seam,
+   *   which surfaces it in `varStatus()`); nothing ever fails silently, and nothing is ever
+   *   thrown out of a background stream.
+   *
+   * A terminal subscription deliberately does NOT fall back to polling: the same credentials
+   * would be refused by `Pull`, and a silent poll loop would hide the failure the terminal
+   * state exists to advertise. Consumers observe `subscription.state === 'failed'` and may
+   * call `refreshVar()` explicitly.
+   */
   function subscribe(scopes: VarScope[], onBatch: (batch: VarSnapshotBatch) => void): () => void {
     const scopeStrings = scopes.map(scopeValue);
     let cancelled = false;
     let current: grpc.ClientReadableStream<WireSnapshotBatch> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const report = (error: unknown, terminal: boolean): void => {
+      const err = error instanceof Error ? error : new Error(String(error));
+      const info = { terminal, scopes: scopeStrings };
+
+      try {
+        options.onError?.(err, info);
+      } catch {
+        /* a reporting hook must never break the transport */
+      }
+
+      try {
+        ctx.onSubscriptionError?.(err, info);
+      } catch {
+        /* ditto */
+      }
+    };
+
+    /** Classify a stream failure and either schedule a bounded retry or go terminal. */
+    const fail = (error: unknown, attempt: number): void => {
+      if (cancelled || closed) {
+        return;
+      }
+
+      const consecutive = attempt + 1;
+
+      if (isTerminalStatus(error) || consecutive >= MAX_CONSECUTIVE_SUBSCRIBE_FAILURES) {
+        cancelled = true;
+        report(error, true);
+        return;
+      }
+
+      report(error, false);
+      reconnectTimer = setTimeout(() => connect(consecutive), nextBackoff(attempt));
+
+      if (typeof reconnectTimer.unref === 'function') {
+        reconnectTimer.unref();
+      }
+    };
 
     const connect = (attempt: number): void => {
       if (cancelled || closed) {
@@ -145,6 +251,9 @@ export function createRpcVarProvider(
           current = stream;
           activeCalls.add(stream as grpc.ClientReadableStream<unknown>);
 
+          let delivered = false;
+          let settled = false;
+
           stream.on('data', (msg: WireSnapshotBatch) => {
             // Push-based deactivations (no_head) and no-change acks are not ingestable batches;
             // the SDK converges on the next pull. Only forward concrete head batches.
@@ -152,41 +261,55 @@ export function createRpcVarProvider(
               return;
             }
 
+            let batch: VarSnapshotBatch;
+
             try {
-              onBatch(toBatch(msg));
+              batch = toBatch(msg);
+            } catch (error) {
+              // A malformed/unrepresentable batch (e.g. an out-of-range int64 generation) is
+              // reported and dropped — never committed, never fatal to the stream.
+              report(error, false);
+              return;
+            }
+
+            delivered = true;
+
+            try {
+              onBatch(batch);
             } catch {
               /* a downstream ingest error never tears down the subscription */
             }
           });
 
-          const scheduleReconnect = (): void => {
-            activeCalls.delete(stream as grpc.ClientReadableStream<unknown>);
-
-            if (cancelled || closed) {
+          const settle = (error: unknown): void => {
+            if (settled) {
               return;
             }
 
-            reconnectTimer = setTimeout(() => connect(attempt + 1), nextBackoff(attempt));
-
-            if (typeof reconnectTimer.unref === 'function') {
-              reconnectTimer.unref();
-            }
+            settled = true;
+            activeCalls.delete(stream as grpc.ClientReadableStream<unknown>);
+            // A stream that delivered at least one batch was healthy: restart the ramp.
+            fail(error, delivered ? 0 : attempt);
           };
 
-          stream.on('error', scheduleReconnect);
-          stream.on('end', scheduleReconnect);
+          stream.on('error', (error: unknown) => settle(error));
+          stream.on('end', () => settle(new Error('Var rpc Subscribe stream ended.')));
+          // A server-side `call.destroy(status)` on a stream that never produced data closes
+          // the call by delivering a non-OK STATUS — with no 'error' and no 'end' event. That
+          // is exactly the auth-rejection path, and listening only for error/end is what made
+          // an UNAUTHENTICATED Subscribe die silently.
+          stream.on('status', (streamStatus: grpc.StatusObject) => {
+            if (streamStatus.code === grpc.status.OK) {
+              return;
+            }
+
+            const error = new Error(
+              streamStatus.details || `Var rpc Subscribe failed with gRPC status ${streamStatus.code}.`,
+            );
+            settle(Object.assign(error, { code: streamStatus.code }));
+          });
         })
-        .catch(() => {
-          if (cancelled || closed) {
-            return;
-          }
-
-          reconnectTimer = setTimeout(() => connect(attempt + 1), nextBackoff(attempt));
-
-          if (typeof reconnectTimer.unref === 'function') {
-            reconnectTimer.unref();
-          }
-        });
+        .catch((error: unknown) => fail(error, attempt));
     };
 
     connect(0);
@@ -224,5 +347,16 @@ export function createRpcVarProvider(
 /** The transport-keyed module, registered like a secret vault provider factory. */
 export const rpcVarSourceProvider: VarSourceProviderModule = {
   transport: 'rpc',
-  create: createRpcVarProvider,
+  create: (def, ctx) => createRpcVarProvider(def, ctx),
 };
+
+/**
+ * The same module with provider options applied — use it to attach an `onError` hook to every
+ * rpc source's background subscription.
+ */
+export function createRpcVarSourceProvider(options: RpcVarProviderOptions): VarSourceProviderModule {
+  return {
+    transport: 'rpc',
+    create: (def, ctx) => createRpcVarProvider(def, ctx, options),
+  };
+}

@@ -11,7 +11,13 @@ import {
 import { createVarEngine, memoryStore, type VarAuthContext, type VarEngine, type VarStore } from '@kitsy/cnos-var-server';
 import { createInMemoryVarSource } from '@kitsy/cnos-var-testkit';
 
-import { createRpcVarProvider, serveVarRpc, VAR_PROTO_LOADER_OPTIONS, type RunningVarRpcServer } from '../src/index.js';
+import {
+  createRpcVarProvider,
+  serveVarRpc,
+  MAX_CONSECUTIVE_SUBSCRIBE_FAILURES,
+  VAR_PROTO_LOADER_OPTIONS,
+  type RunningVarRpcServer,
+} from '../src/index.js';
 
 /**
  * W5b test hardening for the rpc transport and the manager/subscription seam:
@@ -48,13 +54,36 @@ function track<T extends VarSourceProvider>(provider: T): T {
   return provider;
 }
 
-function providerFor(target: string, opts: { bearerRef?: string; token?: string } = {}): VarSourceProvider {
+interface SubscriptionFailure {
+  error: Error;
+  terminal: boolean;
+  scopes: string[];
+}
+
+function providerFor(
+  target: string,
+  opts: {
+    bearerRef?: string;
+    token?: string;
+    /** Provider-level `onError` hook. */
+    onError?: (error: Error, info: { terminal: boolean; scopes: string[] }) => void;
+    /** SDK-level seam the VarManager supplies; feeds varStatus(). */
+    onSubscriptionError?: (error: Error, info: { terminal: boolean; scopes: string[] }) => void;
+  } = {},
+): VarSourceProvider {
   const def: ProjectedVarSourceDefinition = {
     transport: 'rpc',
     url: target,
     auth: opts.bearerRef ? { bearer: opts.bearerRef } : {},
   };
-  return createRpcVarProvider(def, { resolveSecret: async () => opts.token ?? '' });
+  return createRpcVarProvider(
+    def,
+    {
+      resolveSecret: async () => opts.token ?? '',
+      ...(opts.onSubscriptionError ? { onSubscriptionError: opts.onSubscriptionError } : {}),
+    },
+    { ...(opts.onError ? { onError: opts.onError } : {}) },
+  );
 }
 
 async function activate(engine: VarEngine, scope: string, document: unknown, expectedGeneration: number): Promise<void> {
@@ -185,21 +214,33 @@ describe('int64 generation boundary at the provider edge', () => {
     expect(VAR_PROTO_LOADER_OPTIONS.keepCase).toBe(true);
   });
 
-  it('DEFECT-PIN: generations past Number.MAX_SAFE_INTEGER round when converted to a JS number', () => {
-    // The wire carries `generation` as a decimal STRING (`longs: String`), which is exact.
-    // `toBatch` then does `Number(msg.generation)`, which is only exact to 2^53-1. Anything
-    // an authority allocates beyond that is silently corrupted. Pinned, not fixed —
-    // see the W5b report (fix requires a bigint/string carrier in VarSnapshotBatch).
+  it('W5d/D5: a generation past Number.MAX_SAFE_INTEGER is REJECTED at the provider edge, not rounded', async () => {
+    // The wire carries `generation` as an exact decimal STRING (`longs: String`); a JS number
+    // is exact only to 2^53-1. Rather than committing a silently corrupted generation (which
+    // would break optimistic concurrency, replay and watcher dedupe), the provider fails the
+    // pull at the one place that still holds the exact text. Go carries a native int64 and
+    // round-trips the same value exactly — that asymmetry is now explicit, not silent.
     const exactOnWire = '9007199254740993';
-    // The string is exact; the JS number is not — String(Number(x)) !== x proves the loss.
     expect(String(Number(exactOnWire))).not.toBe(exactOnWire);
-    expect(Number(exactOnWire)).toBe(9_007_199_254_740_992);
+
+    const { store, server } = await harness();
+    await store.append({ kind: 'revision-created', scope: 'huge', revision: 'sha256:huge', document: { 'huge.k': 1 }, timestamp: 't' });
+    await store.append({
+      kind: 'activated',
+      scope: 'huge',
+      revision: 'sha256:huge',
+      generation: Number(exactOnWire),
+      timestamp: 't',
+    });
+
+    const provider = track(providerFor(server.target));
+    await expect(provider.pull({ group: 'huge' })).rejects.toThrow(/outside the exactly representable range/);
 
     // Everything at or below the safe boundary round-trips exactly.
     for (const value of ['0', '1', '4294967296', '9007199254740991']) {
       expect(String(Number(value))).toBe(value);
     }
-  });
+  }, 20_000);
 
   it('carries a real MAX_SAFE_INTEGER-scale generation through Pull intact', async () => {
     const { store, server } = await harness();
@@ -224,13 +265,13 @@ describe('int64 generation boundary at the provider edge', () => {
 // ---------------------------------------------------------------------------
 
 describe('Subscribe failure policy', () => {
-  it('DEFECT-PIN: an auth-rejected Subscribe dies SILENTLY — no retry, no observable error', async () => {
-    // W5a flagged "unbounded reconnect loop with no give-up policy". The reality is worse in
-    // the other direction: an UNAUTHENTICATED Subscribe is never retried at all. The server
-    // calls `call.destroy(...)`, the client's reconnect handlers do not fire, and the SDK
-    // surfaces nothing — `subscribe()` returns a stop function for a stream that is already
-    // dead. Because `startPollers()` only covers http sources, an rpc source with a bad token
-    // silently receives no updates for the process lifetime. Pinned — see the W5b report.
+  it('W5d/D1: an auth-rejected Subscribe is TERMINAL and REPORTED, never silent', async () => {
+    // Canonical policy (identical in the Go provider): UNAUTHENTICATED / PERMISSION_DENIED
+    // are terminal — reconnecting with the same credentials can only repeat the refusal — and
+    // the failure is surfaced through BOTH observable seams (the provider's `onError` and the
+    // SDK's `onSubscriptionError`, which feeds varStatus()). It used to die silently: no
+    // retry, no error, and — because startPollers() only covers http sources — no updates at
+    // all for the process lifetime.
     let attempts = 0;
     const { server } = await harness({
       authorize: (ctx) => {
@@ -241,17 +282,51 @@ describe('Subscribe failure policy', () => {
       },
     });
 
-    const provider = track(providerFor(server.target, { bearerRef: 'secret.ops.token', token: 'wrong-token' }));
+    const providerErrors: SubscriptionFailure[] = [];
+    const sdkErrors: SubscriptionFailure[] = [];
+    const provider = track(
+      providerFor(server.target, {
+        bearerRef: 'secret.ops.token',
+        token: 'wrong-token',
+        onError: (error, info) => providerErrors.push({ error, ...info }),
+        onSubscriptionError: (error, info) => sdkErrors.push({ error, ...info }),
+      }),
+    );
     const received: VarSnapshotBatch[] = [];
     const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
 
-    // The first attempt lands...
-    expect(await until(() => attempts >= 1, 5000)).toBe(true);
-    // ...and nothing follows it. Backoff attempt 0 is 500-1000ms, so 4s would have shown
-    // several retries if any reconnect policy applied to auth failures.
+    // The failure is reported — to both seams — as TERMINAL.
+    expect(await until(() => providerErrors.length > 0 && sdkErrors.length > 0, 8000)).toBe(true);
+    expect(providerErrors[0]?.terminal).toBe(true);
+    expect(providerErrors[0]?.scopes).toEqual(['agentic']);
+    expect(sdkErrors[0]?.terminal).toBe(true);
+    expect(String(providerErrors[0]?.error.message)).toMatch(/authoriz/i);
+
+    // And it does not reconnect. Backoff attempt 0 is 500-1000ms, so 4s would have shown
+    // several retries if the auth failure were treated as retryable.
     await delay(4000);
     expect(attempts).toBe(1);
+    expect(providerErrors).toHaveLength(1);
     expect(received).toHaveLength(0);
+
+    expect(() => stop?.()).not.toThrow();
+  }, 30_000);
+
+  it('W5d/D2: transport failures retry but are BOUNDED, ending in one terminal report', async () => {
+    // Nothing listens on this target, so every attempt fails at the transport layer. Retries
+    // stay retryable (non-terminal reports) until the consecutive-failure cap, then the
+    // subscription goes terminal instead of reconnecting forever.
+    const failures: SubscriptionFailure[] = [];
+    const provider = track(
+      providerFor('127.0.0.1:1', { onError: (error, info) => failures.push({ error, ...info }) }),
+    );
+    const stop = provider.subscribe?.([{ group: 'agentic' }], () => undefined);
+
+    // Backoff is capped-exponential from 1s, so only assert the shape of the first few.
+    expect(await until(() => failures.length >= 3, 12_000)).toBe(true);
+    expect(failures.slice(0, 3).every((failure) => failure.terminal === false)).toBe(true);
+    expect(failures.length).toBeLessThan(MAX_CONSECUTIVE_SUBSCRIBE_FAILURES);
+    expect(MAX_CONSECUTIVE_SUBSCRIBE_FAILURES).toBe(8);
 
     expect(() => stop?.()).not.toThrow();
   }, 30_000);
@@ -321,7 +396,7 @@ describe('VarManager.startSubscriptions over the testkit in-memory source', () =
       model_target_ref: 'from-testkit',
     });
     expect(seen).toEqual([{ enabled: true, model_target_ref: 'from-testkit' }]);
-    expect(varManager.status().agentic?.appliedGeneration).toBe(1);
+    expect(varManager.status()['agentic.lanes.vinci']?.appliedGeneration).toBe(1);
 
     await varManager.close();
   });
@@ -349,7 +424,7 @@ describe('VarManager.startSubscriptions over the testkit in-memory source', () =
     });
     expect(rejected.ok).toBe(false);
     expect(varManager.readRuntimeVar('var.agentic.lanes.vinci')).toMatchObject({ model_target_ref: 'good' });
-    expect(varManager.status().agentic?.lastRejected?.revision).toBe('sha256:bad');
+    expect(varManager.status()['agentic.lanes.vinci']?.lastRejected?.revision).toBe('sha256:bad');
 
     await varManager.close();
   });
@@ -367,6 +442,53 @@ describe('VarManager.startSubscriptions over the testkit in-memory source', () =
     await inMemory.engine.activate({ scope: 'agentic', revision: created.revision, expectedGeneration: 0 });
     expect(() => inMemory.emit('agentic')).not.toThrow();
     expect(varManager.readRuntimeVar('var.agentic.lanes.vinci')).toBeUndefined();
+  });
+
+  it('W5d/D1+D2: a terminal subscription failure surfaces in varStatus() as subscription.state=failed', () => {
+    // The manager wires `onSubscriptionError` into every provider it constructs, so a
+    // background stream failure is observable rather than silent — and it never propagates
+    // as an exception into the host process.
+    let report: ((error: Error, info: { terminal: boolean; scopes: string[] }) => void) | undefined;
+    const varManager = new VarManager({
+      varSources: { svc: source },
+      vars: { agentic: { source: 'svc', mode: 'prefetch' } },
+      documents,
+      schema: { 'var.agentic.lanes.vinci': { document: 'agentic-lanes/v1' } },
+      providerModules: [
+        {
+          transport: 'rpc',
+          create: (_def, ctx) => {
+            report = ctx.onSubscriptionError;
+            return {
+              pull: () => Promise.reject(new Error('unused')),
+              subscribe: () => () => undefined,
+              close: async () => undefined,
+            };
+          },
+        },
+      ],
+      resolveSecret: async () => 'token',
+      warn: () => undefined,
+    });
+
+    varManager.startSubscriptions();
+    expect(varManager.status()['agentic.lanes.vinci']?.subscription?.state).toBe('active');
+
+    expect(() =>
+      report?.(new Error('16 UNAUTHENTICATED: Not authorized for this var scope.'), {
+        terminal: true,
+        scopes: ['agentic'],
+      }),
+    ).not.toThrow();
+
+    const status = varManager.status()['agentic.lanes.vinci'];
+    expect(status?.subscription?.state).toBe('failed');
+    expect(status?.subscription?.lastError).toMatch(/UNAUTHENTICATED/);
+    expect(status?.lastError).toMatch(/UNAUTHENTICATED/);
+
+    // A non-terminal drop reports as `retrying`, not `failed`.
+    report?.(new Error('stream reset'), { terminal: false, scopes: ['agentic'] });
+    expect(varManager.status()['agentic.lanes.vinci']?.subscription?.state).toBe('retrying');
   });
 
   it('emit() on a scope with no head is a no-op', () => {

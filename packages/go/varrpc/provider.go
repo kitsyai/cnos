@@ -24,8 +24,10 @@ import (
 
 	cnos "github.com/kitsyai/cnos/packages/go"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // Transport is the manifest transport name this provider serves.
@@ -38,6 +40,26 @@ func grpcTarget(url string) string {
 	return strings.TrimRight(schemePrefix.ReplaceAllString(url, ""), "/")
 }
 
+// MaxConsecutiveSubscribeFailures bounds the reconnect loop: after this many consecutive
+// failed Subscribe attempts the subscription becomes TERMINAL and stops reconnecting.
+// Identical constant in the Node provider (MAX_CONSECUTIVE_SUBSCRIBE_FAILURES).
+const MaxConsecutiveSubscribeFailures = 8
+
+// terminalCodes are gRPC statuses that are NEVER retried: the server has authoritatively
+// refused this identity, so reconnecting with the same credentials can only repeat the
+// refusal. Canonical policy, identical in the Node provider.
+var terminalCodes = map[codes.Code]bool{
+	codes.Unauthenticated:  true,
+	codes.PermissionDenied: true,
+}
+
+func isTerminalStatus(err error) bool {
+	if err == nil {
+		return false
+	}
+	return terminalCodes[status.Code(err)]
+}
+
 // Option configures the provider factory.
 type Option func(*options)
 
@@ -47,6 +69,24 @@ type options struct {
 	// backoffBase/backoffCeiling let tests drive reconnect quickly.
 	backoffBase    time.Duration
 	backoffCeiling time.Duration
+	onError        func(err error, terminal bool, scopes []string)
+	maxFailures    int
+}
+
+// WithOnError installs a callback invoked for every background subscription failure,
+// terminal or not. It is called in addition to the SDK's own OnSubscriptionError seam.
+func WithOnError(onError func(err error, terminal bool, scopes []string)) Option {
+	return func(o *options) { o.onError = onError }
+}
+
+// WithMaxSubscribeFailures overrides the consecutive-failure cap after which a
+// subscription becomes terminal. Values <= 0 are ignored.
+func WithMaxSubscribeFailures(limit int) Option {
+	return func(o *options) {
+		if limit > 0 {
+			o.maxFailures = limit
+		}
+	}
 }
 
 // WithDialOptions appends gRPC dial options (TLS credentials, interceptors, keepalive).
@@ -88,6 +128,9 @@ type Provider struct {
 	resolveSecret  func(ref string) (string, error)
 	backoffBase    time.Duration
 	backoffCeiling time.Duration
+	maxFailures    int
+	onError        func(err error, terminal bool, scopes []string)
+	reportSDK      func(err error, terminal bool, scopes []string)
 
 	mu      sync.Mutex
 	closed  bool
@@ -96,7 +139,11 @@ type Provider struct {
 
 // New builds a provider for one var source definition.
 func New(def cnos.VarSourceDef, providerCtx cnos.VarProviderContext, configure ...Option) (*Provider, error) {
-	settings := options{backoffBase: 500 * time.Millisecond, backoffCeiling: 30 * time.Second}
+	settings := options{
+		backoffBase:    500 * time.Millisecond,
+		backoffCeiling: 30 * time.Second,
+		maxFailures:    MaxConsecutiveSubscribeFailures,
+	}
 	for _, apply := range configure {
 		apply(&settings)
 	}
@@ -106,6 +153,9 @@ func New(def cnos.VarSourceDef, providerCtx cnos.VarProviderContext, configure .
 		resolveSecret:  providerCtx.ResolveSecret,
 		backoffBase:    settings.backoffBase,
 		backoffCeiling: settings.backoffCeiling,
+		maxFailures:    settings.maxFailures,
+		onError:        settings.onError,
+		reportSDK:      providerCtx.OnSubscriptionError,
 	}
 
 	if settings.conn != nil {
@@ -235,14 +285,49 @@ func (provider *Provider) Subscribe(ctx context.Context, scopes []cnos.VarScope,
 	return func() { once.Do(cancel) }, nil
 }
 
+// report surfaces a subscription failure through both the provider's own onError hook and
+// the SDK seam that feeds VarStatus(). Nothing is ever thrown/panicked out of the loop.
+func (provider *Provider) report(err error, terminal bool, scopes []string) {
+	if err == nil {
+		return
+	}
+	if provider.onError != nil {
+		func() {
+			defer func() { _ = recover() }()
+			provider.onError(err, terminal, scopes)
+		}()
+	}
+	if provider.reportSDK != nil {
+		func() {
+			defer func() { _ = recover() }()
+			provider.reportSDK(err, terminal, scopes)
+		}()
+	}
+}
+
+// subscribeLoop implements the canonical Subscribe failure policy (identical in the Node
+// provider):
+//
+//   - codes.Unauthenticated / codes.PermissionDenied are TERMINAL — never reconnected.
+//   - transport/network failures retry with capped exponential backoff + jitter, but
+//     BOUNDED: after maxFailures consecutive failures the subscription becomes terminal
+//     too. A stream that delivered a batch resets the counter.
+//   - every failure is reported (provider onError + the SDK's OnSubscriptionError seam,
+//     which surfaces it in VarStatus()); nothing fails silently and nothing panics out
+//     of this goroutine.
+//
+// A terminal subscription deliberately does NOT fall back to polling: the same credentials
+// would be refused by Pull, and a silent poll loop would hide the failure the terminal state
+// exists to advertise. Consumers observe subscription.state == "failed" and may call
+// RefreshVar explicitly.
 func (provider *Provider) subscribeLoop(ctx context.Context, scopes []string, onBatch func(cnos.VarBatchResult)) {
-	attempt := 0
+	consecutive := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		delivered := provider.runStream(ctx, scopes, onBatch)
+		delivered, streamErr := provider.runStream(ctx, scopes, onBatch)
 
 		if ctx.Err() != nil {
 			return
@@ -250,35 +335,42 @@ func (provider *Provider) subscribeLoop(ctx context.Context, scopes []string, on
 
 		// A stream that delivered at least one batch was healthy — restart the backoff ramp.
 		if delivered {
-			attempt = 0
+			consecutive = 0
 		}
+		consecutive++
+
+		if isTerminalStatus(streamErr) || consecutive >= provider.maxFailures {
+			provider.report(streamErr, true, scopes)
+			return
+		}
+		provider.report(streamErr, false, scopes)
 
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(provider.nextBackoff(attempt)):
+		case <-time.After(provider.nextBackoff(consecutive - 1)):
 		}
-		attempt++
 	}
 }
 
-// runStream runs one Subscribe stream to completion, reporting whether it delivered a batch.
-func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatch func(cnos.VarBatchResult)) bool {
+// runStream runs one Subscribe stream to completion, reporting whether it delivered a batch
+// and the error that ended it.
+func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatch func(cnos.VarBatchResult)) (bool, error) {
 	callCtx, err := provider.authContext(ctx)
 	if err != nil {
-		return false
+		return false, err
 	}
 
 	stream, err := provider.client.Subscribe(callCtx, &SubscribeRequest{Scopes: scopes})
 	if err != nil {
-		return false
+		return false, err
 	}
 
 	delivered := false
 	for {
 		batch, err := stream.Recv()
 		if err != nil {
-			return delivered
+			return delivered, err
 		}
 
 		// Push-side deactivations (no_head) and no-change acks are not ingestable batches;
@@ -289,6 +381,7 @@ func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatc
 
 		result, err := toResult("", batch)
 		if err != nil {
+			provider.report(err, false, scopes)
 			continue
 		}
 

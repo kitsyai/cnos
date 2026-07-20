@@ -23,11 +23,37 @@ type receiverBody struct {
 	Values      map[string]any `json:"values"`
 }
 
+// DefaultMaxVarBodyBytes is the default inbound push body cap (1 MiB). It matches the
+// Node receiver's DEFAULT_MAX_VAR_BODY_BYTES; a larger body is rejected with 413.
+const DefaultMaxVarBodyBytes = 1 << 20
+
+// VarReceiverOption configures a latching push receiver.
+type VarReceiverOption func(*varReceiverOptions)
+
+type varReceiverOptions struct {
+	maxBodyBytes int64
+}
+
+// WithVarReceiverMaxBody overrides the inbound body cap (bytes). A body larger than the
+// cap is rejected 413 without being buffered past the limit.
+func WithVarReceiverMaxBody(limit int64) VarReceiverOption {
+	return func(o *varReceiverOptions) {
+		if limit > 0 {
+			o.maxBodyBytes = limit
+		}
+	}
+}
+
 // receiver returns a latching http.Handler for POSTed pushes on the source. It
 // verifies bearer/HMAC via the source's `verify` secret ref and routes accepted
 // payloads through the SAME ingest path (validate → atomic commit → notify).
 // It never starts its own server; mount it on the host mux at "/cnos/vars/".
-func (variables *varRuntime) receiver(sourceName string) http.Handler {
+func (variables *varRuntime) receiver(sourceName string, configure ...VarReceiverOption) http.Handler {
+	settings := varReceiverOptions{maxBodyBytes: DefaultMaxVarBodyBytes}
+	for _, apply := range configure {
+		apply(&settings)
+	}
+
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
@@ -39,9 +65,15 @@ func (variables *varRuntime) receiver(sourceName string) http.Handler {
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(request.Body, 1<<20))
+		// Read one byte past the cap so an oversized body is DETECTED (413) rather than
+		// silently truncated into a signature mismatch. Matches the Node receiver.
+		body, err := io.ReadAll(io.LimitReader(request.Body, settings.maxBodyBytes+1))
 		if err != nil {
 			http.Error(writer, "read error", http.StatusBadRequest)
+			return
+		}
+		if int64(len(body)) > settings.maxBodyBytes {
+			http.Error(writer, "payload too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 		if err := variables.verifyInbound(source, request, body); err != nil {
@@ -93,9 +125,11 @@ func (variables *varRuntime) receiver(sourceName string) http.Handler {
 	})
 }
 
-// verifyInbound checks the request against the source's verify secret: a bearer
-// token match (Authorization: Bearer) or an HMAC-SHA256 body signature
-// (X-CNOS-Signature: sha256=<hex>). Both comparisons are constant time.
+// verifyInbound checks the request against the source's verify secret. Scheme selection is
+// PRESENCE-BASED and identical to the Node receiver: when X-CNOS-Signature is present the
+// HMAC-SHA256 body signature decides (a wrong signature is a rejection even alongside a valid
+// bearer); when it is absent the Authorization: Bearer token decides. Both comparisons are
+// constant time. A source with no verify secret fails closed.
 func (variables *varRuntime) verifyInbound(source VarSourceDef, request *http.Request, body []byte) error {
 	if source.Verify == "" {
 		return fmt.Errorf("cnos: var source %q has no verify secret", source.Verify)
@@ -112,15 +146,8 @@ func (variables *varRuntime) verifyInbound(source VarSourceDef, request *http.Re
 		return fmt.Errorf("cnos: var receiver verify secret empty")
 	}
 
-	if auth := request.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		presented := strings.TrimPrefix(auth, "Bearer ")
-		if hmac.Equal([]byte(presented), []byte(token)) {
-			return nil
-		}
-		return fmt.Errorf("cnos: var receiver bearer mismatch")
-	}
-
-	if signature := request.Header.Get("X-CNOS-Signature"); signature != "" {
+	if _, present := request.Header["X-Cnos-Signature"]; present {
+		signature := request.Header.Get("X-CNOS-Signature")
 		mac := hmac.New(sha256.New, []byte(token))
 		mac.Write(body)
 		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
@@ -128,6 +155,14 @@ func (variables *varRuntime) verifyInbound(source VarSourceDef, request *http.Re
 			return nil
 		}
 		return fmt.Errorf("cnos: var receiver hmac mismatch")
+	}
+
+	if auth := request.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		presented := strings.TrimPrefix(auth, "Bearer ")
+		if hmac.Equal([]byte(presented), []byte(token)) {
+			return nil
+		}
+		return fmt.Errorf("cnos: var receiver bearer mismatch")
 	}
 
 	return fmt.Errorf("cnos: var receiver missing credentials")

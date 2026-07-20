@@ -57,9 +57,24 @@ segment with no dot (`agentic`); a **key** contains a dot (`agentic.lanes.vinci`
 **ETag / 304.** The `ETag` value is the content-addressed revision (`sha256:...`). A consumer
 sends `If-None-Match: <revision>`; an unchanged head returns `304` with no body.
 
-Authorization: every request runs through `options.authorize({ kind, scope, token })`
-(bearer token parsed from `Authorization: Bearer …`). Default is allow-all with a one-time
-stderr warning; `staticBearerAuthorize(tokens)` is provided for dev/CI. Denied → `403`.
+**Authorization.** Every request runs through `options.authorize({ kind, scope, token })`.
+`kind` is `'read'` (`GET {base}` — the data plane), `'audit'` (`GET {base}/admin/*` — the
+append-only log, including actors, reasons and past document bodies) or `'mutate'`
+(`POST {base}/admin/*`). `audit` is deliberately distinct from `read` so an authorizer can
+guard the audit trail without also closing the data plane.
+
+`scope` is populated for all three kinds: from the `key`/`group`/`scope` query parameter for
+reads/audits, and from the request body's `scope` field for mutations — the body is parsed
+BEFORE the hook runs so scoped (business/environment/component) authorization applies to
+writes too. `token` is parsed from `Authorization: Bearer …`. Default is allow-all with a
+one-time stderr warning; `staticBearerAuthorize(tokens)` is provided for dev/CI (it does not
+distinguish the three kinds). Denied → `403`.
+
+**Request limits.** Bodies are read before authorization, so they are bounded: over
+`options.maxBodyBytes` (default 1 MiB) a request is rejected `413 payload-too-large`. A
+malformed request — missing/wrongly typed body field, unparseable JSON — is `400 bad-request`
+(`store-unsupported` now means only what it says: the active store cannot serve an otherwise
+well-formed operation).
 
 ## Commit seam (`engine.onCommit`)
 

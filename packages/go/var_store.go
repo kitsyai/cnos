@@ -13,12 +13,15 @@ type varRecord struct {
 	base  Snapshot // Freshness/LeaseExpiresAt left zero; filled per read
 	ttl   time.Duration
 	lease time.Duration
+	// leaseSet records whether the group DECLARED a lease at all. An absent lease never
+	// expires; a declared `lease: 0` expires immediately (cross-SDK canonical).
+	leaseSet bool
 }
 
 // snapshot returns the record's snapshot with freshness computed against now.
 func (record *varRecord) snapshot(now time.Time) Snapshot {
 	result := record.base
-	result.Freshness, result.LeaseExpiresAt = computeFreshness(result.Source, result.ObservedAt, record.ttl, record.lease, now)
+	result.Freshness, result.LeaseExpiresAt = computeFreshness(result.Source, result.ObservedAt, record.ttl, record.lease, record.leaseSet, now)
 	return result
 }
 

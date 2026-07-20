@@ -106,7 +106,13 @@ export type VarSnapshotSource = 'runtime' | 'static' | 'default';
 /** Freshness of a var snapshot, driven by the group's ttl/lease window. */
 export type VarSnapshotFreshness = 'fresh' | 'stale' | 'expired';
 
-/** Retained last-known-good pointer when the current fetch state is degraded. */
+/**
+ * Pointer to the last revision that was successfully validated and served while fresh —
+ * i.e. the revision that was active immediately BEFORE the current one. It is stamped at
+ * commit time from the outgoing snapshot, never from the incoming one, so it always names a
+ * different (earlier) revision than the snapshot carrying it. Absent on the first commit for
+ * a scope. Identical semantics in the Go SDK (`LastKnownGood`).
+ */
 export interface VarSnapshotLastKnownGood {
   generation: number;
   revision: string;
@@ -148,6 +154,12 @@ export interface VarScope {
  * Batch pushes covering multiple keys commit atomically as one transaction.
  */
 export interface VarSnapshotBatch {
+  /**
+   * Monotonic per scope. The authority allocates an int64; the Node SDK carries it as a JS
+   * number and therefore only supports the exact range `[0, Number.MAX_SAFE_INTEGER]`.
+   * A batch whose generation falls outside that range is REJECTED at ingest
+   * (`var.generation-range`) rather than silently rounded — see `LiveVarStore.ingest`.
+   */
   generation: number;
   revision: string;
   schemaId?: string;
@@ -155,9 +167,33 @@ export interface VarSnapshotBatch {
   values: Record<string, unknown>;
 }
 
+/** Lifecycle state of a push subscription held by a transport provider. */
+export type VarSubscriptionState = 'active' | 'retrying' | 'failed';
+
+/**
+ * Observable state of a source's push subscription. `failed` is TERMINAL: the provider has
+ * stopped reconnecting (auth rejection, or the consecutive-failure cap was reached) and the
+ * scope will receive no further pushes until the process re-subscribes.
+ */
+export interface VarSubscriptionStatus {
+  state: VarSubscriptionState;
+  /** Message of the failure that produced the current state. */
+  lastError?: string;
+  /** Consecutive failed connection attempts behind the current state. */
+  attempts?: number;
+  /** ISO timestamp of the last state transition. */
+  at?: string;
+}
+
 /** Context handed to a provider factory — resolves `secret.*` auth refs to material. */
 export interface VarSourceProviderContext {
   resolveSecret(ref: string): Promise<string>;
+  /**
+   * Report a background subscription failure so it can surface in `varStatus()`. A provider
+   * must never throw out of a background stream; it reports here instead. `terminal: true`
+   * means the provider has given up reconnecting for those scopes.
+   */
+  onSubscriptionError?(error: Error, info: { terminal: boolean; scopes: string[] }): void;
 }
 
 /**
@@ -220,9 +256,15 @@ export interface VarScopeStatus {
   lastRefreshAt?: string;
   lastError: string | null;
   lastRejected?: { revision?: string; reason: string; at: string };
+  /** Push-subscription state for the scope's source, when a subscribing transport is in use. */
+  subscription?: VarSubscriptionStatus;
 }
 
-/** Full observability report keyed by scope. */
+/**
+ * Full observability report keyed by the FULL var key minus the `var.` prefix
+ * (e.g. `agentic.lanes.vinci`) — the same keying the Go SDK's `VarStatus()` uses and the
+ * same keying every `values` payload uses on the wire.
+ */
 export type VarStatusReport = Record<string, VarScopeStatus>;
 
 /** Watch callback fired only after a validated commit. */

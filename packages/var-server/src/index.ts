@@ -22,7 +22,13 @@ export {
   staticBearerAuthorize,
   resetAuthWarning,
   type VarAuthContext,
+  type VarAuthKind,
   type VarAuthorize,
 } from './authorize.js';
-export { varServer, type VarServerOptions, type VarServerHandler } from './httpServer.js';
+export {
+  varServer,
+  DEFAULT_MAX_VAR_REQUEST_BYTES,
+  type VarServerOptions,
+  type VarServerHandler,
+} from './httpServer.js';
 export { serveVarServer, type ServeVarServerOptions, type RunningVarServer } from './serve.js';

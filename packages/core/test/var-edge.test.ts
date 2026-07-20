@@ -189,7 +189,7 @@ describe('acceptance matrix (consumer plane)', () => {
     const expired = store.runtimeSnapshot('var.flags.mode');
     expect(expired?.value).toBe('live');
     expect(expired?.freshness).toBe('expired'); // #11 visible to the consumer
-    expect(store.status().flags?.freshness).toBe('expired'); // ...and in varStatus()
+    expect(store.status()['flags.mode']?.freshness).toBe('expired'); // ...and in varStatus()
   });
 });
 
@@ -250,7 +250,7 @@ describe('freshness and lease boundaries', () => {
     store.ingest('g', 'g', batch({ values: { 'g.k': 'v' } }));
     clock = 0; // wall clock jumped backwards after the observation
     expect(store.runtimeSnapshot('var.g.k')?.freshness).toBe('fresh');
-    expect(store.status().g?.snapshotAge).toBeLessThanOrEqual(0);
+    expect(store.status()['g.k']?.snapshotAge).toBeLessThanOrEqual(0);
   });
 
   it('PINNED: effectiveAt is carried verbatim and is NOT ordering-checked against the prior revision', () => {
@@ -276,16 +276,34 @@ describe('generation numerics', () => {
     });
     store.ingest('g', 'g', batch({ generation: Number.MAX_SAFE_INTEGER, values: { 'g.k': 'v' } }));
     expect(store.runtimeSnapshot('var.g.k')?.generation).toBe(Number.MAX_SAFE_INTEGER);
-    expect(store.status().g?.appliedGeneration).toBe(Number.MAX_SAFE_INTEGER);
+    expect(store.status()['g.k']?.appliedGeneration).toBe(Number.MAX_SAFE_INTEGER);
   });
 
-  it('DEFECT-PIN: int64 generations beyond MAX_SAFE_INTEGER lose precision at the Number() edge', () => {
-    // The rpc loader pins `longs: String` and the provider converts with `Number(...)`.
-    // Anything past 2^53-1 is silently rounded. Pinned so a future int64-safe carrier
-    // (bigint or string passthrough) has a failing expectation to flip.
+  it('W5d/D5: an int64 generation beyond MAX_SAFE_INTEGER is REJECTED, never silently rounded', () => {
+    // The rpc loader pins `longs: String`, so the wire value is exact; a JS number is not.
+    // Rather than committing a corrupted generation (which would break optimistic
+    // concurrency, replay and watcher dedupe), the store rejects the whole batch. The rpc
+    // provider raises the same failure earlier, while it still holds the exact decimal text.
     const wire = '9007199254740993'; // MAX_SAFE_INTEGER + 2
-    expect(Number(wire)).toBe(9_007_199_254_740_992);
-    expect(String(Number(wire))).not.toBe(wire);
+    expect(Number.isSafeInteger(Number(wire))).toBe(false);
+
+    const store = new LiveVarStore({
+      groups: { g: { source: 's', mode: 'prefetch' } },
+      schema: { 'var.g.k': { type: 'string' } },
+      documents: {},
+      warn: () => undefined,
+    });
+    store.ingest('g', 'g', batch({ generation: 1, revision: 'sha256:good', values: { 'g.k': 'good' } }));
+
+    const rejected = store.ingest('g', 'g', batch({ generation: Number(wire), revision: 'sha256:huge', values: { 'g.k': 'huge' } }));
+    expect(rejected.ok).toBe(false);
+    expect(rejected.issues?.[0]?.code).toBe('var.generation-range');
+    // Last-known-good is untouched.
+    expect(store.readRuntimeVar('var.g.k')).toBe('good');
+    expect(store.status()['g.k']?.appliedGeneration).toBe(1);
+
+    // Everything inside the safe range still commits.
+    expect(store.ingest('g', 'g', batch({ generation: Number.MAX_SAFE_INTEGER, revision: 'sha256:max', values: { 'g.k': 'max' } })).ok).toBe(true);
   });
 
   it('PINNED: out-of-order arrival is LAST-WRITE-WINS — an older generation overwrites a newer one', () => {
@@ -302,7 +320,7 @@ describe('generation numerics', () => {
 
     expect(store.readRuntimeVar('var.g.k')).toBe('two');
     expect(store.runtimeSnapshot('var.g.k')?.generation).toBe(2);
-    expect(store.status().g?.appliedGeneration).toBe(2);
+    expect(store.status()['g.k']?.appliedGeneration).toBe(2);
   });
 
   it('PINNED: a replayed IDENTICAL batch is idempotent and fires no watcher', () => {
@@ -508,10 +526,10 @@ describe('watcher lifecycle during a notify pass', () => {
     expect(seen).toEqual(['first']);
   });
 
-  it('DEFECT-PIN: a watcher REGISTERED inside a callback fires for the commit that preceded it', () => {
-    // Watchers live in a Set iterated with for-of during notify, so an entry added mid-pass is
-    // visited in that same pass and — having no `previous` entry — fires for a commit that
-    // happened before it subscribed. Arguably a spurious fire; pinned, see the W5b report.
+  it('W5d/D8: a watcher REGISTERED inside a callback does NOT fire for the preceding commit', () => {
+    // The registry is snapshotted before dispatch, so an entry added mid-pass is not visited
+    // by the pass already running — it never observed the commit that pass is reporting.
+    // (Previously the live Set was iterated and the late watcher fired spuriously.)
     const store = new LiveVarStore({
       groups: { g: { source: 's', mode: 'prefetch' } },
       schema: { 'var.g.k': { type: 'string' } },
@@ -526,7 +544,11 @@ describe('watcher lifecycle during a notify pass', () => {
     });
 
     store.ingest('g', 'g', batch({ values: { 'g.k': 'v' } }));
-    expect(seen).toEqual(['first', 'late']);
+    expect(seen).toEqual(['first']);
+
+    // It does fire for the NEXT commit, which it was registered in time to observe.
+    store.ingest('g', 'g', batch({ generation: 2, revision: 'sha256:next', values: { 'g.k': 'w' } }));
+    expect(seen).toEqual(['first', 'first', 'late']);
   });
 
   it('a prefix watcher fires per matching schema key and ignores non-matching ones', () => {
@@ -593,7 +615,7 @@ describe('VarManager.startSubscriptions', () => {
 
     pushed?.(batch({ generation: 7, revision: 'sha256:push', values: { 'g.k': 'pushed' } }));
     expect(manager.readRuntimeVar('var.g.k')).toBe('pushed');
-    expect(manager.status().g?.appliedGeneration).toBe(7);
+    expect(manager.status()['g.k']?.appliedGeneration).toBe(7);
 
     await manager.close();
     expect(stopped).toBe(1);
@@ -601,7 +623,7 @@ describe('VarManager.startSubscriptions', () => {
     // committed snapshot is retained (close does not clear already-committed scopes).
     pushed?.(batch({ generation: 8, revision: 'sha256:late', values: { 'g.k': 'late' } }));
     expect(manager.readRuntimeVar('var.g.k')).toBe('pushed');
-    expect(manager.status().g?.appliedGeneration).toBe(7);
+    expect(manager.status()['g.k']?.appliedGeneration).toBe(7);
   });
 
   it('skips ondemand groups and providers with no subscribe capability', () => {
@@ -662,7 +684,14 @@ describe('VarManager.startSubscriptions', () => {
     const manager = new VarManager(managerOptions(provider));
     manager.startSubscriptions();
     expect(() => pushed?.(batch({ values: {} }))).not.toThrow();
-    expect(manager.status()).toEqual({});
+    // No batch was committed: the only key in the report is the declared schema key, at the
+    // `none` tier, carrying the subscription state recorded by startSubscriptions().
+    expect(manager.status()['g.k']).toMatchObject({
+      appliedGeneration: 0,
+      source: 'none',
+      freshness: 'none',
+      subscription: { state: 'active' },
+    });
   });
 });
 
@@ -746,7 +775,7 @@ describe('VarManager ondemand + refresh', () => {
     const manager = new VarManager(managerOptions(provider, { warn }));
     await expect(manager.prefetch()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ECONNRESET'));
-    expect(manager.status().g?.lastError).toContain('ECONNRESET');
+    expect(manager.status()['g.k']?.lastError).toContain('ECONNRESET');
     await manager.close();
   });
 

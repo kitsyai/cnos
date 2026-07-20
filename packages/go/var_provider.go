@@ -3,6 +3,7 @@ package cnos
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -53,6 +54,11 @@ type VarBatchResult struct {
 // providers never read secret material any other way.
 type VarProviderContext struct {
 	ResolveSecret func(ref string) (string, error)
+	// OnSubscriptionError reports a background subscription failure so it can surface in
+	// VarStatus(). A provider must never panic out of a stream goroutine or fail silently;
+	// it reports here instead. terminal == true means the provider has given up
+	// reconnecting for those scopes.
+	OnSubscriptionError func(err error, terminal bool, scopes []string)
 }
 
 // VarSourceProvider is the transport contract, mirroring the TypeScript
@@ -128,7 +134,10 @@ func (variables *varRuntime) providerFor(sourceName string, source VarSourceDef)
 		)
 	}
 
-	provider, err := factory.Create(source, VarProviderContext{ResolveSecret: variables.resolveSecretRef})
+	provider, err := factory.Create(source, VarProviderContext{
+		ResolveSecret:       variables.resolveSecretRef,
+		OnSubscriptionError: variables.reportSubscriptionError(sourceName),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("cnos: create var source provider for %q: %w", sourceName, err)
 	}
@@ -143,6 +152,44 @@ func (variables *varRuntime) providerFor(sourceName string, source VarSourceDef)
 	variables.providers[sourceName] = provider
 	variables.mu.Unlock()
 	return provider, nil
+}
+
+// reportSubscriptionError builds the OnSubscriptionError callback handed to a provider.
+// Failures land in VarStatus() as the scope's subscription state and a stderr warning —
+// never as a panic and never silently.
+func (variables *varRuntime) reportSubscriptionError(sourceName string) func(error, bool, []string) {
+	return func(err error, terminal bool, scopes []string) {
+		if err == nil {
+			return
+		}
+
+		state := VarSubscriptionRetrying
+		detail := "dropped (retrying)"
+		if terminal {
+			state = VarSubscriptionFailed
+			detail = "FAILED (terminal, no further reconnects)"
+		}
+
+		if len(scopes) == 0 {
+			scopes = variables.groupsForSource(sourceName)
+		}
+		for _, scope := range scopes {
+			variables.recordSubscription(groupFromVarKey(scope), state, err.Error(), 0)
+		}
+
+		fmt.Fprintf(os.Stderr, "cnos [warn]: var subscription for source %q %s: %v\n", sourceName, detail, err)
+	}
+}
+
+// groupsForSource lists the groups served by a var source.
+func (variables *varRuntime) groupsForSource(sourceName string) []string {
+	result := []string{}
+	for group, def := range variables.groups {
+		if def.Source == sourceName {
+			result = append(result, group)
+		}
+	}
+	return result
 }
 
 // resolveSecretRef resolves a `secret.*` ref through the existing Go secrets machinery.
@@ -219,13 +266,29 @@ func (variables *varRuntime) startSubscriptions() {
 
 		stop, err := subscriber.Subscribe(variables.ctx, scopes, variables.ingestSubscribed)
 		if err != nil {
+			variables.reportSubscriptionError(sourceName)(err, true, scopeStrings(scopes))
 			continue
+		}
+
+		for _, scope := range scopes {
+			variables.recordSubscription(groupFromVarKey(scope.Scope()), VarSubscriptionActive, "", 0)
 		}
 
 		variables.mu.Lock()
 		variables.subscriptions = append(variables.subscriptions, stop)
 		variables.mu.Unlock()
 	}
+}
+
+// scopeStrings flattens scopes onto their wire strings.
+func scopeStrings(scopes []VarScope) []string {
+	result := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if value := scope.Scope(); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 // ingestSubscribed routes a pushed batch through ingest, deriving its group from the

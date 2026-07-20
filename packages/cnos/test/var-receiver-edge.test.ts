@@ -181,7 +181,7 @@ describe('receiver replay and ordering semantics', () => {
     expect(older.statusCode).toBe(204);
     expect(runtime.read('var.flags.label')).toBe('older');
     expect(runtime.varSnapshot?.('var.flags.label')?.generation).toBe(2);
-    expect(runtime.varStatus?.().flags?.appliedGeneration).toBe(2);
+    expect(runtime.varStatus?.()['flags.label']?.appliedGeneration).toBe(2);
 
     await runtime.close?.();
   });
@@ -328,9 +328,11 @@ describe('receiver adversarial input', () => {
     await runtime.close?.();
   });
 
-  it('SLOW-ISH: accepts a multi-megabyte push body without hanging', async () => {
+  it('SLOW-ISH: accepts a multi-megabyte push body without hanging when the cap is raised', async () => {
     const runtime = await runtimeFor();
-    const handler = varReceiver('svc');
+    // The 1 MiB default is deliberate (W5d/D3); a deployment that genuinely pushes large
+    // documents opts in explicitly.
+    const handler = varReceiver('svc', { maxBodyBytes: 8 * 1024 * 1024 });
     const blob = 'z'.repeat(3 * 1024 * 1024);
     const { raw, headers } = signed({ values: { 'flags.label': blob } });
 
@@ -342,16 +344,30 @@ describe('receiver adversarial input', () => {
     await runtime.close?.();
   }, 20_000);
 
-  it('DEFECT-PIN: the Node receiver enforces NO body-size limit (the Go receiver caps at 1 MiB)', async () => {
-    // `readRawBody` drains the whole stream unbounded. Go's `receiver` uses
-    // io.LimitReader(request.Body, 1<<20). The two SDKs disagree; an unbounded Node receiver
-    // is a memory-exhaustion vector on a public mount. Pinned, not fixed.
+  it('W5d/D3: the Node receiver caps the body at 1 MiB by default and 413s past it', async () => {
+    // `readRawBody` used to drain the whole stream unbounded — a memory-exhaustion vector on
+    // a public mount. It now stops at the cap (default DEFAULT_MAX_VAR_BODY_BYTES = 1 MiB)
+    // and reports 413 payload-too-large, the same status the Go receiver now returns.
     const runtime = await runtimeFor();
     const handler = varReceiver('svc');
-    const oversized = 'q'.repeat(2 * 1024 * 1024); // > 1 MiB, which Go would truncate + 400
+    const oversized = 'q'.repeat(2 * 1024 * 1024); // > 1 MiB
     const { raw, headers } = signed({ values: { 'flags.label': oversized } });
     const res = await invoke(handler, { method: 'POST', url: '/cnos/vars/push/flags', headers, raw });
-    expect(res.statusCode).toBe(204);
+    expect(res.statusCode).toBe(413);
+    expect(JSON.parse(res.body).code).toBe('payload-too-large');
+    // Nothing was committed.
+    expect(runtime.read('var.flags.label')).toBeUndefined();
+
+    // A configurable cap is honored in both directions.
+    const tiny = varReceiver('svc', { maxBodyBytes: 8 });
+    const small = signed({ values: { 'flags.label': 'still-too-big-for-8-bytes' } });
+    const rejected = await invoke(tiny, {
+      method: 'POST',
+      url: '/cnos/vars/push/flags',
+      headers: small.headers,
+      raw: small.raw,
+    });
+    expect(rejected.statusCode).toBe(413);
     await runtime.close?.();
   }, 20_000);
 
@@ -429,16 +445,30 @@ describe('receiver signature verification', () => {
     await runtime.close?.();
   });
 
-  it('PINNED: when the signature header IS present the bearer fallback is NOT consulted', async () => {
+  it('W5d/D9: signature PRESENCE decides the scheme — the bearer is not a fallback for a bad signature', async () => {
+    // Canonical in both SDKs: header present -> the signature decides (a wrong signature is a
+    // 401 even alongside a valid bearer, a valid signature wins alongside a wrong bearer);
+    // header absent -> the bearer decides. One presence-based rule, no either-or acceptance.
     const runtime = await runtimeFor();
     const handler = varReceiver('svc');
-    const res = await invoke(handler, {
+    const body = { values: { 'flags.enabled': true } };
+    const { raw, headers } = signed(body);
+
+    const wrongSignature = await invoke(handler, {
       method: 'POST',
       url: '/cnos/vars/push/flags',
       headers: { 'x-cnos-signature': 'sha256=deadbeef', authorization: `Bearer ${SECRET}` },
-      raw: JSON.stringify({ values: { 'flags.enabled': true } }),
+      raw,
     });
-    expect(res.statusCode).toBe(401);
+    expect(wrongSignature.statusCode).toBe(401);
+
+    const validSignature = await invoke(handler, {
+      method: 'POST',
+      url: '/cnos/vars/push/flags',
+      headers: { ...headers, authorization: 'Bearer wrong-token' },
+      raw,
+    });
+    expect(validSignature.statusCode).toBe(204);
     await runtime.close?.();
   });
 
@@ -456,20 +486,41 @@ describe('receiver signature verification', () => {
     await runtime.close?.();
   });
 
-  it('DEFECT-PIN: a source with NO `verify` ref accepts unauthenticated pushes', async () => {
-    // `varReceiver('unverified')` skips verification entirely when the manifest declares no
-    // `verify` secret. Manifest validation does not require one, so a receiver can be mounted
-    // wide open by omission. Go's receiver fails closed in the same case. Pinned, not fixed.
+  it('W5d/D4: a source with NO `verify` ref FAILS CLOSED (401), it does not accept the push', async () => {
+    // A receiver is an inbound write path, so an undeclared `verify` secret is a
+    // misconfiguration — never an invitation to accept unauthenticated pushes. Matches the
+    // Go receiver, which 401s the same case. A bearer/signature cannot rescue it either:
+    // there is no secret to compare against.
     const runtime = await runtimeFor();
-    const handler = varReceiver('unverified');
+    const handler = varReceiver('unverified', { onError: () => undefined });
+
+    for (const headers of [{}, { authorization: `Bearer ${SECRET}` }, { 'x-cnos-signature': 'sha256=deadbeef' }]) {
+      const res = await invoke(handler, {
+        method: 'POST',
+        url: '/cnos/vars/push/flags',
+        headers,
+        body: { values: { 'flags.enabled': true } },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(JSON.parse(res.body).code).toBe('unauthorized');
+    }
+
+    // The default (false) survives: nothing was committed.
+    expect(runtime.read('var.flags.enabled')).toBe(false);
+    await runtime.close?.();
+  });
+
+  it('W5d/D4: a receiver mounted for an UNDECLARED source is 404, not an open door', async () => {
+    const runtime = await runtimeFor();
+    const handler = varReceiver('does-not-exist');
     const res = await invoke(handler, {
       method: 'POST',
       url: '/cnos/vars/push/flags',
-      headers: {},
+      headers: { authorization: `Bearer ${SECRET}` },
       body: { values: { 'flags.enabled': true } },
     });
-    expect(res.statusCode).toBe(204);
-    expect(runtime.read('var.flags.enabled')).toBe(true);
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe('unknown-source');
     await runtime.close?.();
   });
 

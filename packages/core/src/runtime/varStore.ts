@@ -6,7 +6,10 @@ import type {
   VarScopeStatus,
   VarSnapshotBatch,
   VarSnapshotFreshness,
+  VarSnapshotLastKnownGood,
   VarStatusReport,
+  VarSubscriptionState,
+  VarSubscriptionStatus,
   VarWatchCallback,
 } from '../types/var.js';
 import type { ValidationIssue } from '../types/plugin.js';
@@ -21,6 +24,8 @@ interface StoredScope {
   observedAt: string;
   observedAtMs: number;
   effectiveAt: string;
+  /** The revision this commit displaced — the last one validated and served while fresh. */
+  lastKnownGood?: VarSnapshotLastKnownGood;
 }
 
 interface ScopeMeta {
@@ -30,6 +35,7 @@ interface ScopeMeta {
   lastRejected?: { revision?: string; reason: string; at: string };
   desiredGeneration?: number;
   warnedRejections: Set<string>;
+  subscription?: VarSubscriptionStatus;
 }
 
 interface Watcher {
@@ -62,6 +68,31 @@ export interface IngestResult {
  */
 function extractForScope(_scope: string, path: string, values: Record<string, unknown>): unknown {
   return values[path];
+}
+
+/**
+ * The authority allocates `generation` as an int64. JavaScript numbers are exact only up to
+ * `Number.MAX_SAFE_INTEGER`, so anything larger has ALREADY lost precision by the time it
+ * reaches here (a rounded int64 is never a safe integer, which is exactly what this detects).
+ * Reject the batch instead of committing a corrupted generation — a silently wrong generation
+ * breaks optimistic concurrency, replay, and watcher dedupe. Go carries the value as a native
+ * int64 and needs no equivalent guard.
+ */
+function validateGeneration(scope: string, generation: unknown): ValidationIssue[] {
+  if (typeof generation === 'number' && Number.isSafeInteger(generation) && generation >= 0) {
+    return [];
+  }
+
+  return [
+    {
+      code: 'var.generation-range',
+      key: scope,
+      message:
+        `Var scope "${scope}" received generation ${String(generation)}, which is outside the ` +
+        `exactly representable range 0..${Number.MAX_SAFE_INTEGER} for this SDK. ` +
+        'Configure the var authority to allocate generations below 2^53.',
+    },
+  ];
 }
 
 function validateScalar(key: string, rule: ConfigSpecRule, value: unknown): ValidationIssue[] {
@@ -194,7 +225,8 @@ export class LiveVarStore {
     }
 
     const meta = this.metaFor(scope, group);
-    const issues = this.validateBatch(scope, group, batch.values ?? {});
+    const issues = validateGeneration(scope, batch.generation);
+    issues.push(...this.validateBatch(scope, group, batch.values ?? {}));
 
     if (issues.length > 0) {
       const reason = issues.map((issue) => `${issue.code}: ${issue.message}`).join('; ');
@@ -212,6 +244,13 @@ export class LiveVarStore {
 
     const previousSnapshots = this.snapshotWatchers();
     const nowMs = this.clockMs();
+    // `lastKnownGood` names the revision this commit DISPLACES — the last one that was
+    // validated and served while fresh. Cross-SDK canonical (mirrors the Go SDK).
+    const displaced = this.scopes.get(scope);
+    const lastKnownGood: VarSnapshotLastKnownGood | undefined = displaced
+      ? { generation: displaced.batch.generation, revision: displaced.batch.revision }
+      : undefined;
+
     this.scopes.set(scope, {
       scope,
       group,
@@ -219,6 +258,7 @@ export class LiveVarStore {
       observedAt: this.now(),
       observedAtMs: nowMs,
       effectiveAt: batch.effectiveAt,
+      ...(lastKnownGood ? { lastKnownGood } : {}),
     });
     meta.desiredGeneration = batch.generation;
 
@@ -296,10 +336,13 @@ export class LiveVarStore {
       source: 'runtime',
       freshness,
       ...(leaseExpiresAt !== undefined ? { leaseExpiresAt } : {}),
-      ...(freshness !== 'fresh'
-        ? { lastKnownGood: { generation: stored.batch.generation, revision: stored.batch.revision } }
-        : {}),
+      ...(stored.lastKnownGood ? { lastKnownGood: stored.lastKnownGood } : {}),
     };
+  }
+
+  /** Revision currently applied for `scope`, used as the pull `If-None-Match` value. */
+  appliedRevision(scope: string): string | undefined {
+    return this.scopes.get(scope)?.batch.revision;
   }
 
   hasRuntimeScope(path: string): boolean {
@@ -321,14 +364,49 @@ export class LiveVarStore {
     }
   }
 
+  /** Record the transport-reported state of a scope's push subscription. */
+  recordSubscription(scope: string, group: string, state: VarSubscriptionState, error?: unknown, attempts?: number): void {
+    const meta = this.metaFor(scope, group);
+    const message = error === undefined ? undefined : error instanceof Error ? error.message : String(error);
+
+    meta.subscription = {
+      state,
+      ...(message !== undefined ? { lastError: message } : {}),
+      ...(attempts !== undefined ? { attempts } : {}),
+      at: this.now(),
+    };
+
+    if (message !== undefined) {
+      meta.lastError = message;
+    }
+  }
+
+  /**
+   * Observability report keyed by the FULL var key minus `var.` — the same keying the Go SDK's
+   * `VarStatus()` and every wire `values` payload use. Keys come from the declared schema plus
+   * whatever a committed batch actually carried; per-scope metadata (errors, rejections,
+   * subscription state) is inherited by every key the scope serves.
+   */
   status(): VarStatusReport {
     const report: VarStatusReport = {};
-    const scopeKeys = new Set<string>([...this.scopes.keys(), ...this.meta.keys()]);
+    const paths = new Set<string>();
 
-    for (const scope of scopeKeys) {
-      const stored = this.scopes.get(scope);
-      const meta = this.meta.get(scope);
-      const group = stored?.group ?? meta?.group ?? scope.split('.')[0] ?? scope;
+    for (const schemaKey of Object.keys(this.schema)) {
+      if (schemaKey.startsWith(VAR_NAMESPACE_PREFIX)) {
+        paths.add(schemaKey.slice(VAR_NAMESPACE_PREFIX.length));
+      }
+    }
+
+    for (const stored of this.scopes.values()) {
+      for (const path of Object.keys(stored.batch.values ?? {})) {
+        paths.add(path);
+      }
+    }
+
+    for (const path of paths) {
+      const stored = this.findScope(path);
+      const group = stored?.group ?? path.split('.')[0] ?? path;
+      const meta = this.meta.get(stored?.scope ?? path) ?? this.meta.get(group);
 
       let freshness: VarScopeStatus['freshness'] = 'none';
       let snapshotAge: number | undefined;
@@ -338,7 +416,7 @@ export class LiveVarStore {
         snapshotAge = Math.floor((this.clockMs() - stored.observedAtMs) / 1000);
       }
 
-      report[scope] = {
+      report[path] = {
         ...(meta?.desiredGeneration !== undefined ? { desiredGeneration: meta.desiredGeneration } : {}),
         appliedGeneration: stored?.batch.generation ?? 0,
         ...(stored?.batch.revision !== undefined ? { revision: stored.batch.revision } : {}),
@@ -348,6 +426,7 @@ export class LiveVarStore {
         ...(meta?.lastRefreshAt !== undefined ? { lastRefreshAt: meta.lastRefreshAt } : {}),
         lastError: meta?.lastError ?? null,
         ...(meta?.lastRejected !== undefined ? { lastRejected: meta.lastRejected } : {}),
+        ...(meta?.subscription !== undefined ? { subscription: meta.subscription } : {}),
       };
     }
 
@@ -400,7 +479,15 @@ export class LiveVarStore {
   }
 
   private fireWatchers(previous: Map<string, ResolvedVarSnapshot | undefined>): void {
-    for (const watcher of this.watchers) {
+    // Snapshot the registry BEFORE dispatching: a watcher registered from inside a callback
+    // must not be visited by the pass that is already running — it never observed the commit
+    // that pass is reporting. (Unsubscribing mid-pass still suppresses a pending fire, which
+    // is checked against the live set below.) Mirrors the Go SDK's `notify`.
+    for (const watcher of Array.from(this.watchers)) {
+      if (!this.watchers.has(watcher)) {
+        continue;
+      }
+
       const keys = watcher.prefix
         ? Object.keys(this.schema).filter((schemaKey) => schemaKey.startsWith(watcher.prefix as string))
         : [watcher.key];

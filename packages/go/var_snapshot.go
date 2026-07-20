@@ -69,24 +69,29 @@ func (snapshot Snapshot) Decode(target any) error {
 // expired after — no stale tier). When only ttl is set, ttl is the fresh window
 // (fresh until ttl, stale after — no expired tier). Static/default tiers never
 // expire.
-func computeFreshness(source VarSource, observedAt time.Time, ttl, lease time.Duration, now time.Time) (Freshness, *time.Time) {
+//
+// leaseSet distinguishes an ABSENT lease from an explicitly declared ZERO one, exactly
+// as the Node SDK's `leaseMs !== undefined` check does: absent means "no lease, never
+// expires"; a declared `lease: 0` means "expires immediately". Callers derive it from
+// the presence of the manifest duration string, never from the parsed duration.
+func computeFreshness(source VarSource, observedAt time.Time, ttl, lease time.Duration, leaseSet bool, now time.Time) (Freshness, *time.Time) {
 	if source != VarSourceRuntime {
 		return FreshnessFresh, nil
 	}
 	age := now.Sub(observedAt)
 
 	var leaseExpiresAt *time.Time
-	if lease > 0 {
+	if leaseSet {
 		expiry := observedAt.Add(lease)
 		leaseExpiresAt = &expiry
 	}
 
-	if lease > 0 && age > lease {
+	if leaseSet && age > lease {
 		return FreshnessExpired, leaseExpiresAt
 	}
 
 	freshWindow := ttl
-	if freshWindow == 0 {
+	if freshWindow == 0 && leaseSet {
 		freshWindow = lease
 	}
 	if freshWindow > 0 && age > freshWindow {
