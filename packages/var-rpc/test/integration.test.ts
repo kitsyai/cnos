@@ -174,10 +174,17 @@ describe('var rpc transport', () => {
     server = await serveVarRpc(store, { engine, documents, port });
     servers.push(server);
 
-    await delay(1200); // give the client time to reconnect (subscribe backoff)
-    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'after-restart' } }, 0);
+    // Deterministic (W5b): rather than sleeping a fixed backoff window and hoping the client
+    // reconnected, keep committing new generations and poll on the delivery condition. The
+    // loop exits the instant the reconnected stream produces a batch.
+    let generation = 0;
+    const deadline = Date.now() + 15_000;
+    while (received.length === 0 && Date.now() < deadline) {
+      await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'after-restart' } }, generation);
+      generation += 1;
+      await until(() => received.length > 0, 250);
+    }
 
-    await until(() => received.length > 0, 6000);
     expect(received.length).toBeGreaterThan(0);
     expect(received[received.length - 1]?.values).toEqual({
       'agentic.lanes.vinci': { enabled: true, model_target_ref: 'after-restart' },

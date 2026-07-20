@@ -1,0 +1,376 @@
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  VarManager,
+  type DocumentSchemaDefinition,
+  type NormalizedVarSourceDefinition,
+  type ProjectedVarSourceDefinition,
+  type VarSnapshotBatch,
+  type VarSourceProvider,
+} from '@kitsy/cnos-core';
+import { createVarEngine, memoryStore, type VarAuthContext, type VarEngine, type VarStore } from '@kitsy/cnos-var-server';
+import { createInMemoryVarSource } from '@kitsy/cnos-var-testkit';
+
+import { createRpcVarProvider, serveVarRpc, VAR_PROTO_LOADER_OPTIONS, type RunningVarRpcServer } from '../src/index.js';
+
+/**
+ * W5b test hardening for the rpc transport and the manager/subscription seam:
+ * the `scopeMatches` prefix rule W5a flagged as untested, int64 boundary behavior,
+ * Subscribe auth-failure/reconnect policy, and a transport-free VarManager.startSubscriptions
+ * test driven by var-testkit's in-memory source.
+ */
+
+const AGENTIC_SCHEMA: DocumentSchemaDefinition = {
+  fields: {
+    enabled: { type: 'boolean', required: true },
+    model_target_ref: { type: 'string', required: true },
+  },
+  additionalProperties: false,
+};
+
+const documents = { 'agentic-lanes/v1': AGENTIC_SCHEMA };
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Poll a condition instead of sleeping a fixed interval — keeps timing-sensitive tests deterministic. */
+async function until(predicate: () => boolean, timeoutMs = 8000, stepMs = 20): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await delay(stepMs);
+  }
+  return predicate();
+}
+
+const servers: RunningVarRpcServer[] = [];
+const providers: VarSourceProvider[] = [];
+
+function track<T extends VarSourceProvider>(provider: T): T {
+  providers.push(provider);
+  return provider;
+}
+
+function providerFor(target: string, opts: { bearerRef?: string; token?: string } = {}): VarSourceProvider {
+  const def: ProjectedVarSourceDefinition = {
+    transport: 'rpc',
+    url: target,
+    auth: opts.bearerRef ? { bearer: opts.bearerRef } : {},
+  };
+  return createRpcVarProvider(def, { resolveSecret: async () => opts.token ?? '' });
+}
+
+async function activate(engine: VarEngine, scope: string, document: unknown, expectedGeneration: number): Promise<void> {
+  const created = await engine.createRevision({
+    scope,
+    document,
+    ...(scope.includes('.') ? { schemaId: 'agentic-lanes/v1' } : {}),
+  });
+  await engine.activate({ scope, revision: created.revision, expectedGeneration });
+}
+
+async function harness(
+  options: { authorize?: (ctx: VarAuthContext) => boolean } = {},
+): Promise<{ store: VarStore; engine: VarEngine; server: RunningVarRpcServer }> {
+  const store = memoryStore();
+  const engine = createVarEngine(store, { documents });
+  const server = await serveVarRpc(store, {
+    engine,
+    documents,
+    ...(options.authorize ? { authorize: options.authorize } : {}),
+  });
+  servers.push(server);
+  return { store, engine, server };
+}
+
+afterEach(async () => {
+  await Promise.all(providers.splice(0).map((provider) => provider.close().catch(() => undefined)));
+  await Promise.all(servers.splice(0).map((server) => server.close().catch(() => undefined)));
+});
+
+// ---------------------------------------------------------------------------
+// scopeMatches — the prefix rule W5a flagged as untested
+// ---------------------------------------------------------------------------
+
+describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
+  it('a GROUP subscription receives a KEY-scoped activation beneath it', async () => {
+    const { engine, server } = await harness();
+    const provider = track(providerFor(server.target));
+    const received: VarSnapshotBatch[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+
+    await delay(100); // let the stream establish before the first commit
+    await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'key-scoped' }, 0);
+
+    expect(await until(() => received.length > 0)).toBe(true);
+    // The wire batch for a key scope wraps the document under the full stripped key.
+    expect(received[received.length - 1]?.values).toEqual({
+      'agentic.lanes.vinci': { enabled: true, model_target_ref: 'key-scoped' },
+    });
+    stop?.();
+  }, 20_000);
+
+  it('a GROUP subscription receives its own exact-scope activation', async () => {
+    const { engine, server } = await harness();
+    const provider = track(providerFor(server.target));
+    const received: VarSnapshotBatch[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+
+    await delay(100);
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: false, model_target_ref: 'g' } }, 0);
+
+    expect(await until(() => received.length > 0)).toBe(true);
+    expect(received[0]?.values).toHaveProperty('agentic.lanes.vinci');
+    stop?.();
+  }, 20_000);
+
+  it('does NOT match a sibling scope that merely shares a string prefix without a dot boundary', async () => {
+    const { engine, server } = await harness();
+    const provider = track(providerFor(server.target));
+    const received: VarSnapshotBatch[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+
+    await delay(100);
+    // `agentics` starts with `agentic` but is a different group — the rule requires a `.` boundary.
+    await activate(engine, 'agentics', { 'agentics.k': 1 }, 0);
+    await delay(300);
+    expect(received).toHaveLength(0);
+
+    // A real match still arrives, proving the stream was live the whole time.
+    await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'r' }, 0);
+    expect(await until(() => received.length > 0)).toBe(true);
+    stop?.();
+  }, 20_000);
+
+  it('a KEY subscription does NOT receive its parent group activation', async () => {
+    const { engine, server } = await harness();
+    const provider = track(providerFor(server.target));
+    const received: VarSnapshotBatch[] = [];
+    const stop = provider.subscribe?.([{ key: 'agentic.lanes.vinci' }], (batch) => received.push(batch));
+
+    await delay(100);
+    // PINNED: matching is subscribed-is-a-prefix-of-committed, so a group commit does not
+    // reach a key subscriber. Consumers subscribe by group; key subscriptions are narrow.
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'r' } }, 0);
+    await delay(300);
+    expect(received).toHaveLength(0);
+
+    await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'r' }, 0);
+    expect(await until(() => received.length > 0)).toBe(true);
+    stop?.();
+  }, 20_000);
+
+  it('PINNED: a deactivation pushes a no_head message that the provider drops (never ingested)', async () => {
+    const { engine, server } = await harness();
+    const provider = track(providerFor(server.target));
+    const received: VarSnapshotBatch[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+
+    await delay(100);
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'r' } }, 0);
+    expect(await until(() => received.length === 1)).toBe(true);
+
+    await engine.deactivate({ scope: 'agentic', expectedGeneration: 1 });
+    await delay(400);
+    // The no_head push is filtered client-side; the SDK converges on the next pull instead.
+    expect(received).toHaveLength(1);
+    stop?.();
+  }, 20_000);
+});
+
+// ---------------------------------------------------------------------------
+// int64 / numeric boundary
+// ---------------------------------------------------------------------------
+
+describe('int64 generation boundary at the provider edge', () => {
+  it('pins longs: String on the wire with a Number() conversion at the provider edge', () => {
+    expect(VAR_PROTO_LOADER_OPTIONS.longs).toBe(String);
+    expect(VAR_PROTO_LOADER_OPTIONS.keepCase).toBe(true);
+  });
+
+  it('DEFECT-PIN: generations past Number.MAX_SAFE_INTEGER round when converted to a JS number', () => {
+    // The wire carries `generation` as a decimal STRING (`longs: String`), which is exact.
+    // `toBatch` then does `Number(msg.generation)`, which is only exact to 2^53-1. Anything
+    // an authority allocates beyond that is silently corrupted. Pinned, not fixed —
+    // see the W5b report (fix requires a bigint/string carrier in VarSnapshotBatch).
+    const exactOnWire = '9007199254740993';
+    // The string is exact; the JS number is not — String(Number(x)) !== x proves the loss.
+    expect(String(Number(exactOnWire))).not.toBe(exactOnWire);
+    expect(Number(exactOnWire)).toBe(9_007_199_254_740_992);
+
+    // Everything at or below the safe boundary round-trips exactly.
+    for (const value of ['0', '1', '4294967296', '9007199254740991']) {
+      expect(String(Number(value))).toBe(value);
+    }
+  });
+
+  it('carries a real MAX_SAFE_INTEGER-scale generation through Pull intact', async () => {
+    const { store, server } = await harness();
+    // Fabricate a head at the safe boundary directly in the store's log.
+    await store.append({ kind: 'revision-created', scope: 'big', revision: 'sha256:big', document: { 'big.k': 1 }, timestamp: 't' });
+    await store.append({
+      kind: 'activated',
+      scope: 'big',
+      revision: 'sha256:big',
+      generation: Number.MAX_SAFE_INTEGER,
+      timestamp: 't',
+    });
+
+    const provider = track(providerFor(server.target));
+    const batch = await provider.pull({ group: 'big' });
+    expect(batch.generation).toBe(Number.MAX_SAFE_INTEGER);
+  }, 20_000);
+});
+
+// ---------------------------------------------------------------------------
+// Subscribe auth failure / reconnect policy
+// ---------------------------------------------------------------------------
+
+describe('Subscribe failure policy', () => {
+  it('DEFECT-PIN: an auth-rejected Subscribe dies SILENTLY — no retry, no observable error', async () => {
+    // W5a flagged "unbounded reconnect loop with no give-up policy". The reality is worse in
+    // the other direction: an UNAUTHENTICATED Subscribe is never retried at all. The server
+    // calls `call.destroy(...)`, the client's reconnect handlers do not fire, and the SDK
+    // surfaces nothing — `subscribe()` returns a stop function for a stream that is already
+    // dead. Because `startPollers()` only covers http sources, an rpc source with a bad token
+    // silently receives no updates for the process lifetime. Pinned — see the W5b report.
+    let attempts = 0;
+    const { server } = await harness({
+      authorize: (ctx) => {
+        if (ctx.kind === 'read') {
+          attempts += 1;
+        }
+        return false;
+      },
+    });
+
+    const provider = track(providerFor(server.target, { bearerRef: 'secret.ops.token', token: 'wrong-token' }));
+    const received: VarSnapshotBatch[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+
+    // The first attempt lands...
+    expect(await until(() => attempts >= 1, 5000)).toBe(true);
+    // ...and nothing follows it. Backoff attempt 0 is 500-1000ms, so 4s would have shown
+    // several retries if any reconnect policy applied to auth failures.
+    await delay(4000);
+    expect(attempts).toBe(1);
+    expect(received).toHaveLength(0);
+
+    expect(() => stop?.()).not.toThrow();
+  }, 30_000);
+
+  it('a Pull auth failure DOES surface as a rejected promise (unlike Subscribe)', async () => {
+    const { server } = await harness({ authorize: () => false });
+    const provider = track(providerFor(server.target, { bearerRef: 'secret.ops.token', token: 'wrong-token' }));
+    await expect(provider.pull({ group: 'agentic' })).rejects.toThrow(/authoriz/i);
+  }, 20_000);
+
+  it('an unreachable target does not throw synchronously and stops cleanly on unsubscribe', async () => {
+    const provider = track(providerFor('127.0.0.1:1')); // nothing listening
+    const received: VarSnapshotBatch[] = [];
+    let stop: (() => void) | undefined;
+
+    expect(() => {
+      stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    }).not.toThrow();
+
+    await delay(200);
+    expect(received).toHaveLength(0);
+    expect(() => stop?.()).not.toThrow();
+    await expect(provider.close()).resolves.toBeUndefined();
+  }, 20_000);
+
+  it('a Pull against an unreachable target rejects rather than hanging', async () => {
+    const provider = track(providerFor('127.0.0.1:1'));
+    await expect(provider.pull({ group: 'agentic' })).rejects.toBeInstanceOf(Error);
+  }, 20_000);
+
+});
+
+// ---------------------------------------------------------------------------
+// VarManager.startSubscriptions against var-testkit's in-memory source
+// ---------------------------------------------------------------------------
+
+describe('VarManager.startSubscriptions over the testkit in-memory source', () => {
+  const source: NormalizedVarSourceDefinition = { transport: 'rpc', url: 'unused', auth: {} };
+
+  function manager(provider: VarSourceProvider): VarManager {
+    return new VarManager({
+      varSources: { svc: source },
+      vars: { agentic: { source: 'svc', mode: 'prefetch' } },
+      documents,
+      schema: { 'var.agentic.lanes.vinci': { document: 'agentic-lanes/v1' } },
+      providerModules: [{ transport: 'rpc', create: () => provider }],
+      resolveSecret: async () => 'token',
+      warn: () => undefined,
+    });
+  }
+
+  it('ingests an emitted activation end-to-end (activate -> emit -> ingest -> read -> watch)', async () => {
+    const inMemory = createInMemoryVarSource({ documents });
+    const varManager = manager(inMemory.provider);
+    varManager.startSubscriptions();
+
+    const seen: unknown[] = [];
+    varManager.watch('var.agentic.lanes.vinci', (next) => seen.push(next.value));
+
+    const document = { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'from-testkit' } };
+    const created = await inMemory.engine.createRevision({ scope: 'agentic', document });
+    await inMemory.engine.activate({ scope: 'agentic', revision: created.revision, expectedGeneration: 0 });
+    inMemory.emit('agentic');
+
+    expect(varManager.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({
+      enabled: true,
+      model_target_ref: 'from-testkit',
+    });
+    expect(seen).toEqual([{ enabled: true, model_target_ref: 'from-testkit' }]);
+    expect(varManager.status().agentic?.appliedGeneration).toBe(1);
+
+    await varManager.close();
+  });
+
+  it('rejects an emitted batch that violates the bound document schema and keeps LKG', async () => {
+    const inMemory = createInMemoryVarSource({ documents });
+    const varManager = manager(inMemory.provider);
+    varManager.startSubscriptions();
+
+    const good = await inMemory.engine.createRevision({
+      scope: 'agentic',
+      document: { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'good' } },
+    });
+    await inMemory.engine.activate({ scope: 'agentic', revision: good.revision, expectedGeneration: 0 });
+    inMemory.emit('agentic');
+    expect(varManager.readRuntimeVar('var.agentic.lanes.vinci')).toMatchObject({ model_target_ref: 'good' });
+
+    // The server-side engine validates on create; bypass it by emitting a hand-built batch so
+    // the CONSUMER-side validate-before-swap is what is under test.
+    const rejected = varManager.ingest('svc', 'agentic', {
+      generation: 2,
+      revision: 'sha256:bad',
+      effectiveAt: 't',
+      values: { 'agentic.lanes.vinci': { enabled: 'not-a-boolean', model_target_ref: 'bad' } },
+    });
+    expect(rejected.ok).toBe(false);
+    expect(varManager.readRuntimeVar('var.agentic.lanes.vinci')).toMatchObject({ model_target_ref: 'good' });
+    expect(varManager.status().agentic?.lastRejected?.revision).toBe('sha256:bad');
+
+    await varManager.close();
+  });
+
+  it('unsubscribes on close so later emits are ignored', async () => {
+    const inMemory = createInMemoryVarSource({ documents });
+    const varManager = manager(inMemory.provider);
+    varManager.startSubscriptions();
+    await varManager.close();
+
+    const created = await inMemory.engine.createRevision({
+      scope: 'agentic',
+      document: { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'after-close' } },
+    });
+    await inMemory.engine.activate({ scope: 'agentic', revision: created.revision, expectedGeneration: 0 });
+    expect(() => inMemory.emit('agentic')).not.toThrow();
+    expect(varManager.readRuntimeVar('var.agentic.lanes.vinci')).toBeUndefined();
+  });
+
+  it('emit() on a scope with no head is a no-op', () => {
+    const inMemory = createInMemoryVarSource({ documents });
+    expect(() => inMemory.emit('nothing-here')).not.toThrow();
+  });
+});
