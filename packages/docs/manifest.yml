@@ -59,6 +59,10 @@ sidebar:
         label: Secrets and Vaults
       - path: guides/vault-providers
         label: Vault Providers
+      - path: guides/runtime-variables
+        label: Runtime Variables (var.*)
+      - path: guides/var-server
+        label: Running the Var Authority
       - path: guides/schema-overrides
         label: Schema-level Overrides
       - path: guides/patch-files

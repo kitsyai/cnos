@@ -1,0 +1,349 @@
+---
+title: Runtime Variables (var.*)
+description: Mutable, non-secret runtime configuration owned by a remote authority — the third value tier alongside value.* and secret.*.
+---
+
+# Runtime Variables (`var.*`)
+
+CNOS has three value tiers:
+
+```text
+value.*  = deployment/bootstrap configuration (static, safe path)
+secret.* = secret material / references (vault-backed)
+var.*    = mutable, non-secret runtime configuration owned by a remote authority
+```
+
+`var.*` covers policy that changes **while the process runs** and is owned by a remote
+control plane — allow/block lists, entitlements, kill switches, execution-lane policies. It
+is not a place to put anything secret: a `var.*` document may carry an opaque `secret.*`
+**reference**, never secret material.
+
+If you just need static per-environment config, use `value.*` and [profiles](/guides/profiles).
+If you need runtime-mutable policy pushed by an authority without a redeploy, that's `var.*`.
+
+## Keys, groups, and sources
+
+Every var key looks like `var.<group>.<rest>`. The manifest maps each **group** to a
+declared **source** — application code never names a remote directly, so repointing a group
+to a different backend is a manifest-only change:
+
+```yaml
+varSources:
+  ops:
+    transport: http
+    url: https://cnos-vars.internal
+    auth:
+      bearer: secret.ops.token   # secret.* ref only, never inline material
+    verify: secret.ops.verify    # secret.* ref used to verify inbound pushes (HMAC/bearer)
+
+vars:
+  agentic:
+    source: ops
+    mode: prefetch     # resolves before ready()
+    lease: 10m          # fail-closed freshness window
+  user:
+    source: ops
+    mode: ondemand      # never blocks ready(); fetched lazily on first read
+    ttl: 60s             # staleness window
+```
+
+`transport` is one of `rpc`, `http`, `ws`, `sse` (priority in that order as modules ship).
+Today the batteries-included `@kitsy/cnos` package auto-registers the `http` transport; `rpc`
+is reserved in the schema for the gRPC transport (`cnos.var.v1`) shipping separately — see
+[Package layout](#package-layout) below. `ws`/`sse` are not implemented yet.
+
+`ttl` and `lease` accept CNOS duration strings: `500ms`, `30s`, `10m`, `1h`, `1d` (a bare
+number is seconds).
+
+## Document schemas and per-key rules
+
+Two schema layers apply to `var.*`:
+
+- **Per-key rules** — the same `type` / `required` / `default` / `enum` / `pattern` fields
+  as any other `schema` rule, for scalar vars.
+- **Whole-document schemas** — a `documents:` registry keyed by `schemaId/version`, for
+  vars whose value is a structured policy document. A schema rule binds a key to one with
+  `document: <schemaId>`.
+
+```yaml
+documents:
+  agentic-lanes/v1:
+    fields:
+      enabled:            { type: boolean, required: true }
+      model_target_ref:   { type: string, required: true }
+      max_input_tokens:   { type: number }
+      max_output_tokens:  { type: number }
+      budgets:            { type: object }
+    additionalProperties: false   # unknown fields rejected (this is also the default)
+
+schema:
+  var.agentic.lanes.vinci:
+    document: agentic-lanes/v1
+    required: true
+  var.user.IN.coupon_allowed:
+    type: boolean
+    default: false
+```
+
+Validation rules CNOS enforces on the manifest itself:
+
+- every `vars` group must reference a declared `varSources` entry;
+- every `var.*` schema rule must fall under a declared group;
+- `required: true` and `default` on the same rule is an error — pick one;
+- `document:` must reference a declared `documents` entry;
+- `varSource.auth` / `varSource.verify` values must be `secret.*` references, never inline
+  material;
+- `var.*` can never appear in `public.promote` — see [Safety](#safety).
+
+Document validation itself (unknown fields rejected, missing required fields rejected, wrong
+types rejected) runs **both** at authoring time (control plane `create`/`activate`, see the
+[var-server guide](/guides/var-server)) and at consumer ingest time, so a malformed revision
+never reaches a running process even if it somehow got past the authority.
+
+## Overlay precedence
+
+Reading `var.<group>.<rest>` resolves through one stable precedence, in order:
+
+1. **active, valid runtime revision** — the latest validated snapshot pulled/pushed from the
+   group's source;
+2. **statically projected `value.<group>.<rest>`** — the same path under `value.*`, if one
+   exists;
+3. **schema `default`**, if declared on the `var.*` rule;
+4. otherwise `undefined`.
+
+Application code never implements this precedence itself — one read call, one call site.
+Deactivating the runtime head (`cnos var deactivate`) cleanly falls back to tier ② or ③ with
+**no deployment**. This overlay only applies to `var.*` reads — `value.*` reads are never
+affected by it.
+
+## Fetch modes
+
+Declared per group via `mode`:
+
+- **`prefetch`** — resolved before `ready()` returns. If the group has any `required: true`
+  key and prefetch fails with no static/default fallback available for every required key,
+  `ready()` rejects (fail fast). If prefetch fails but every required key is still resolvable
+  through the static/default tiers, CNOS warns and falls back — no runtime head, but the
+  overlay degrades cleanly.
+- **`ondemand`** — never blocks `ready()`. The first read of an unresolved key in the group
+  triggers a background fetch of the whole group (deduped — one in-flight fetch per group,
+  not per key) and serves the static/default tier meanwhile.
+
+## Reading vars (Node.js singleton)
+
+```ts
+import cnos from '@kitsy/cnos';
+
+await cnos.ready();
+
+// Sync read via overlay precedence (runtime -> value.* -> default). Never blocks on network.
+const enabled = cnos.var<boolean>('agentic.lanes.vinci.enabled');
+
+// Same path, through the generic reader.
+cnos('var.agentic.lanes.vinci.enabled');
+
+// Mandatory read — throws CnosVarRequiredError if unresolved through every tier.
+cnos.require('var.agentic.lanes.vinci.enabled');
+```
+
+### Snapshots
+
+`varSnapshot()` is a cheap, in-memory read that also returns resolution metadata — use it
+per request when you need to know freshness, not just the value:
+
+```ts
+const snap = cnos.varSnapshot('agentic.lanes.vinci');
+// {
+//   value: { enabled: true, model_target_ref: 'secret.ops.model' },
+//   generation: 14,
+//   revision: 'sha256:...',
+//   schemaId: 'agentic-lanes/v1',
+//   effectiveAt: '2026-07-20T00:00:00.000Z',
+//   observedAt: '2026-07-20T00:00:03.120Z',
+//   source: 'runtime',       // 'runtime' | 'static' | 'default'
+//   freshness: 'fresh',      // 'fresh' | 'stale' | 'expired'
+//   leaseExpiresAt: '2026-07-20T00:10:00.000Z',
+// }
+```
+
+`source` tells you which overlay tier produced the value. `generation` / `revision` /
+`effectiveAt` / `observedAt` are only present when `source === 'runtime'`; a static/default
+read reports `{ value, source, freshness: 'fresh' }` with no generation/revision.
+
+### Freshness: fresh / stale / expired, ttl vs lease
+
+Freshness is derived from the age of the applied snapshot against the group's `ttl` and
+`lease`:
+
+- past `lease` → `expired`;
+- else past `ttl` (or, if only `lease` is set, past `lease`) → `stale`;
+- else → `fresh`.
+
+`ttl` is the **staleness window** for `ondemand` groups — past it, a read still serves the
+cached value but is eligible for a background refresh. `lease` is the **fail-closed window**:
+during a transient outage the SDK keeps serving last-known-good (`lastKnownGood: { generation,
+revision }` on the snapshot) until the lease expires, after which the snapshot reports
+`expired`.
+
+**CNOS reports freshness; it never enforces a safety policy.** Whether an `expired` var means
+"fail closed and refuse the request" or "proceed with a warning" is your call — check
+`freshness` (or `varStatus()`) at the point you'd make that decision:
+
+```ts
+const snap = cnos.varSnapshot('agentic.lanes.vinci');
+
+if (snap.freshness === 'expired') {
+  // cost-bearing / high-risk paths: fail closed
+  throw new Error('agentic lane policy is expired; refusing to run.');
+}
+```
+
+### Watch
+
+`watch` is the single reaction construct. It fires only after a validated, committed
+activation — nothing fires on read, on a rejected revision, or on a stale/expired transition
+by itself:
+
+```ts
+const stop = cnos.watch('var.agentic.lanes.vinci', (next, prev) => {
+  console.log('lane policy updated', next.generation, next.value);
+});
+
+// Prefix form: watch every key under a group.
+cnos.watch('var.user.*', (next, prev) => { /* ... */ });
+
+// Later:
+stop();
+```
+
+A callback error is caught and logged — it never rolls back the store; the snapshot is
+already active. Apply-failure handling is the consumer's responsibility.
+
+### Refresh
+
+```ts
+await cnos.refreshVar('var.agentic.lanes.vinci');  // honors the group's ttl (no-op if fresh)
+await cnos.refreshVars();                            // refresh every prefetch group
+```
+
+`refreshVar` mirrors `refreshSecret`; `refreshVars` mirrors `refreshSecrets`.
+
+### Status
+
+```ts
+const status = cnos.varStatus();
+// {
+//   "agentic.lanes.vinci": {
+//     desiredGeneration: 14,
+//     appliedGeneration: 14,
+//     revision: "sha256:...",
+//     source: "runtime",
+//     snapshotAge: 3,
+//     freshness: "fresh",
+//     lastRefreshAt: "2026-07-20T00:00:03.120Z",
+//     lastError: null
+//   }
+// }
+```
+
+Never carries secret material or a full sensitive document — see [Safety](#safety).
+
+### Close
+
+```ts
+await cnos.close(); // stops pollers, cancels subscriptions, releases watchers
+```
+
+## Restart recovery
+
+On boot, `prefetch` groups re-fetch the active runtime head from the source of truth — a
+process restart never "loses" the runtime head from its own perspective; it re-converges. If
+the authority itself is backed by an ephemeral `memoryStore()`, the authority's own head is
+gone on ITS restart and consumers cleanly fall back to the static/default tiers (see the
+[var-server guide](/guides/var-server) for persistent stores).
+
+## Receiver mounting (push)
+
+Pull (poll on an interval, or fetch-on-demand) is the default. For http-only environments
+that want push instead of polling, mount a **latching** receiver on your own server — CNOS
+never opens its own port for this.
+
+### Node (http / express)
+
+```ts
+import http from 'node:http';
+import { varReceiver } from '@kitsy/cnos';
+
+const handler = varReceiver('ops'); // sourceId, matching the varSources key
+
+http.createServer((req, res) => {
+  if (req.url?.startsWith('/cnos/vars/push/')) {
+    return handler(req, res);
+  }
+  // ... your own routes
+}).listen(3000);
+```
+
+```ts
+// express
+import express from 'express';
+import { varReceiver } from '@kitsy/cnos';
+
+const app = express();
+app.post('/cnos/vars/push/:scope', varReceiver('ops'));
+```
+
+The receiver expects the target scope (a var key or group) as the **last path segment** of
+the request URL, and a JSON body `{ revision?, generation?, schemaId?, effectiveAt?, values }`.
+When `revision`/`generation` are omitted, both are derived deterministically (`revision =
+sha256:` of the canonical JSON of `values`; `generation = Date.now()`), identical to the Go
+receiver.
+
+Verification (only enforced when the source declares `verify`):
+
+- `x-cnos-signature: sha256=<hex hmac-sha256 of the raw body>` header, verified against the
+  `verify` secret — **or**, if that header is absent,
+- a bearer token in `Authorization: Bearer <token>` compared against the same secret.
+
+Responses: `204` on accepted, `401` on failed verification, `422` on a validation-rejected
+batch (last-known-good is kept), `400` on a malformed request.
+
+### Go (`net/http`)
+
+```go
+mux := http.NewServeMux()
+mux.Handle("/cnos/vars/push/", runtime.VarReceiver("ops"))
+http.ListenAndServe(":3000", mux)
+```
+
+`VarReceiver` returns a plain `http.Handler` — it never starts its own listener; mount it on
+whatever mux your service already runs.
+
+## Manifest reference
+
+See [Manifest: Runtime variable sections](/reference/manifest#runtime-variable-var-sections)
+for the full `varSources` / `vars` / `documents` / `schema.<key>.document` field reference.
+
+## Safety
+
+- `var.*` must never appear in `public.promote` — enforced at manifest validation
+  (`var.public-exposure`).
+- `var.*` never reaches browser projections or `toPublicEnv()` output.
+- Runtime documents may carry opaque `secret.*` **references**; the material itself continues
+  to flow through `secret.*` and vaults, never through `var.*`.
+- `varSource.auth` / `varSource.verify` values must be `secret.*` refs — enforced at manifest
+  validation (`var.auth-not-secret-ref`).
+- `varStatus()`, `cnos var status`, `cnos var history`, and the append-only log never expose
+  secret material or full sensitive documents.
+- Derived expressions **may** reference `var.*` (unlike `secret.*` and `public.*`, which are
+  forbidden), but any derivation that does is runtime-dependent by definition: it is **never
+  cached** and is re-evaluated on every read so a pushed change is visible immediately.
+
+## See also
+
+- [Running the var authority](/guides/var-server) — embedding the control plane, storage
+  backends, and the mutation lifecycle.
+- [cnos var](/cli/var) — the CLI surface for authoring and operating var revisions.
+- [Manifest reference](/reference/manifest) — full `varSources` / `vars` / `documents` field
+  shapes.
+- [Secrets and Vaults](/guides/secrets) — how `secret.*` refs inside var documents resolve.

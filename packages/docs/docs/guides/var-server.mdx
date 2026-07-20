@@ -1,0 +1,282 @@
+---
+title: Running the Var Authority
+description: Embed the CNOS var control plane in your own server, or run it standalone with cnos var serve.
+---
+
+# Running the Var Authority
+
+The **var server** is the control-plane authority behind `var.*` runtime variables:
+immutable revisions, monotonic per-scope generations, atomic activation, optimistic
+concurrency, rollback, and an append-only audit log. It ships as an embeddable library
+(`@kitsy/cnos-var-server`) — CNOS never runs its own sidecar process.
+
+If you haven't read it yet, start with [Runtime Variables (var.*)](/guides/runtime-variables)
+for the consumer side (reading, watching, freshness). This guide covers operating the
+authority that consumers pull from or receive pushes from.
+
+## Two ways to run it
+
+### Embedded — mount on your existing server
+
+A service that already runs a server and owns config for others embeds the var-server
+library into its existing listener:
+
+```ts
+import { fileStore, varServer } from '@kitsy/cnos-var-server';
+import http from 'node:http';
+
+const store = fileStore('./.cnos/var-log.jsonl');
+
+// Plain http.createServer:
+http.createServer(varServer(store, { documents })).listen(8080);
+
+// Or mounted under a path on an express-style server:
+app.use('/cnos/vars', varServer(store, { base: '/cnos/vars', documents }));
+```
+
+This is the "any service implementing the protocol directly" case from the manifest's
+`varSources` (`user_service → https://config.run.app`): CNOS ships the heavy lifting
+(validation, generations, optimistic concurrency, audit), your service just mounts it.
+
+### Standalone — `cnos var serve`
+
+A thin wrapper over the same library, for deployments that want a dedicated central plane:
+
+```bash
+cnos var serve --store ./.cnos/var-log.jsonl --port 8790
+cnos var serve --host 0.0.0.0 --port 8790 --bearer-token "$CNOS_VAR_TOKEN"   # ephemeral, no --store
+```
+
+One server implementation total — standalone vs. embedded is a packaging choice, not an
+architecture fork. `cnos var serve` runs until `SIGINT`/`SIGTERM`. Document schemas are
+loaded from the current project's manifest automatically.
+
+A service can hold both roles at once: consume `var.ops.*` from a central plane while acting
+as the authority for `var.<its-group>.*` toward its own downstream clients — expressed purely
+through the group → source mapping in each side's manifest.
+
+## Stores: `memoryStore()` vs `fileStore(path)`
+
+Persistence is a property of the store you choose, not a server mode:
+
+| Store | Persistence | Use |
+|-------|-------------|-----|
+| `memoryStore()` | ephemeral, empty on restart | embedded/latched authorities; the default. On authority restart, consumers safely fall back to the static/default overlay tiers — ephemeral mode degrades cleanly by design. |
+| `fileStore(path)` | append-only JSONL log book | durable head + full audit; restart recovery; replay/time-travel. |
+
+```ts
+import { memoryStore, fileStore } from '@kitsy/cnos-var-server';
+
+const dev = memoryStore();
+const prod = fileStore('./.cnos/var-log.jsonl');
+```
+
+Reads (`store.head` / `status` / `revision`) are synchronous and lock-free — they observe a
+single immutable per-scope snapshot, so a concurrent `append` is never partially visible.
+`append` persists first, then swaps the in-memory snapshot in one synchronous assignment.
+
+### The append-only log (`fileStore`)
+
+One JSON object per line, appended forever. Four event kinds: `revision-created`,
+`activated`, `deactivated`, `rejected`. Every event records actor, reason, timestamps, and
+the previous/new revision or generation; `revision-created` and `activated` also record the
+document schema id/version in force at write time, so **replay is self-describing** — it
+validates against the schema that governed the write, not today's schema.
+
+```jsonc
+{ "kind": "revision-created", "scope": "agentic.lanes.vinci", "revision": "sha256:…",
+  "document": { "enabled": true, "model_target_ref": "secret.ops.model" },
+  "schemaId": "agentic-lanes/v1", "actor": "ops", "timestamp": "2026-07-20T…Z" }
+{ "kind": "activated", "scope": "agentic.lanes.vinci", "revision": "sha256:…",
+  "generation": 1, "previousGeneration": 0, "actor": "ops", "reason": "enable vinci",
+  "timestamp": "2026-07-20T…Z" }
+{ "kind": "rejected", "scope": "agentic.lanes.vinci",
+  "rejectionReason": "document.unknown-field: Unknown field 'budgets2' …",
+  "timestamp": "2026-07-20T…Z" }
+```
+
+Derived properties of the log:
+
+- **current head** = fold of the log (last activation not followed by a deactivation);
+- **audit / history**: full mutation trail, including rejections, per scope;
+- **restart / resume**: the authority replays the log on construction and resumes from the
+  last persisted activation — never from fallback;
+- **replay & time travel**: `cnos var replay --to-generation N` reconstructs the head active
+  at any past generation;
+- **append-only forever**: rollback activates a prior revision as a *new* generation — the
+  log is never rewritten;
+- **safe to store and ship**: the log carries `var.*` documents and opaque `secret.*` refs
+  only, never secret material.
+
+## Mutation flow
+
+```text
+create  →  validate  →  activate (--expect-generation N)
+                              ↓
+                          deactivate                 rollback (as a NEW generation)
+```
+
+### `create` — content-addressed, validated before storage
+
+```bash
+cnos var create agentic.lanes.vinci \
+  --document @lane.json \
+  --schema agentic-lanes/v1 \
+  --store ./.cnos/var-log.jsonl
+```
+
+The document is validated against its bound document schema **before** it is stored. A valid
+document becomes an immutable revision, addressed by the sha256 of its content — creating the
+same document twice returns the same revision and does not append a duplicate event. An
+invalid document is recorded as a `rejected` audit event and the command fails; the current
+head is untouched either way.
+
+### `validate` — dry run, no store writes
+
+```bash
+cnos var validate --document @lane.json --schema agentic-lanes/v1 --store ./.cnos/var-log.jsonl
+# { "valid": false, "issues": [{ "code": "document.required", "message": "Missing required field \"enabled\"..." }] }
+```
+
+### `activate` — atomic, requires `--expect-generation`
+
+```bash
+cnos var activate agentic.lanes.vinci \
+  --revision sha256:9f86d0... \
+  --expect-generation 0 \
+  --store ./.cnos/var-log.jsonl
+```
+
+`--expect-generation` is the optimistic-concurrency guard and is **required** — it must equal
+the scope's current generation. A stale value produces a `409 revision-conflict` (CLI:
+`CnosVarConflictError`) and never overwrites; re-read `cnos var status` and retry with the
+current generation. A successful activation allocates the *next* monotonic generation and
+becomes the new head — consumers watching the scope see it on their next read/poll/push
+cycle.
+
+### `deactivate` — clean fallback, no deployment
+
+```bash
+cnos var deactivate agentic.lanes.vinci --expect-generation 3 --store ./.cnos/var-log.jsonl
+```
+
+Removes the active head as a new generation. Consumers fall back to the static `value.*` /
+schema `default` overlay tiers immediately — no redeploy needed on either side.
+
+### `rollback` — always a new generation
+
+```bash
+cnos var rollback agentic.lanes.vinci --to-generation 2 --expect-generation 4 --store ./.cnos/var-log.jsonl
+# or: --to-revision sha256:...
+```
+
+Re-activates a prior revision, but **as a new generation** — history is append-only, the log
+is never rewritten. Internally this is `activate` with the resolved target revision, so it
+carries the same `--expect-generation` guard and audit trail.
+
+### Idempotency
+
+Every mutation accepts `--idempotency-key <k>` (`idempotencyKey` over HTTP). A replayed
+request with the same key returns the original result without appending a second event. The
+idempotency map is rebuilt from the log on restart, so it survives across process restarts
+for persistent stores.
+
+## Inspecting state
+
+```bash
+cnos var status agentic.lanes.vinci --store ./.cnos/var-log.jsonl
+cnos var history agentic.lanes.vinci --store ./.cnos/var-log.jsonl --json
+cnos var replay agentic.lanes.vinci --to-generation 2 --store ./.cnos/var-log.jsonl   # persistent stores only
+```
+
+`status`/`history` never expose secret material. `replay` returns `400 store-unsupported`
+against an ephemeral `memoryStore()` — it requires a persistent store to reconstruct past
+state.
+
+## HTTP protocol table
+
+Base defaults to `/cnos/vars`. Mutations live under `{base}/admin/*`.
+
+| Method | Path | Body / Query | Success | Errors |
+|--------|------|--------------|---------|--------|
+| GET | `{base}?key=<scope>` or `?group=<scope>` | — | `200 { generation, revision, schemaId?, effectiveAt, values }` + `ETag: <revision>`; `304` when `If-None-Match` equals the current revision | `404 no-head` when no active head; `400 bad-request` |
+| POST | `{base}/admin/revisions` | `{ scope, document, schemaId?, schemaVersion?, actor?, reason?, idempotencyKey? }` | `201 { scope, revision, generation, created }` (`200` when the content-addressed revision already existed) | `422 revision-invalid { issues }` |
+| POST | `{base}/admin/validate` | `{ document, schemaId?, scope? }` | `200 { valid, issues }` | — |
+| POST | `{base}/admin/activate` | `{ scope, revision, expectedGeneration, actor?, reason?, idempotencyKey? }` | `200 { scope, generation, revision, effectiveAt }` | `409 revision-conflict { expectedGeneration, currentGeneration }`; `404 not-found` (unknown revision) |
+| POST | `{base}/admin/deactivate` | `{ scope, expectedGeneration, actor?, reason?, idempotencyKey? }` | `200 { scope, generation, active: false }` | `409 revision-conflict` |
+| POST | `{base}/admin/rollback` | `{ scope, expectedGeneration, toRevision? \| toGeneration?, actor?, reason? }` | `200 { scope, generation, revision, effectiveAt }` | `409 revision-conflict`; `404 not-found` |
+| GET | `{base}/admin/status?scope=<scope>` | — | `200 { scope, active, generation, revision?, source, lastRejected? }` | `400 bad-request` |
+| GET | `{base}/admin/history?scope=<scope>` | — | `200 { scope, events: VarEvent[] }` | `400 bad-request` |
+| GET | `{base}/admin/replay?scope=<scope>&toGeneration=<n>` | — | `200 <ScopeHead>` (persistent stores only) | `404 not-found`; `400 store-unsupported` (ephemeral store) |
+
+**Values keying (canonical).** In every read response, `values` is always a JSON object
+keyed by the **full var key minus `var.`**. Scope kind is decided syntactically: a group is a
+single segment with no dot (`agentic`); a key contains a dot (`agentic.lanes.vinci`).
+
+- A key-scoped read wraps the as-authored document: `values = { "<scope>": doc }`.
+- A group-scoped read passes the document through; a group revision must be an object whose
+  every top-level key starts with `"<group>."` — enforced at `revisions`/`validate` time
+  (issue code `var.group-scope-shape`), so a malformed group document is rejected before it
+  can ever activate.
+
+**ETag / 304.** The `ETag` is the content-addressed revision (`sha256:...`). A consumer sends
+`If-None-Match: <revision>`; an unchanged head returns `304` with no body.
+
+## Authorization hook
+
+Every request runs through `options.authorize({ kind, scope, token })` — `kind` is `'read'`
+or `'mutate'`, `token` is the bearer token parsed from `Authorization: Bearer …`. Denied
+requests get `403`.
+
+```ts
+import { varServer, staticBearerAuthorize } from '@kitsy/cnos-var-server';
+
+const handler = varServer(store, {
+  authorize: staticBearerAuthorize(['ops-token-abc', 'ops-token-def']),
+});
+```
+
+The default (`allowAllWithWarning`) allows every request and emits **one** stderr warning —
+it exists for local dev/CI and must not reach production. `staticBearerAuthorize(tokens)` is
+a minimal option until workload-identity authorization ships; write your own function
+matching `VarAuthorize = (ctx) => boolean | Promise<boolean>` for anything more scoped (e.g.
+per-group least privilege).
+
+`cnos var serve --bearer-token <token>` wires `staticBearerAuthorize` for the standalone
+wrapper; `cnos var ... --server <url> --bearer-token <token>` sends that token as the client.
+
+## Observability
+
+```bash
+cnos var status agentic.lanes.vinci --server https://config.internal/cnos/vars --json
+```
+
+```jsonc
+{
+  "agentic.lanes.vinci": {
+    "desiredGeneration": 14,
+    "appliedGeneration": 14,
+    "revision": "sha256:…",
+    "source": "runtime",
+    "snapshotAge": 42,
+    "freshness": "fresh",
+    "lastRefreshAt": "…",
+    "lastError": null,
+    "lastRejected": { "revision": "sha256:…", "reason": "unknown field 'budgets2'" }
+  }
+}
+```
+
+This is the consumer-SDK shape (`cnos.varStatus()`); the server's own `{base}/admin/status`
+route returns the narrower `ScopeStatus` shape (`{ scope, active, generation, revision?,
+source, lastRejected? }`) documented in the protocol table above. Neither ever includes
+secret material or full sensitive documents — logs and status summarize `sensitive: true`
+groups by revision hash only.
+
+## See also
+
+- [Runtime Variables (var.*)](/guides/runtime-variables) — the consumer side: reading,
+  watching, freshness, receiver mounting.
+- [cnos var](/cli/var) — full CLI subcommand reference.
+- [Manifest reference](/reference/manifest) — `varSources` / `vars` / `documents` field
+  shapes.

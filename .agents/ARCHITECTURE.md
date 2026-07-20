@@ -55,6 +55,30 @@ This package publishes the docs content consumed by the web docs site and other 
 - navigation in `packages/docs/manifest.yml`
 - validation in `packages/docs/scripts/validate-docs.mjs`
 
+### `packages/var-server`
+
+Embeddable `var.*` control-plane library (`@kitsy/cnos-var-server`): the mutation engine
+(create/validate/activate/deactivate/rollback, optimistic concurrency, idempotency), pluggable
+storage (`memoryStore()`, `fileStore()` append-only log), the embeddable HTTP handler
+(`varServer(store, opts)`), and the standalone wrapper (`serveVarServer`, backs `cnos var
+serve`). Library-first — CNOS never runs its own sidecar process; a host embeds this on its
+existing server or runs the thin standalone wrapper. See `.agents/context/runtime-vars.md`.
+
+### `packages/var-http`
+
+The `http` transport `VarSourceProvider` module (`@kitsy/cnos-var-http`) — pull with
+ETag/`If-None-Match`, mapping `404 {code:"no-head"}` and `304` to the corresponding core
+errors. Registered by default in the batteries-included `@kitsy/cnos` package.
+
+`packages/var-rpc` (gRPC transport, `cnos.var.v1`) is in progress and not covered here yet —
+treat it as its own docs/architecture follow-up once it lands.
+
+### `packages/var-testkit`
+
+Test doubles for `var.*` (`@kitsy/cnos-var-testkit`), mirroring `packages/vault-testkit`: an
+ephemeral `startTestVarServer()` and a transport-free `createInMemoryVarSource()` double for
+exercising consumer SDK pull/subscribe/close without a network hop.
+
 ## Resolution Pipeline
 
 CNOS resolves config in this order:
@@ -145,6 +169,11 @@ interface ServerProjection {
   values: Record<string, unknown>;
   derived: Record<string, DerivedFormula>;
   secretRefs: Record<string, SecretReference & { envVar?: string }>;
+  // var.* authoring blocks — present only when the manifest declares varSources/vars.
+  varSources?: Record<string, ProjectedVarSourceDefinition>; // refs only, never resolved auth material
+  vars?: Record<string, VarGroupDefinition>;
+  documents?: Record<string, DocumentSchemaDefinition>;
+  schema?: Record<string, ProjectedVarKeyRule>; // keyed by full var.* key; `default` present only when declared
   publicKeys: string[];
   runtimeNamespaces: string[];
   meta: {
@@ -155,6 +184,11 @@ interface ServerProjection {
   };
 }
 ```
+
+The `var.*` blocks are populated by `packages/core/src/runtime/toServerProjection.ts`. `var.*`
+never appears in `values`/`publicKeys` — it is its own set of blocks with its own overlay
+precedence, resolved at read time by the runtime SDK, not baked into `values` at projection
+time. See `.agents/context/runtime-vars.md` for the full module map and wire conventions.
 
 ## Runtime Surfaces
 
@@ -226,6 +260,26 @@ format/         output shaping
 services/       shared command logic
 ```
 
+### `packages/var-server/src/`
+
+```text
+types.ts        VarStore / VarEvent / ScopeHead / ScopeStatus contracts
+engine.ts       VarEngine — create/validate/activate/deactivate/rollback, locking, idempotency
+memoryStore.ts  ephemeral store
+fileStore.ts    append-only JSONL store (audit, replay, restart resume)
+baseStore.ts    shared fold/replay logic behind both stores
+authorize.ts    pluggable authorize hook + static bearer helper
+httpServer.ts   embeddable Node HTTP handler (read plane + admin mutation routes)
+serve.ts        standalone http.createServer wrapper (backs `cnos var serve`)
+hash.ts         canonical JSON + content-addressed revision hashing
+errors.ts       CnosVarConflictError / CnosVarValidationError / CnosVarNotFoundError / CnosVarStoreError
+```
+
+### `packages/var-http/src/`, `packages/var-testkit/src/`
+
+Each is a single `index.ts`: the http `VarSourceProvider` module, and the test-double
+factories (`startTestVarServer`, `createInMemoryVarSource`), respectively.
+
 ## CLI Surface
 
 Do not treat this file as the canonical CLI registry. The authoritative sources are:
@@ -239,6 +293,7 @@ At a high level, the top-level CLI surface currently includes:
 - data operations: `read`, `value`, `secret`, `define`, `list`, `promote`, `inspect`, `validate`
 - workflows: `export`, `build`, `dev`, `run`, `dump`, `diff`, `doctor`, `drift`, `watch`, `migrate`
 - workspace and secrets: `workspace`, `vault`, `cache`
+- var control plane: `var` (`create`, `validate`, `activate`, `deactivate`, `rollback`, `status`, `history`, `replay`, `serve`)
 - meta/help: `help`, `help-ai`, `version`
 
 When CLI behavior changes, update `helpRegistry.ts` first, then the published docs under `packages/docs/docs/cli/`.
@@ -263,9 +318,12 @@ Use this map before editing:
 - derived values: `packages/core/src/derive`
 - resolution or validation: `packages/core/src/resolvers`, `packages/core/src/validation`, `packages/core/src/promotions`
 - secret behavior: `packages/core/src/secrets`
-- singleton/runtime bootstrap: `packages/cnos/src/runtime`
+- runtime variables (`var.*`) consumer-side model: `packages/core/src/runtime/{readVar,varStore,varManager}.ts`, `packages/core/src/validation/validateVars.ts`, `packages/core/src/manifest/normalizeVars.ts`
+- runtime variables control plane (authority): `packages/var-server/src`
+- runtime variables transports: `packages/var-http/src` (http); `packages/var-rpc` (gRPC) is in progress elsewhere, not yet in this tree
+- singleton/runtime bootstrap: `packages/cnos/src/runtime`, `packages/cnos/src/varReceiver.ts`
 - official plugin logic: `plugins/*/src`
-- CLI commands/help: `packages/cli/src/commands`, `packages/cli/src/cli/helpRegistry.ts`
+- CLI commands/help: `packages/cli/src/commands`, `packages/cli/src/cli/helpRegistry.ts`; var control-plane CLI: `packages/cli/src/commands/var.ts`, `packages/cli/src/services/varControl.ts`
 - published docs: `packages/docs/docs`, `packages/docs/manifest.yml`
 
 ## Error Types
@@ -277,5 +335,6 @@ Look for typed CNOS errors before inventing a new generic one. The common famili
 - security errors
 - authentication errors
 - derived-value cycle / resolution errors
+- var runtime errors (`CnosVarRequiredError`, `CnosVarNoHeadError`, `CnosVarNotModifiedError` in `packages/core/src/errors.ts`) and var control-plane errors (`CnosVarConflictError`, `CnosVarValidationError`, `CnosVarNotFoundError`, `CnosVarStoreError` in `packages/var-server/src/errors.ts` — a separate hierarchy from the core `CnosError` family)
 
 If you add a new user-facing failure mode, make the message actionable: say what failed, which key/file/root was involved, and what the user should do next.

@@ -9,6 +9,7 @@ Namespaces define what kind of data a key represents and which surfaces may read
 - `meta.*`: system-populated readonly metadata
 - `public.*`: projection namespace created by promotion
 - `process.*`: built-in runtime namespace
+- `var.*`: mutable, non-secret runtime configuration owned by a remote authority (allow/block lists, entitlements, kill switches). Keys are `var.<group>.<rest>`; the manifest maps `<group>` to a declared `varSources` entry. Reads resolve through an overlay: active runtime revision → static `value.<group>.<rest>` → schema `default`. See `.agents/context/runtime-vars.md`.
 
 ## Custom Namespaces
 
@@ -25,13 +26,15 @@ Data namespaces participate in storage and resolution. Runtime namespaces are su
 - Namespaces marked `sensitive: true` follow the same restriction.
 - `public.*` is output-only. Agents should not model it as an authoring namespace.
 - `process.*` and custom runtime namespaces are server/runtime-only and should not be promoted into browser/public outputs when they remain runtime-dependent.
+- `var.*` must never appear in `public.promote`, browser projections, or `toPublicEnv()` output — enforced at manifest validation (`var.public-exposure`). A `var.*` document may carry an opaque `secret.*` reference, never secret material. `varStatus()`, `cnos var status`, `cnos var history`, and the append-only var log never expose secret material or full sensitive documents.
 
 ## Derived Values
 
 - You may author derived values in `value.*` and other writable data namespaces.
-- You may not author derived values in `secret.*`, `public.*`, `meta.*`, or runtime namespaces.
-- Derived expressions may reference `value.*`, `meta.*`, shareable custom data namespaces, and runtime namespaces.
+- You may not author derived values in `secret.*`, `public.*`, `meta.*`, or runtime namespaces (this includes `var.*` — it is a read-only overlay, not an authoring namespace).
+- Derived expressions may reference `value.*`, `meta.*`, shareable custom data namespaces, runtime namespaces, and `var.*`.
 - Derived expressions may not reference `secret.*` or `public.*`.
+- Any derivation that references `var.*` is runtime-dependent by definition and is never cached (Critical Rule 9), re-evaluated on every read.
 
 ## CLI Notes
 

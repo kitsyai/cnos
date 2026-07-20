@@ -23,6 +23,9 @@ CNOS is not a dotenv wrapper. It is a portable, plugin-based configuration syste
 | `packages/vite/` | `@kitsy/cnos-vite` | Vite integration for promoted public config |
 | `packages/next/` | `@kitsy/cnos-next` | Next.js integration for promoted public config |
 | `packages/webpack/` | `@kitsy/cnos-webpack` | Webpack integration for promoted public config |
+| `packages/var-server/` | `@kitsy/cnos-var-server` | Embeddable `var.*` control-plane library: revisions, activation, rollback, audit log, pluggable storage; also backs `cnos var serve` |
+| `packages/var-http/` | `@kitsy/cnos-var-http` | http transport provider for `var.*` sources |
+| `packages/var-testkit/` | `@kitsy/cnos-var-testkit` | Test doubles for `var.*` (ephemeral server, in-memory source), mirrors `vault-testkit` |
 | `plugins/*` | `@kitsy/cnos-plugin-*` | Official loader / validator / exporter plugin packages |
 
 ## Monorepo Tooling
@@ -87,6 +90,7 @@ When `.agents` and another source disagree, prefer the code plus the canonical g
 | Monorepo projection, anchors, detach/attach, runtime delivery | `.agents/context/monorepo-projection.md` |
 | Remote root resolution and cache model | `.agents/context/remote-root-resolver.md` |
 | DX refresh: implicit base, workspace enable, onboard | `.agents/context/dx-refresh.md` |
+| Runtime variables (`var.*`): overlay, control plane, module map, wire conventions | `.agents/context/runtime-vars.md` |
 | Role-specific instructions | `.agents/skills/<role>/SKILL.md` |
 
 ## Task Routing

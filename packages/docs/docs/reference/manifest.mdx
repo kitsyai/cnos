@@ -16,6 +16,7 @@ Key sections:
 - `vaults`
 - `schema`
 - `writePolicy`
+- `varSources` / `vars` / `documents` — see [Runtime variable (`var.*`) sections](#runtime-variable-var-sections)
 
 Use the main repo spec for the exhaustive schema until this reference grows into the full field-by-field version.
 
@@ -38,3 +39,105 @@ vaults:
 ```
 
 Fallbacks are explicit and ordered. CNOS never silently falls back to environment variables unless a fallback provider is declared.
+
+## Runtime variable (`var.*`) sections
+
+Three sections author the `var.*` tier — mutable, non-secret runtime configuration owned by
+a remote authority. See the [Runtime Variables guide](/guides/runtime-variables) for the full
+concept walkthrough; this is the field reference.
+
+### `varSources`
+
+Named backends. `transport` is one of `rpc`, `http`, `ws`, `sse`. `auth`/`verify` values must
+be `secret.*` references — never inline material.
+
+```yaml
+varSources:
+  ops:
+    transport: http
+    url: https://cnos-vars.internal
+    auth:
+      bearer: secret.ops.token
+    verify: secret.ops.verify   # secret.* ref used to verify inbound pushes
+  user_service:
+    transport: http
+    url: https://config.run.app
+    pollInterval: 30s
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `transport` | yes | `rpc` \| `http` \| `ws` \| `sse` |
+| `url` | yes | Endpoint the transport connects to |
+| `auth` | no | Map of auth slot -> `secret.*` ref (e.g. `{ bearer: secret.ops.token }`) |
+| `pollInterval` | no | Poll interval for pull-based transports (duration string, e.g. `30s`) |
+| `verify` | no | `secret.*` ref used to verify inbound pushes on a latching receiver (HMAC or bearer) |
+
+### `vars`
+
+Maps a `var.<group>.*` group to a declared source and fetch mode.
+
+```yaml
+vars:
+  agentic:
+    source: ops
+    mode: prefetch   # resolves before ready()
+    lease: 10m         # fail-closed freshness window
+  user:
+    source: ops
+    mode: ondemand    # fetched lazily on first read; never blocks ready()
+    ttl: 60s            # staleness window
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `source` | yes | Name of a declared `varSources` entry |
+| `mode` | no (default `ondemand`) | `prefetch` \| `ondemand` |
+| `ttl` | no | Staleness window (duration string) |
+| `lease` | no | Fail-closed freshness window (duration string) |
+
+Every group must reference a declared source, or manifest validation fails
+(`var.unknown-source`).
+
+### `documents`
+
+Whole-document schemas, keyed by `schemaId/version` (e.g. `agentic-lanes/v1`). Bound to a
+`var.*` key via the `document` field on a `schema` rule (below).
+
+```yaml
+documents:
+  agentic-lanes/v1:
+    fields:
+      enabled:            { type: boolean, required: true }
+      model_target_ref:   { type: string, required: true }
+      max_input_tokens:   { type: number }
+      budgets:            { type: object }
+    additionalProperties: false   # default; unknown fields rejected
+```
+
+Each field rule supports `type` (`string` \| `number` \| `boolean` \| `object` \| `array`,
+required), `required`, `enum`, and `pattern` — the same shape as a scalar `schema` rule.
+
+### `schema.<var-key>.document`
+
+A `schema` rule for a `var.*` key can bind it to a document schema instead of declaring
+scalar `type`/`enum`/`pattern` fields directly:
+
+```yaml
+schema:
+  var.agentic.lanes.vinci:
+    document: agentic-lanes/v1
+    required: true
+  var.user.IN.coupon_allowed:
+    type: boolean
+    default: false
+```
+
+Rules:
+
+- `document:` must reference a declared `documents` entry (`var.unknown-document` otherwise).
+- `required: true` and `default` may not both be set on the same rule
+  (`var.required-and-default`) — a mandatory var cannot also declare a fallback.
+- Every `var.*` schema key must fall under a declared `vars` group (`var.unknown-group`).
+- `var.*` keys may never appear in `public.promote` (`var.public-exposure`) — `var.*` never
+  reaches browser or public surfaces.

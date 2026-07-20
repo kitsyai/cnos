@@ -55,3 +55,12 @@ running server (`--server <url>`). A bearer token for a remote server is passed 
 
 Secrets never appear in `var.*` documents: a runtime document may carry an opaque `secret.*`
 **reference** only, and the material continues to flow through `secret.*` and vaults.
+
+## See also
+
+- [Runtime Variables (var.*)](/guides/runtime-variables) — reading, watching, and freshness
+  on the consumer side.
+- [Running the Var Authority](/guides/var-server) — embedding the control plane, storage
+  backends, and the full mutation lifecycle with examples for every subcommand above.
+- [Manifest reference](/reference/manifest#runtime-variable-var-sections) — `varSources` /
+  `vars` / `documents` field shapes.
