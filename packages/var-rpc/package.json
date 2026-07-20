@@ -1,6 +1,5 @@
 {
   "name": "@kitsy/cnos-var-rpc",
-  "private": true,
   "version": "1.17.0",
   "description": "gRPC (rpc) transport module for CNOS runtime variables (var.*): Pull + Subscribe VarSourceProvider client and an embeddable VarService server.",
   "type": "module",
@@ -19,6 +18,9 @@
     "dist",
     "proto"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "dependencies": {
     "@grpc/grpc-js": "^1.10.0",

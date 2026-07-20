@@ -39,6 +39,7 @@ jobs:
             "packages/go/vault/firebase/v${VERSION}"
             "packages/go/vault/gcp/v${VERSION}"
             "packages/go/vault/hashicorp/v${VERSION}"
+            "packages/go/varrpc/v${VERSION}"
           )
 
           for TAG in "${TAGS[@]}"; do

@@ -1,6 +1,5 @@
 {
   "name": "@kitsy/cnos-var-http",
-  "private": true,
   "version": "1.17.0",
   "description": "HTTP transport module for CNOS runtime variables (var.*): pull-based VarSourceProvider with ETag/If-None-Match and secret-ref bearer auth.",
   "type": "module",
@@ -17,6 +16,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "dependencies": {
     "@kitsy/cnos-core": "workspace:*"

@@ -171,6 +171,16 @@ while IFS= read -r f; do
 done < <(find packages/csharp -name "*.csproj")
 info "C# ✓"
 
+# Go: submodules (vault/*, varrpc) require the parent module. Go resolves that
+# requirement from published tags, not from go.work, so a stale pin means a
+# consumer installing a submodule gets an old parent that may predate the API
+# the submodule uses. Point every submodule at the version being released; the
+# matching parent tag is created by publish-go.yml in the same run.
+while IFS= read -r f; do
+  sed -i "s|\(github.com/kitsyai/cnos/packages/go\) v[0-9]\+\.[0-9]\+\.[0-9]\+|\1 v${NEW}|g" "$f"
+done < <(find packages/go -mindepth 2 -name "go.mod")
+info "Go submodules ✓"
+
 # PHP: composer.json has no version field — Packagist reads versions from git
 # tags, so nothing to bump here.
 info "PHP ✓ (no version field in composer.json)"

@@ -1,6 +1,5 @@
 {
   "name": "@kitsy/cnos-var-server",
-  "private": true,
   "version": "1.17.0",
   "description": "Embeddable CNOS var (var.*) control-plane server: revisions, generations, atomic activation, audit log, and pluggable stores.",
   "type": "module",
@@ -17,6 +16,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "dependencies": {
     "@kitsy/cnos-core": "workspace:*"
