@@ -88,6 +88,7 @@ async function runServe(cliArgs: string[], options: RuntimeServiceOptions): Prom
   const storePath = consumeOption(cliArgs, '--store');
   const host = consumeOption(cliArgs, '--host');
   const portRaw = consumeOption(cliArgs, '--port');
+  const rpcRaw = consumeOption(cliArgs, '--rpc');
   const bearerToken = consumeOption(cliArgs, '--bearer-token');
   const documents = await loadDocuments(options);
 
@@ -96,11 +97,14 @@ async function runServe(cliArgs: string[], options: RuntimeServiceOptions): Prom
     ...(Object.keys(documents).length > 0 ? { documents } : {}),
     ...(host ? { host } : {}),
     ...(portRaw ? { port: Number(portRaw) } : {}),
+    ...(rpcRaw ? { rpcPort: Number(rpcRaw) } : {}),
     ...(bearerToken ? { bearerToken } : {}),
   });
 
   process.stderr.write(
-    `cnos var serve listening on ${running.url} (${storePath ? `fileStore ${storePath}` : 'memoryStore (ephemeral)'})\n`,
+    `cnos var serve listening on ${running.url}${running.rpcTarget ? ` and rpc ${running.rpcTarget}` : ''} (${
+      storePath ? `fileStore ${storePath}` : 'memoryStore (ephemeral)'
+    })\n`,
   );
 
   await new Promise<void>((resolve) => {

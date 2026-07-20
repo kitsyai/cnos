@@ -78,6 +78,14 @@ export interface ValidateResult {
 }
 
 /**
+ * A commit-path notification. Fired synchronously after an activation/deactivation event has
+ * been appended to the store (so `store.head(scope)` already reflects the new state). `head`
+ * is the new canonical head for the scope, or `undefined` after a deactivation. Transports
+ * (rpc Subscribe, ws/sse) hook this to push the new batch to matching subscribers.
+ */
+export type CommitListener = (event: { scope: string; kind: 'activated' | 'deactivated'; head: ScopeHead | undefined }) => void;
+
+/**
  * The control-plane mutation engine on top of a {@link VarStore}. Owns validation,
  * content-addressed revision creation, atomic activation with monotonic generations,
  * optimistic concurrency, rollback, idempotency, history, status, and replay.
@@ -87,6 +95,8 @@ export class VarEngine {
   private readonly clock: () => string;
   /** Per-scope serialization: read-generation → build-event → append happens under one lock. */
   private readonly locks = new Map<string, Promise<unknown>>();
+  /** Commit-path listeners: fire after every accepted activation/deactivation (incl. rollback). */
+  private readonly commitListeners = new Set<CommitListener>();
 
   constructor(
     private readonly store: VarStore,
@@ -299,6 +309,7 @@ export class VarEngine {
         }),
       );
 
+      this.emitCommit(input.scope, 'activated');
       return { scope: input.scope, generation, revision: input.revision, effectiveAt };
     });
   }
@@ -331,6 +342,7 @@ export class VarEngine {
         }),
       );
 
+      this.emitCommit(input.scope, 'deactivated');
       return { scope: input.scope, generation, active: false };
     });
   }
@@ -346,6 +358,34 @@ export class VarEngine {
       reason: input.reason ?? `rollback to ${target}`,
       ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
     });
+  }
+
+  /**
+   * Register a commit-path listener fired after every accepted activation/deactivation
+   * (rollback flows through `activate`, so it is covered). Returns an unsubscribe function.
+   * The reusable seam behind the rpc Subscribe transport; ws/sse reuse it unchanged.
+   */
+  onCommit(listener: CommitListener): () => void {
+    this.commitListeners.add(listener);
+    return () => {
+      this.commitListeners.delete(listener);
+    };
+  }
+
+  private emitCommit(scope: string, kind: 'activated' | 'deactivated'): void {
+    if (this.commitListeners.size === 0) {
+      return;
+    }
+
+    const head = this.store.head(scope);
+
+    for (const listener of this.commitListeners) {
+      try {
+        listener({ scope, kind, head });
+      } catch {
+        /* a listener error never affects the commit — the snapshot is already active */
+      }
+    }
   }
 
   status(scope: string): ScopeStatus {

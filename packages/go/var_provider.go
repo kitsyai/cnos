@@ -1,0 +1,260 @@
+package cnos
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+// Var pull outcomes. These mirror the http status mapping exactly and are the values a
+// transport provider reports back to the SDK:
+//
+//	VarPullOK          — a fresh head batch (http 200)
+//	VarPullNotModified — the caller's known revision is still current (http 304), keep cache
+//	VarPullNoHead      — no active runtime head (http 404 {code:"no-head"}), fall back to
+//	                     overlay tiers ②/③ (static value.* / schema default)
+const (
+	VarPullOK          = pullOK
+	VarPullNotModified = pullNotModified
+	VarPullNoHead      = pullNoHead
+)
+
+// VarScope identifies a fetch scope: exactly one of Key or Group. Scope kind is
+// syntactically decidable from the prefix-stripped string — a group is a single segment
+// with no dot, a key always contains a dot.
+type VarScope struct {
+	Key   string
+	Group string
+}
+
+// Scope returns the wire scope string (the `var.` prefix is already stripped).
+func (scope VarScope) Scope() string {
+	if scope.Key != "" {
+		return scope.Key
+	}
+	return scope.Group
+}
+
+// VarBatchResult is the transport-agnostic result of a pull or a pushed subscription
+// batch. Values are keyed by the full var key minus the `var.` prefix, per the canonical
+// cross-SDK keying convention.
+type VarBatchResult struct {
+	Status      int
+	Scope       string
+	Generation  int64
+	Revision    string
+	SchemaId    string
+	EffectiveAt string
+	Values      map[string]any
+}
+
+// VarProviderContext hands a provider the runtime facilities it needs. ResolveSecret
+// resolves a `secret.*` reference to material through the normal CNOS secret machinery —
+// providers never read secret material any other way.
+type VarProviderContext struct {
+	ResolveSecret func(ref string) (string, error)
+}
+
+// VarSourceProvider is the transport contract, mirroring the TypeScript
+// `VarSourceProvider`. Transport modules (rpc, ws, sse) live in their own Go submodules so
+// the core module stays free of their dependencies.
+type VarSourceProvider interface {
+	Pull(ctx context.Context, scope VarScope, knownRevision string) (VarBatchResult, error)
+	Close() error
+}
+
+// VarSubscribingProvider is additionally implemented by push transports. Subscribe returns
+// a stop function; the provider owns reconnect/backoff internally.
+type VarSubscribingProvider interface {
+	VarSourceProvider
+	Subscribe(ctx context.Context, scopes []VarScope, onBatch func(VarBatchResult)) (func(), error)
+}
+
+// VarSourceProviderFactory registers a provider implementation by transport name. It is the
+// var-side twin of SecretVaultProviderFactory and registers the same way.
+type VarSourceProviderFactory struct {
+	Transport string
+	Create    func(def VarSourceDef, providerCtx VarProviderContext) (VarSourceProvider, error)
+}
+
+func varSourceFactoryMap(factories []VarSourceProviderFactory) map[string]VarSourceProviderFactory {
+	result := map[string]VarSourceProviderFactory{}
+	for _, factory := range factories {
+		transport := strings.TrimSpace(factory.Transport)
+		if transport == "" || factory.Create == nil {
+			continue
+		}
+		result[transport] = factory
+	}
+	return result
+}
+
+// RegisterVarSourceProviders adds var transport provider factories to this runtime. Safe to
+// call after Load: providers are constructed lazily on first use.
+func (runtime *Runtime) RegisterVarSourceProviders(factories ...VarSourceProviderFactory) {
+	if runtime.vars == nil {
+		return
+	}
+	runtime.vars.mu.Lock()
+	defer runtime.vars.mu.Unlock()
+	if runtime.vars.varFactories == nil {
+		runtime.vars.varFactories = map[string]VarSourceProviderFactory{}
+	}
+	for transport, factory := range varSourceFactoryMap(factories) {
+		runtime.vars.varFactories[transport] = factory
+	}
+}
+
+// isBuiltinTransport reports whether the built-in stdlib http client serves this transport.
+// An empty transport defaults to http for backward compatibility.
+func isBuiltinTransport(transport string) bool {
+	return transport == "" || transport == "http"
+}
+
+// providerFor lazily constructs (and caches) the registered provider for a source.
+func (variables *varRuntime) providerFor(sourceName string, source VarSourceDef) (VarSourceProvider, error) {
+	variables.mu.Lock()
+	if provider, ok := variables.providers[sourceName]; ok {
+		variables.mu.Unlock()
+		return provider, nil
+	}
+	factory, ok := variables.varFactories[source.Transport]
+	variables.mu.Unlock()
+
+	if !ok {
+		return nil, fmt.Errorf(
+			"cnos: no var source provider registered for transport %q (source %q). Register one via Options.VarSourceProviders or RegisterVarSourceProviders",
+			source.Transport, sourceName,
+		)
+	}
+
+	provider, err := factory.Create(source, VarProviderContext{ResolveSecret: variables.resolveSecretRef})
+	if err != nil {
+		return nil, fmt.Errorf("cnos: create var source provider for %q: %w", sourceName, err)
+	}
+
+	variables.mu.Lock()
+	if existing, ok := variables.providers[sourceName]; ok {
+		// Lost a construction race — keep the winner and release ours.
+		variables.mu.Unlock()
+		_ = provider.Close()
+		return existing, nil
+	}
+	variables.providers[sourceName] = provider
+	variables.mu.Unlock()
+	return provider, nil
+}
+
+// resolveSecretRef resolves a `secret.*` ref through the existing Go secrets machinery.
+func (variables *varRuntime) resolveSecretRef(ref string) (string, error) {
+	value, found, err := variables.runtime.Read(ref)
+	if err != nil {
+		return "", fmt.Errorf("cnos: resolve var source auth secret %q: %w", ref, err)
+	}
+	if !found {
+		return "", fmt.Errorf("cnos: var source auth secret %q unresolved", ref)
+	}
+	token, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("cnos: var source auth secret %q is not a string", ref)
+	}
+	return token, nil
+}
+
+// pullScope dispatches a group pull to the built-in http client or to a registered
+// transport provider, normalizing both onto the same pullResult.
+func (variables *varRuntime) pullScope(ctx context.Context, sourceName string, source VarSourceDef, group, knownRevision string) (pullResult, error) {
+	if isBuiltinTransport(source.Transport) {
+		return variables.pull(ctx, source, "group", group, knownRevision)
+	}
+
+	provider, err := variables.providerFor(sourceName, source)
+	if err != nil {
+		return pullResult{}, err
+	}
+
+	batch, err := provider.Pull(ctx, VarScope{Group: group}, knownRevision)
+	if err != nil {
+		return pullResult{}, err
+	}
+
+	return pullResult{
+		status:      batch.Status,
+		generation:  batch.Generation,
+		revision:    batch.Revision,
+		schemaId:    batch.SchemaId,
+		effectiveAt: batch.EffectiveAt,
+		values:      batch.Values,
+	}, nil
+}
+
+// startSubscriptions opens a live subscription per prefetch source whose provider
+// implements VarSubscribingProvider. Pushed batches route through the SAME validated ingest
+// path as pulls; pollers still cover pull-only (http) sources. Capability-keyed, never
+// keyed off the transport name.
+func (variables *varRuntime) startSubscriptions() {
+	scopesBySource := map[string][]VarScope{}
+	for group, def := range variables.groups {
+		if def.Mode != "prefetch" {
+			continue
+		}
+		scopesBySource[def.Source] = append(scopesBySource[def.Source], VarScope{Group: group})
+	}
+
+	for sourceName, scopes := range scopesBySource {
+		source, ok := variables.sources[sourceName]
+		if !ok || isBuiltinTransport(source.Transport) {
+			continue
+		}
+
+		provider, err := variables.providerFor(sourceName, source)
+		if err != nil {
+			continue
+		}
+
+		subscriber, ok := provider.(VarSubscribingProvider)
+		if !ok {
+			continue
+		}
+
+		stop, err := subscriber.Subscribe(variables.ctx, scopes, variables.ingestSubscribed)
+		if err != nil {
+			continue
+		}
+
+		variables.mu.Lock()
+		variables.subscriptions = append(variables.subscriptions, stop)
+		variables.mu.Unlock()
+	}
+}
+
+// ingestSubscribed routes a pushed batch through ingest, deriving its group from the
+// batch scope (or, failing that, from the full-key-keyed values).
+func (variables *varRuntime) ingestSubscribed(batch VarBatchResult) {
+	if batch.Status != VarPullOK || len(batch.Values) == 0 {
+		return
+	}
+
+	group := batch.Scope
+	if group == "" {
+		for key := range batch.Values {
+			group = key
+			break
+		}
+	}
+	if index := strings.Index(group, "."); index >= 0 {
+		group = group[:index]
+	}
+	if group == "" {
+		return
+	}
+
+	_ = variables.ingest(varBatch{
+		group:       group,
+		generation:  batch.Generation,
+		revision:    batch.Revision,
+		schemaId:    batch.SchemaId,
+		effectiveAt: batch.EffectiveAt,
+		values:      batch.Values,
+	}, "subscribe")
+}

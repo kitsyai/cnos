@@ -244,10 +244,46 @@ In **every** pull response and push payload, `values` is ALWAYS a JSON object ke
 
 ### Transports
 
-- **rpc (gRPC, `cnos.var.v1`, first)**: `Pull(scope, knownRevision) → SnapshotBatch`; `Subscribe(scopes) → stream SnapshotBatch`. Proto shipped in `packages/var-rpc`.
+- **rpc (gRPC, `cnos.var.v1`, first)**: `Pull(scope, knownRevision) → SnapshotBatch`; `Subscribe(scopes) → stream SnapshotBatch`. Proto shipped in `packages/var-rpc` (see the rpc subsection below).
 - **http**: `GET {url}/cnos/vars?key=|group=` → `200 { generation, revision, schemaId?, effectiveAt, values }`, `304` on `If-None-Match: <revision>`, `404 {code:"no-head"}` → overlay fallback.
 - **ws / sse**: subscribe scopes on connect; server emits snapshot-batch events.
 - **Consumer-side receiver (latching)**: optional inbound push for http-only environments — `POST /cnos/vars/:scope` handled by the mounted adapter → same ingest path.
+
+### rpc (gRPC) transport
+
+The canonical proto lives at **`packages/var-rpc/proto/cnos/var/v1/var.proto`** — a single
+source of truth referenced by both sides (TypeScript loads it at runtime with
+`@grpc/proto-loader`; the Go submodule encodes the same messages directly).
+
+```proto
+service VarService {
+  rpc Pull(PullRequest) returns (SnapshotBatch);
+  rpc Subscribe(SubscribeRequest) returns (stream SnapshotBatch);
+}
+```
+
+- **Scope** is the prefix-stripped scope string, so the same syntactic dot rule decides its
+  kind: `PullRequest.scope` / `SubscribeRequest.scopes` carry a group (no dot) or a key (dot).
+- **`values_json`** is `bytes` carrying the SAME canonical JSON object as the http `values`
+  field — keyed by the full var key minus `var.`. This deliberately reuses the reconciled JSON
+  convention and the existing document validators rather than duplicating schemas in proto.
+- **Semantics map 1:1 onto http**: `not_modified` ≙ `304` (known revision still current, keep
+  cache, `values_json` empty) · `no_head` ≙ `404 {code:"no-head"}` (no active runtime head →
+  overlay fallback to tiers ②/③). Both SDKs raise the same `NotModified` / `NoHead` conditions
+  the http transport does, so the ingest path is transport-agnostic.
+- **Auth**: gRPC metadata `authorization: Bearer <token>`, resolved from the source's
+  `secret.*` ref at call time — the metadata twin of the http `Authorization` header, checked
+  by the same `authorize({kind:'read', scope, token})` hook the http server uses.
+- **Subscribe** is fed by the var-server engine's commit seam (`engine.onCommit`), which fires
+  after every accepted activation/deactivation; the server pushes the new canonical head batch
+  (or a `no_head` batch on deactivation) to every subscriber whose scope matches. Reconnect
+  uses the same capped backoff+jitter policy as the pollers, and clients re-pull with known
+  revisions on reconnect to converge.
+- **`cnos var serve --rpc <port>`** serves the rpc transport alongside the http plane, sharing
+  one store and one engine so http-admin activations reach rpc subscribers.
+- **Wire pinning**: the Go module hand-writes the protobuf encoding (protoc is not a build
+  prerequisite), so byte-level fixtures under `fixtures/var-cross-sdk/rpc/` assert Node and Go
+  encode/decode identically in both directions.
 
 ### Receiver contract (both SDKs, identical)
 

@@ -38,6 +38,7 @@
   "dependencies": {
     "@kitsy/cnos": "workspace:*",
     "@kitsy/cnos-ui": "workspace:*",
+    "@kitsy/cnos-var-rpc": "workspace:*",
     "@kitsy/cnos-var-server": "workspace:*",
     "smol-toml": "^1.4.2"
   },

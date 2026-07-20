@@ -1,0 +1,79 @@
+[
+  {
+    "file": "pull-request.bin",
+    "message": "PullRequest",
+    "hex": "0a076167656e74696312277368613235363a3066306530643063306230613039303830373036303530343033303230313030",
+    "value": {
+      "scope": "agentic",
+      "known_revision": "sha256:0f0e0d0c0b0a09080706050403020100"
+    }
+  },
+  {
+    "file": "pull-request-no-revision.bin",
+    "message": "PullRequest",
+    "hex": "0a136167656e7469632e6c616e65732e76696e6369",
+    "value": {
+      "scope": "agentic.lanes.vinci"
+    }
+  },
+  {
+    "file": "subscribe-request.bin",
+    "message": "SubscribeRequest",
+    "hex": "0a076167656e7469630a0475736572",
+    "value": {
+      "scopes": [
+        "agentic",
+        "user"
+      ]
+    }
+  },
+  {
+    "file": "snapshot-batch.bin",
+    "message": "SnapshotBatch",
+    "hex": "0a076167656e74696310071a277368613235363a306630653064306330623061303930383037303630353034303330323031303022106167656e7469632d6c616e65732f76312a18323032362d30372d32305430303a30303a30302e3030305a324e7b226167656e7469632e6c616e65732e76696e6369223a7b22656e61626c6564223a747275652c226d6f64656c5f7461726765745f726566223a227365637265742e6f70732e6d6f64656c227d7d",
+    "value": {
+      "scope": "agentic",
+      "generation": "7",
+      "revision": "sha256:0f0e0d0c0b0a09080706050403020100",
+      "schema_id": "agentic-lanes/v1",
+      "effective_at": "2026-07-20T00:00:00.000Z",
+      "values_json_utf8": "{\"agentic.lanes.vinci\":{\"enabled\":true,\"model_target_ref\":\"secret.ops.model\"}}"
+    }
+  },
+  {
+    "file": "snapshot-batch-not-modified.bin",
+    "message": "SnapshotBatch",
+    "hex": "0a076167656e74696310071a277368613235363a30663065306430633062306130393038303730363035303430333032303130303801",
+    "value": {
+      "scope": "agentic",
+      "generation": "7",
+      "revision": "sha256:0f0e0d0c0b0a09080706050403020100",
+      "not_modified": true
+    }
+  },
+  {
+    "file": "snapshot-batch-no-head.bin",
+    "message": "SnapshotBatch",
+    "hex": "0a076167656e7469634001",
+    "value": {
+      "scope": "agentic",
+      "no_head": true
+    }
+  },
+  {
+    "file": "snapshot-batch-explicit-defaults.bin",
+    "message": "SnapshotBatch",
+    "decodeOnly": true,
+    "hex": "0a076167656e74696310001a0022002a00320038004001",
+    "value": {
+      "scope": "agentic",
+      "generation": "0",
+      "revision": "",
+      "schema_id": "",
+      "effective_at": "",
+      "not_modified": false,
+      "no_head": true,
+      "values_json_utf8": ""
+    }
+  }
+]

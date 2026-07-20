@@ -16,3 +16,27 @@ never silently drift:
 `projection.json`'s var blocks are the byte-for-byte output of `toServerProjection` for the
 manifest documented in the TS test. If you change either SDK's wire shape, update these
 files and both tests together.
+
+## `rpc/` — byte-level protobuf fixtures
+
+The Go rpc transport (`packages/go/varrpc`) hand-writes the protobuf wire format, because
+`protoc` is not a build prerequisite of this repo. These blobs are what keeps that encoder
+byte-identical to the Node encoder (`@grpc/proto-loader` over the canonical
+`packages/var-rpc/proto/cnos/var/v1/var.proto`), asserted in BOTH directions:
+
+- TypeScript: `packages/var-rpc/test/wire-fixtures.test.ts`
+- Go: `packages/go/varrpc/wire_test.go`
+
+| File | Message | Notes |
+|------|---------|-------|
+| `messages.json` | — | Manifest: per-blob message type, hex, and logical field values both sides assert |
+| `pull-request.bin` | `PullRequest` | scope + known_revision |
+| `pull-request-no-revision.bin` | `PullRequest` | known_revision omitted (proto3 default omission) |
+| `subscribe-request.bin` | `SubscribeRequest` | repeated scopes |
+| `snapshot-batch.bin` | `SnapshotBatch` | full head batch; `values_json` is the canonical `values` JSON |
+| `snapshot-batch-not-modified.bin` | `SnapshotBatch` | `not_modified` (≙ http 304) |
+| `snapshot-batch-no-head.bin` | `SnapshotBatch` | `no_head` (≙ http 404 no-head) |
+| `snapshot-batch-explicit-defaults.bin` | `SnapshotBatch` | decode-only: the shape the TS server actually emits (every field set, so protobuf.js also writes the default-valued ones). Both sides must decode it to the same logical message as the canonical blob. |
+
+All blobs except the last use canonical proto3 encoding (fields equal to their default are
+omitted). Regenerate them only alongside a deliberate wire change, and update both tests.

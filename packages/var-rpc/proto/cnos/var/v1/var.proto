@@ -1,0 +1,36 @@
+syntax = "proto3";
+package cnos.var.v1;
+
+// CNOS runtime variables (var.*) distribution over gRPC. Canonical, single source of
+// truth referenced by every SDK. `values_json` deliberately reuses the reconciled
+// cross-SDK canonical JSON convention (values keyed by the full var key minus `var.`)
+// instead of duplicating document schemas in proto.
+service VarService {
+  // Pull the current canonical head batch for one scope. Answers not_modified when the
+  // caller's known_revision is still current, or no_head when the scope has no active
+  // runtime head (the client falls back to overlay tiers).
+  rpc Pull(PullRequest) returns (SnapshotBatch);
+  // Subscribe to one or more scopes; the server streams a fresh SnapshotBatch on every
+  // accepted activation/deactivation for a matching scope.
+  rpc Subscribe(SubscribeRequest) returns (stream SnapshotBatch);
+}
+
+message PullRequest {
+  string scope = 1;            // var key (contains dot) or group (no dot), var. prefix stripped
+  string known_revision = 2;   // optional; server may answer not_modified
+}
+
+message SubscribeRequest {
+  repeated string scopes = 1;
+}
+
+message SnapshotBatch {
+  string scope = 1;
+  int64 generation = 2;
+  string revision = 3;         // sha256:...
+  string schema_id = 4;
+  string effective_at = 5;     // RFC3339
+  bytes values_json = 6;       // canonical JSON object keyed by full stripped var key (reconciled convention)
+  bool not_modified = 7;       // true => known_revision still current; values_json empty
+  bool no_head = 8;            // true => no active runtime head for scope (client falls back to overlay tiers)
+}

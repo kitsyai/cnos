@@ -74,6 +74,9 @@ importers:
       '@kitsy/cnos-ui':
         specifier: workspace:*
         version: link:../ui
+      '@kitsy/cnos-var-rpc':
+        specifier: workspace:*
+        version: link:../var-rpc
       '@kitsy/cnos-var-server':
         specifier: workspace:*
         version: link:../var-server
@@ -154,6 +157,25 @@ importers:
       '@kitsy/cnos-var-server':
         specifier: workspace:*
         version: link:../var-server
+      '@kitsy/cnos-var-testkit':
+        specifier: workspace:*
+        version: link:../var-testkit
+
+  packages/var-rpc:
+    dependencies:
+      '@grpc/grpc-js':
+        specifier: ^1.10.0
+        version: 1.14.4
+      '@grpc/proto-loader':
+        specifier: ^0.7.10
+        version: 0.7.15
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
+      '@kitsy/cnos-var-server':
+        specifier: workspace:*
+        version: link:../var-server
+    devDependencies:
       '@kitsy/cnos-var-testkit':
         specifier: workspace:*
         version: link:../var-testkit
@@ -737,6 +759,11 @@ packages:
   '@grpc/grpc-js@1.14.4':
     resolution: {integrity: sha512-k9Dj3DV/itK9D06Y8f190Qgop7/Ui+D0njFV3LHMPwPT75DpXLQohE9Wmz0QElrJnzsjB7KPWiKJbOl7IPDArQ==}
     engines: {node: '>=12.10.0'}
+
+  '@grpc/proto-loader@0.7.15':
+    resolution: {integrity: sha512-tMXdRCfYVixjuFK+Hk0Q1s38gV9zDiDJfWL3h1rv4Qc39oILCu1TRTDt7+fGUI8K4G1Fj125Hx/ru3azECWTyQ==}
+    engines: {node: '>=6'}
+    hasBin: true
 
   '@grpc/proto-loader@0.8.1':
     resolution: {integrity: sha512-wtF6h+DY6M3YaDBPAmvuuA6jV8Sif9MjtOI5euKFWRgCDl5PeDpPsHR9u2l6St5ceY8AZgoNDww5+HvEsXFsGg==}
@@ -4047,6 +4074,13 @@ snapshots:
     dependencies:
       '@grpc/proto-loader': 0.8.1
       '@js-sdsl/ordered-map': 4.4.2
+
+  '@grpc/proto-loader@0.7.15':
+    dependencies:
+      lodash.camelcase: 4.3.0
+      long: 5.3.2
+      protobufjs: 7.6.3
+      yargs: 17.7.2
 
   '@grpc/proto-loader@0.8.1':
     dependencies:

@@ -426,12 +426,13 @@ const COMMANDS: HelpCommand[] = [
       { flag: '--store <path>', description: 'Local mode: operate directly on a file-backed (JSONL) var log at <path>.' },
       { flag: '--server <url>', description: 'Remote mode: target a running var server base URL (…/cnos/vars).' },
       { flag: '--bearer-token <token>', description: 'Bearer token sent to a remote var server, or required token for serve.' },
+      { flag: '--rpc <port>', description: 'serve only: also serve the rpc (gRPC) transport on <port>, sharing the http store/engine.' },
     ],
     examples: [
       'cnos var create agentic.lanes.vinci --document @lane.json --schema agentic-lanes/v1 --store ./.cnos/var-log.jsonl',
       'cnos var activate agentic.lanes.vinci --revision sha256:… --expect-generation 0 --store ./.cnos/var-log.jsonl',
       'cnos var status agentic.lanes.vinci --server https://config.internal/cnos/vars',
-      'cnos var serve --store ./.cnos/var-log.jsonl --port 8790',
+      'cnos var serve --store ./.cnos/var-log.jsonl --port 8790 --rpc 8791',
     ],
   },
   {

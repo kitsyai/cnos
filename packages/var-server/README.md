@@ -61,6 +61,24 @@ Authorization: every request runs through `options.authorize({ kind, scope, toke
 (bearer token parsed from `Authorization: Bearer …`). Default is allow-all with a one-time
 stderr warning; `staticBearerAuthorize(tokens)` is provided for dev/CI. Denied → `403`.
 
+## Commit seam (`engine.onCommit`)
+
+`VarEngine.onCommit(listener)` fires after every accepted activation/deactivation (rollback
+flows through `activate`, so it is covered), receiving `{ scope, kind, head }` with the store
+already updated. It returns an unsubscribe function. This is the reusable push seam behind the
+rpc `Subscribe` stream in `@kitsy/cnos-var-rpc` (`attachVarRpc` / `serveVarRpc`); ws/sse will
+reuse it unchanged.
+
+To make http-admin mutations reach rpc subscribers, both planes must share ONE engine:
+
+```ts
+const engine = createVarEngine(store, { documents });
+http.createServer(varServer(store, { engine, documents })).listen(8790);
+attachVarRpc(grpcServer, store, { engine, documents });   // same engine
+```
+
+`cnos var serve --port 8790 --rpc 8791` does exactly this.
+
 ## Event-log format (`fileStore`)
 
 One JSON object per line (JSONL), appended forever. Event kinds:

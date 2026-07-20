@@ -27,6 +27,9 @@ type Options struct {
 	Environment          map[string]string
 	SecretHome           string
 	SecretVaultProviders []SecretVaultProviderFactory
+	// VarSourceProviders registers var transport modules (rpc, ws, sse). The core module
+	// ships the http client built in; other transports live in their own submodules.
+	VarSourceProviders []VarSourceProviderFactory
 }
 
 type Runtime struct {
@@ -74,7 +77,20 @@ type runtimeEntry struct {
 	overridden    []runtimeProvenance
 }
 
+// Load builds a runtime from the configured source and registers any provider factories
+// supplied through Options.
 func Load(options Options) (*Runtime, error) {
+	runtime, err := loadRuntime(options)
+	if err != nil {
+		return nil, err
+	}
+	if len(options.VarSourceProviders) > 0 {
+		runtime.RegisterVarSourceProviders(options.VarSourceProviders...)
+	}
+	return runtime, nil
+}
+
+func loadRuntime(options Options) (*Runtime, error) {
 	env := newEnvironment(options.Environment)
 	secretHome, err := resolveSecretHome(env, options.SecretHome)
 	if err != nil {

@@ -66,6 +66,13 @@ type varRuntime struct {
 	store      *varStore
 	httpClient *http.Client
 
+	// Registered transport provider factories keyed by transport name, plus the lazily
+	// constructed providers and their live subscriptions. The core module ships the http
+	// client only; rpc/ws/sse arrive as registered factories from their own submodules.
+	varFactories  map[string]VarSourceProviderFactory
+	providers     map[string]VarSourceProvider
+	subscriptions []func()
+
 	mu        sync.Mutex
 	watchers  map[int]*varWatcher
 	nextWatch int
@@ -84,18 +91,21 @@ type varRuntime struct {
 func (runtime *Runtime) initVars(projection ServerProjection) {
 	ctx, cancel := context.WithCancel(context.Background())
 	variables := &varRuntime{
-		runtime:    runtime,
-		sources:    map[string]VarSourceDef{},
-		groups:     map[string]VarGroupDef{},
-		documents:  map[string]DocumentSchema{},
-		rules:      map[string]VarKeyRule{},
-		store:      newVarStore(),
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		watchers:   map[int]*varWatcher{},
-		status:     map[string]*varScopeStatus{},
-		inflight:   map[string]bool{},
-		ctx:        ctx,
-		cancel:     cancel,
+		runtime:      runtime,
+		sources:      map[string]VarSourceDef{},
+		groups:       map[string]VarGroupDef{},
+		documents:    map[string]DocumentSchema{},
+		rules:        map[string]VarKeyRule{},
+		store:        newVarStore(),
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		varFactories: map[string]VarSourceProviderFactory{},
+		providers:    map[string]VarSourceProvider{},
+
+		watchers: map[int]*varWatcher{},
+		status:   map[string]*varScopeStatus{},
+		inflight: map[string]bool{},
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 	for name, def := range projection.VarSources {
 		variables.sources[name] = def
@@ -121,7 +131,9 @@ func (runtime *Runtime) initVars(projection ServerProjection) {
 }
 
 // read resolves a var key via overlay precedence:
-//  ① active runtime snapshot → ② static value.<group>.<rest> → ③ schema default → nil.
+//
+//	① active runtime snapshot → ② static value.<group>.<rest> → ③ schema default → nil.
+//
 // Sync and never blocks on the network. For ondemand groups with no snapshot it
 // triggers exactly one background fetch and serves the fallback tier meanwhile.
 func (variables *varRuntime) read(fullKey string) (any, bool, error) {
@@ -341,11 +353,7 @@ func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error
 	if !ok {
 		return fmt.Errorf("cnos: var group %q references unknown source %q", group, def.Source)
 	}
-	if source.Transport != "" && source.Transport != "http" {
-		return fmt.Errorf("cnos: var source transport %q not supported by the Go SDK", source.Transport)
-	}
-
-	result, err := variables.pull(ctx, source, "group", group, variables.knownRevision(group))
+	result, err := variables.pullScope(ctx, def.Source, source, group, variables.knownRevision(group))
 	if err != nil {
 		variables.recordError(group, err.Error())
 		return err
@@ -434,6 +442,7 @@ func (variables *varRuntime) start(ctx context.Context) error {
 	}
 
 	variables.startPollers()
+	variables.startSubscriptions()
 	return nil
 }
 
@@ -508,7 +517,24 @@ func (variables *varRuntime) close() error {
 	variables.closed = true
 	variables.watchers = map[int]*varWatcher{}
 	cancel := variables.cancel
+	subscriptions := variables.subscriptions
+	variables.subscriptions = nil
+	providers := make([]VarSourceProvider, 0, len(variables.providers))
+	for _, provider := range variables.providers {
+		providers = append(providers, provider)
+	}
+	variables.providers = map[string]VarSourceProvider{}
 	variables.mu.Unlock()
+
+	for _, stop := range subscriptions {
+		if stop != nil {
+			stop()
+		}
+	}
+	for _, provider := range providers {
+		_ = provider.Close()
+	}
+
 	if cancel != nil {
 		cancel()
 	}

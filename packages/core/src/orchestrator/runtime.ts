@@ -350,6 +350,7 @@ export function createRuntime(
       value: async () => {
         await varManager.prefetch();
         varManager.startPollers();
+        varManager.startSubscriptions();
       },
       enumerable: false,
     });

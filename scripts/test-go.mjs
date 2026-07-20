@@ -7,6 +7,7 @@ const cache = resolve(root, ".tmp", "go-build");
 const workspace = resolve(root, "go.work");
 const modules = [
   "packages/go",
+  "packages/go/varrpc",
   "packages/go/vault/gcp",
   "packages/go/vault/firebase",
   "packages/go/vault/aws",

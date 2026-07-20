@@ -49,6 +49,9 @@ func Ready(options ...Options) error {
 		if len(loadOptions.SecretVaultProviders) > 0 {
 			runtime.RegisterSecretVaultProviders(loadOptions.SecretVaultProviders...)
 		}
+		if len(loadOptions.VarSourceProviders) > 0 {
+			runtime.RegisterVarSourceProviders(loadOptions.VarSourceProviders...)
+		}
 		if err := runtime.warmSecrets(); err != nil {
 			return err
 		}
@@ -225,6 +228,17 @@ func RegisterSecretVaultProviders(factories ...SecretVaultProviderFactory) error
 		return err
 	}
 	runtime.RegisterSecretVaultProviders(factories...)
+	return nil
+}
+
+// RegisterVarSourceProviders adds var transport provider factories (rpc, ws, sse) to the
+// default runtime. Mirrors RegisterSecretVaultProviders.
+func RegisterVarSourceProviders(factories ...VarSourceProviderFactory) error {
+	runtime, err := DefaultRuntime()
+	if err != nil {
+		return err
+	}
+	runtime.RegisterVarSourceProviders(factories...)
 	return nil
 }
 

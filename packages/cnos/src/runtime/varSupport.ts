@@ -94,6 +94,7 @@ export function createSingletonVarSupport(options: SingletonVarSupportOptions): 
     async start() {
       await manager.prefetch();
       manager.startPollers();
+      manager.startSubscriptions();
     },
   };
 }

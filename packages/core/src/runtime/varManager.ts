@@ -51,6 +51,7 @@ export class VarManager {
   private readonly providers = new Map<string, VarSourceProvider>();
   private readonly inFlight = new Map<string, Promise<void>>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly subscriptions = new Set<() => void>();
   private overlayReader?: (key: string) => unknown;
   private closed = false;
 
@@ -309,6 +310,64 @@ export class VarManager {
     }
   }
 
+  /**
+   * Start a live subscription per prefetch source whose provider implements `subscribe`
+   * (push transports: rpc first, ws/sse later). Pushed batches route through the SAME
+   * validated ingest path as pulls; the provider owns reconnect/backoff internally. Pollers
+   * still cover pull-only (http) sources — the two are complementary, keyed off the provider's
+   * declared capabilities, never the transport name.
+   */
+  startSubscriptions(): void {
+    const scopesBySource = new Map<string, VarScope[]>();
+
+    for (const [group, definition] of Object.entries(this.vars)) {
+      if (definition.mode !== 'prefetch') {
+        continue;
+      }
+
+      const scopes = scopesBySource.get(definition.source) ?? [];
+      scopes.push({ group });
+      scopesBySource.set(definition.source, scopes);
+    }
+
+    for (const [sourceId, scopes] of scopesBySource) {
+      let provider: VarSourceProvider;
+
+      try {
+        provider = this.provider(sourceId);
+      } catch {
+        // Missing/unavailable transport module — the overlay serves static/default tiers.
+        continue;
+      }
+
+      if (!provider.subscribe) {
+        continue;
+      }
+
+      const stop = provider.subscribe(scopes, (batch) => {
+        this.ingestSubscribed(batch);
+      });
+
+      this.subscriptions.add(stop);
+    }
+  }
+
+  /** Route a pushed batch through ingest, deriving its group from the full-key-keyed values. */
+  private ingestSubscribed(batch: VarSnapshotBatch): void {
+    if (this.closed) {
+      return;
+    }
+
+    const firstKey = Object.keys(batch.values)[0];
+
+    if (!firstKey) {
+      return;
+    }
+
+    const group = firstKey.split('.')[0] ?? '';
+    this.ingest(group, group, batch);
+  }
+
   private schedulePoll(group: string, sourceId: string, interval: number, delay: number, attempt: number): void {
     if (this.closed) {
       return;
@@ -400,6 +459,15 @@ export class VarManager {
       clearTimeout(timer);
     }
     this.timers.clear();
+
+    for (const stop of this.subscriptions) {
+      try {
+        stop();
+      } catch {
+        /* provider unsubscribe is best-effort */
+      }
+    }
+    this.subscriptions.clear();
 
     await Promise.all(
       Array.from(this.providers.values()).map((provider) =>

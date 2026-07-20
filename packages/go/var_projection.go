@@ -9,8 +9,11 @@ import (
 // endpoint) declared in the manifest under `varSources`. Adapters consume it at
 // runtime; read sites never name a source directly.
 type VarSourceDef struct {
-	// Transport is one of "rpc", "http", "ws", "sse". The Go SDK implements
-	// "http" (pull + latching receiver); other transports parse but are inert.
+	// Transport is one of "rpc", "http", "ws", "sse". "http" (pull + latching
+	// receiver) is built into this module; other transports are served by
+	// registered VarSourceProviderFactory implementations from their own
+	// submodules (e.g. packages/go/varrpc for "rpc"), and are inert until one
+	// is registered.
 	Transport string `json:"transport"`
 	// URL is the source base URL. HTTP pulls hit "{URL}/cnos/vars".
 	URL string `json:"url"`

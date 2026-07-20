@@ -22,6 +22,9 @@ cnos var status agentic.lanes.vinci --server https://config.internal/cnos/vars
 
 # Run a standalone var server (thin wrapper over the embeddable library).
 cnos var serve --store ./.cnos/var-log.jsonl --port 8790
+
+# Serve the rpc (gRPC) transport alongside http, sharing one store/engine.
+cnos var serve --store ./.cnos/var-log.jsonl --port 8790 --rpc 8791
 ```
 
 ## Subcommands
@@ -43,9 +46,11 @@ cnos var serve --store ./.cnos/var-log.jsonl --port 8790
   Secret material never appears in either.
 - `replay <scope> --to-generation <N>` — reconstruct the head that was active at a past
   generation (persistent/file-backed stores only).
-- `serve [--store <path>] [--host <h>] [--port <n>] [--bearer-token <token>]` — run a
-  standalone HTTP var server. With `--store` it is durable; without, it uses an ephemeral
-  memory store.
+- `serve [--store <path>] [--host <h>] [--port <n>] [--rpc <port>] [--bearer-token <token>]` —
+  run a standalone var server. With `--store` it is durable; without, it uses an ephemeral
+  memory store. `--rpc <port>` additionally serves the rpc (gRPC) transport on that port,
+  sharing the same store and engine so activations made over the http admin plane reach rpc
+  subscribers.
 
 ## Targets
 

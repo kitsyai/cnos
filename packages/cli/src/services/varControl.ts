@@ -4,11 +4,14 @@ import type { DocumentSchemaDefinition } from '@kitsy/cnos-core';
 import {
   createVarEngine,
   fileStore,
+  memoryStore,
   serveVarServer,
   staticBearerAuthorize,
   type RunningVarServer,
   type VarEngine,
+  type VarStore,
 } from '@kitsy/cnos-var-server';
+import { serveVarRpc, type RunningVarRpcServer } from '@kitsy/cnos-var-rpc';
 
 export interface VarMutationMeta {
   actor?: string;
@@ -142,17 +145,63 @@ export interface ServeOptions {
   documents?: Record<string, DocumentSchemaDefinition>;
   host?: string;
   port?: number;
+  /** When set, also serve the rpc (gRPC) transport on this port, sharing the same engine. */
+  rpcPort?: number;
   bearerToken?: string;
 }
 
-/** Start a standalone var server (`cnos var serve`). Resolves once it is listening. */
-export async function startStandaloneVarServer(options: ServeOptions): Promise<RunningVarServer> {
-  const store = options.storePath ? fileStore(options.storePath) : (await import('@kitsy/cnos-var-server')).memoryStore();
+export interface RunningStandaloneVarServer {
+  store: VarStore;
+  /** http read/admin plane URL (…/cnos/vars). */
+  url: string;
+  host: string;
+  port: number;
+  /** rpc `host:port` gRPC target, when `--rpc` was requested. */
+  rpcTarget?: string;
+  close(): Promise<void>;
+}
 
-  return serveVarServer(store, {
+/**
+ * Start a standalone var server (`cnos var serve`). Always serves the http plane; when
+ * `rpcPort` is set it ALSO serves the rpc (gRPC) transport on that port. Both planes share a
+ * single {@link VarEngine} so activations made over the http admin plane reach rpc subscribers.
+ * Resolves once every requested listener is bound.
+ */
+export async function startStandaloneVarServer(options: ServeOptions): Promise<RunningStandaloneVarServer> {
+  const store: VarStore = options.storePath ? fileStore(options.storePath) : memoryStore();
+  const engine = createVarEngine(store, {
     ...(options.documents ? { documents: options.documents } : {}),
-    ...(options.bearerToken ? { authorize: staticBearerAuthorize(options.bearerToken) } : {}),
+  });
+  const authorize = options.bearerToken ? staticBearerAuthorize(options.bearerToken) : undefined;
+
+  const http: RunningVarServer = await serveVarServer(store, {
+    engine,
+    ...(options.documents ? { documents: options.documents } : {}),
+    ...(authorize ? { authorize } : {}),
     ...(options.host ? { host: options.host } : {}),
     ...(options.port !== undefined ? { port: options.port } : {}),
   });
+
+  let rpc: RunningVarRpcServer | undefined;
+
+  if (options.rpcPort !== undefined) {
+    rpc = await serveVarRpc(store, {
+      engine,
+      ...(options.documents ? { documents: options.documents } : {}),
+      ...(authorize ? { authorize } : {}),
+      ...(options.host ? { host: options.host } : {}),
+      port: options.rpcPort,
+    });
+  }
+
+  return {
+    store,
+    url: http.url,
+    host: http.host,
+    port: http.port,
+    ...(rpc ? { rpcTarget: rpc.target } : {}),
+    async close() {
+      await Promise.all([http.close(), ...(rpc ? [rpc.close()] : [])]);
+    },
+  };
 }
