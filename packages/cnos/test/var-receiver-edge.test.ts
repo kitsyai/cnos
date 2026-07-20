@@ -206,12 +206,11 @@ describe('receiver replay and ordering semantics', () => {
     await runtime.close?.();
   });
 
-  it('DEFECT-PIN: unchanged content re-fires watchers whenever the generation differs', async () => {
-    // The derived revision is content-addressed, so an UNCHANGED document keeps its revision
-    // — but a revision-less push also stamps `generation = Date.now()`. The watcher gate is
-    // (revision, generation), so two identical no-op pushes land in different milliseconds and
-    // spuriously wake every watcher. Pinned here with explicit generations so the assertion is
-    // deterministic; the wall-clock variant is the same hazard with a race attached.
+  it('unchanged content stays silent even when the generation advances', async () => {
+    // Revision is content-addressed, so an unchanged document keeps its revision while a
+    // revision-less push is stamped with a wall-clock generation. The watcher gate compares
+    // revision only, so replaying an identical document never wakes watchers no matter how the
+    // generation moves; a genuine content change still fires exactly once.
     const runtime = await runtimeFor();
     const handler = varReceiver('svc');
     const fires: unknown[] = [];
@@ -228,16 +227,21 @@ describe('receiver replay and ordering semantics', () => {
       expect(res.statusCode).toBe(204);
     }
 
-    // Value never changed, yet the watcher fired for every push.
-    expect(fires).toEqual([true, true, true]);
-    // The same revision+generation replayed is correctly silent.
+    // First push established the value; the two identical replays were silent.
+    expect(fires).toEqual([true]);
+
+    // A real content change still fires.
     await invoke(handler, {
       method: 'POST',
       url: '/cnos/vars/push/flags',
       headers: { authorization: `Bearer ${SECRET}` },
-      body: { revision: REVISION, generation: 1002, values: { 'flags.enabled': true } },
+      body: {
+        revision: 'sha256:content-addressed-changed',
+        generation: 1003,
+        values: { 'flags.enabled': false },
+      },
     });
-    expect(fires).toEqual([true, true, true]);
+    expect(fires).toEqual([true, false]);
     await runtime.close?.();
   });
 });

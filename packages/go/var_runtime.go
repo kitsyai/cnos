@@ -292,9 +292,11 @@ func (variables *varRuntime) notify(updates map[string]*varRecord, prev map[stri
 		next := record.snapshot(now)
 		previous := prev[key]
 
-		if previous.Source == VarSourceRuntime &&
-			previous.Revision == next.Revision &&
-			previous.Generation == next.Generation {
+		// Revision is content-addressed, so an equal revision means equal content and there is
+		// nothing for a watcher to react to. Generation is deliberately excluded: a push without
+		// an explicit revision is stamped with a wall-clock generation, so gating on it would
+		// wake every watcher on each replay of an identical document.
+		if previous.Source == VarSourceRuntime && previous.Revision == next.Revision {
 			continue
 		}
 

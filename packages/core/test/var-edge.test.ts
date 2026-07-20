@@ -342,7 +342,10 @@ describe('generation numerics', () => {
     expect(store.readRuntimeVar('var.g.k')).toBe('v');
   });
 
-  it('PINNED: same revision with a DIFFERENT generation re-fires watchers', () => {
+  it('same revision with a DIFFERENT generation stays silent; a content change fires', () => {
+    // Watcher dispatch is gated on the content-addressed revision alone. Generation is excluded
+    // deliberately: a revision-less push is stamped with a wall-clock generation, so gating on it
+    // would wake every watcher on each identical replay.
     const store = new LiveVarStore({
       groups: { g: { source: 's', mode: 'prefetch' } },
       schema: { 'var.g.k': { type: 'string' } },
@@ -353,7 +356,10 @@ describe('generation numerics', () => {
 
     store.ingest('g', 'g', batch({ generation: 1, revision: 'sha256:same', values: { 'g.k': 'v' } }));
     store.ingest('g', 'g', batch({ generation: 2, revision: 'sha256:same', values: { 'g.k': 'v' } }));
-    expect(fires).toEqual([1, 2]);
+    expect(fires).toEqual([1]);
+
+    store.ingest('g', 'g', batch({ generation: 3, revision: 'sha256:other', values: { 'g.k': 'w' } }));
+    expect(fires).toEqual([1, 3]);
   });
 });
 

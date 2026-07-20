@@ -501,7 +501,11 @@ export class LiveVarStore {
 
         const prev = previous.get(key);
 
-        if (prev && prev.revision === next.revision && prev.generation === next.generation) {
+        // Revision is content-addressed, so an equal revision means equal content and there is
+        // nothing for a watcher to react to. Generation is deliberately excluded: a push without
+        // an explicit revision is stamped with a wall-clock generation, so gating on it would
+        // wake every watcher on each replay of an identical document.
+        if (prev && prev.revision === next.revision) {
           continue;
         }
 

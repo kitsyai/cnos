@@ -217,10 +217,12 @@ func TestVarPinnedOutOfOrderIngestIsLastWriteWins(t *testing.T) {
 
 func TestVarReplayedIdenticalBatchIsSilent(t *testing.T) {
 	t.Parallel()
-	// W5d/D9 CANONICAL (both SDKs): watcher dispatch is gated on (revision, generation)
-	// changing, so an EXACT replay of an already-applied batch wakes nobody. Idempotent
-	// push is a core protocol property, so a replay must be invisible to consumers.
-	// (A same-revision/different-generation commit still fires — asserted below.)
+	// W5d/D9 CANONICAL (both SDKs): watcher dispatch is gated on the content-addressed
+	// revision alone, so replaying an already-applied document wakes nobody. Idempotent push
+	// is a core protocol property, and generation is excluded deliberately: a revision-less
+	// push is stamped with a wall-clock generation, so gating on it would wake every watcher
+	// on each identical replay. (A same-revision commit at a new generation stays silent —
+	// asserted below; only a content change fires.)
 	runtime, _ := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand"}}, nil, false)
 
 	var mu sync.Mutex
@@ -246,16 +248,28 @@ func TestVarReplayedIdenticalBatchIsSilent(t *testing.T) {
 		t.Fatalf("an exact replay must not wake watchers; expected 1 fire, got %d", got)
 	}
 
-	// A new generation for the same revision IS a real activation and does fire.
+	// A new generation carrying the SAME revision is unchanged content: still silent.
 	bumped := batch
 	bumped.generation = 6
 	if err := runtime.vars.ingest(bumped, "test"); err != nil {
 		t.Fatalf("ingest bumped: %v", err)
 	}
 	mu.Lock()
+	got = fires
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("unchanged content must stay silent; expected 1 fire, got %d", got)
+	}
+
+	// A genuine content change fires.
+	changed := varBatch{group: "user", generation: 7, revision: "sha256:different", values: map[string]any{"user.plan": "free"}}
+	if err := runtime.vars.ingest(changed, "test"); err != nil {
+		t.Fatalf("ingest changed: %v", err)
+	}
+	mu.Lock()
 	defer mu.Unlock()
 	if fires != 2 {
-		t.Fatalf("a new generation must fire; expected 2 fires, got %d", fires)
+		t.Fatalf("a content change must fire; expected 2 fires, got %d", fires)
 	}
 }
 
