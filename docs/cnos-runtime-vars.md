@@ -374,9 +374,21 @@ Registered like secret vault factories (`varSourceProviders` create option + `re
 
 No budgeting/usage/ledger/counter state, no model routing, no consumer authorization logic, no business vocabulary in core, no secret values in `var.*`, no per-service polling daemons, no browser/public exposure of `var.*` in v1.
 
+## Implementation deltas (doc vs shipped code)
+
+Recorded during the docs pass; the code is authoritative where these differ from prose above.
+
+1. **Ondemand fetches are group-scoped.** An on-demand read never pulls a bare key — it pulls the whole group, deduped to one in-flight fetch per group. Both SDKs behave this way.
+2. **Transport availability is staged**, not simultaneous: `http` and `rpc` (gRPC, `cnos.var.v1`) have real providers; `ws` and `sse` are accepted by the manifest schema but have no provider yet.
+3. **`varStatus()` is two distinct shapes** — the consumer SDK's per-scope status vs. the server's own scope status. They share field names where they overlap but are not the same type.
+4. **Receiver route is a convention, not a contract.** Both SDKs only require the scope to be the last URL path segment; `POST /cnos/vars/:scope` is the recommended mount, not an enforced one.
+5. **rpc registration is explicit.** `@kitsy/cnos` does not depend on `@kitsy/cnos-var-rpc`; pass `varSourceProviders: [rpcVarSourceProvider]` to opt in, so gRPC is never forced on consumers. Likewise the Go rpc client lives in the `packages/go/varrpc` submodule — the root Go module stays stdlib-only.
+
 ## Open decisions
 
 1. ~~Server topology~~ — **resolved**: library-first embeddable var-server, standalone `cnos var serve` as a thin wrapper (see Server topology section). Never a sidecar process. Storage-direct SDK reads (polling GCS/Firestore directly, no server) may come later as a simple mode.
-2. **Document schema syntax**: CNOS-native `documents:` field map (recommended, shown above) vs embedding standard JSON Schema. Native keeps validation code shared with `ConfigSpecRule`; JSON Schema buys ecosystem tooling but adds a dependency (Critical Rule 2 needs approval either way if we take a validator dep).
-3. **Where the control plane's authz identity comes from** (workload identity federation vs static tokens via secret refs) — likely deployment-specific config on `var-server`, pluggable like vault auth.
-4. **Lease vs ttl naming/merge** — `ttl` (ondemand staleness) and `lease` (fail-closed window) are related; decide whether one field with two roles or two fields (drafted as two).
+2. ~~Document schema syntax~~ — **resolved**: CNOS-native `documents:` field map. Validation code is shared with `ConfigSpecRule` and no validator dependency was taken.
+3. **Where the control plane's authz identity comes from** (workload identity federation vs static tokens via secret refs) — likely deployment-specific config on `var-server`, pluggable like vault auth. The v1 `authorize` hook is the seam.
+4. ~~Lease vs ttl naming/merge~~ — **resolved**: two fields with distinct semantics (`ttl` = ondemand staleness bound, `lease` = fail-closed freshness window). See the freshness transition table.
+5. **Subscribe give-up policy** — an rpc Subscribe stream that fails auth currently reconnects indefinitely with no backpressure or give-up. Needs a bounded policy.
+6. **`publish-go.yml` does not tag `packages/go/varrpc/v*`** — the submodule layout is compatible, but the tag line must be added before it is consumable from pkg.go.dev.
