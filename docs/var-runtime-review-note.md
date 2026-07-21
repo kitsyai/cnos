@@ -1,7 +1,9 @@
 # Review Handover — `var.*` Runtime Variables (`main...var-runtime`)
 
-**Branch:** `var-runtime` (12 commits ahead of `main`, clean tree, nothing pushed)
-**Size:** 134 files, +18,974 / −37
+**Branch:** `var-runtime` (18 commits ahead of `main`, clean tree, nothing pushed)
+**Size:** 138 files, +21,300 / −40
+**Review status:** rounds 1 and 2 complete — 2 and 6 findings respectively, all valid, all fixed
+(see the round sections below). **This is the round-3 pass.**
 **Target release:** 1.18.0 (minor — purely additive)
 **Design/ADR:** `docs/cnos-runtime-vars.md` · **Agent context:** `.agents/context/runtime-vars.md`
 
@@ -27,6 +29,8 @@ namespaces like `process.*`). No aliases.
 
 | Commit | Phase | Contents |
 |---|---|---|
+| `3a292ef` | R1 | Round-1 fixes: ondemand no longer gates Ready; failed starts no longer latch |
+| `c5e6e0b` | R2 | Round-2 fixes: deactivation clears the runtime tier; required-check parity; shared in-flight startup; ctx; poll capability; transactional startup |
 | `22f287c` | W1 | Core authoring: types, manifest `varSources`/`vars`/`documents`, normalization, validation, overlay precedence, projection emit |
 | `43c451c` | W2 | Control plane: `packages/var-server` (engine + stores + HTTP), `var-testkit`, `cnos var` CLI |
 | `a328671` | W4 | Node SDK: live store, `VarManager`, `var-http` provider, receiver, singleton API, derive Rule 9 |
@@ -67,6 +71,33 @@ the head is absent and consumers degrade to static/default) vs `fileStore(path)`
 event-sourced JSONL: revision-created/activated/deactivated/rejected → audit, history,
 replay-to-generation, restart resume).
 
+## Round 3 — where to aim
+
+Rounds 1 and 2 found **eight** real defects. Every one was in **lifecycle or cross-SDK
+semantics**; none were in steady-state ingest, validation, or the secret boundary. That is
+where the 160-test hardening sweep concentrated, and evidently where it did not. Aim round 3
+at the same seam:
+
+1. **Deactivation now actually mutates state** (round-2 blocker 1). It is newly exercised code:
+   check no-head racing an in-flight pull, a no-head arriving while a watcher callback runs,
+   deactivate→reactivate ordering, and whether `lastKnownGood` / `lease` / `freshness` still
+   mean anything sane once the runtime tier is gone.
+2. **Startup and shutdown ordering.** Round 2 changed startup in three ways (shared in-flight
+   attempt, caller ctx, transactional rollback). Look for: `close()` racing a startup attempt,
+   rollback leaving a half-registered provider, a retry after rollback double-registering, and
+   whether a ctx cancelled *during* prefetch leaves the attempt claimable.
+3. **rpc reconnect × the new no-head path.** A reconnect re-pulls subscribed scopes; a
+   deactivation that lands during a terminal-failure backoff may never be observed.
+4. **Cross-SDK parity, again.** Both rounds found Node and Go disagreeing on lifecycle. The
+   wire is fixture-pinned; the *semantics* are not. Treat any behavior where only one SDK has a
+   test as suspect.
+
+**A recurring failure mode worth targeting directly: tests that assert nothing.** Four have
+been found so far — a synthetic empty-batch "deactivation" no transport emits, an rpc test that
+pinned a bug as correct, a WSL low-port hang that silently disabled a retry assertion, and three
+`var-http` tests that only passed *because* of the round-2 blocker. If a test looks like
+coverage, check that it fails when the behavior is broken.
+
 ## What to review hardest
 
 1. **Overlay precedence correctness** — `packages/core/src/runtime/readVar.ts`,
@@ -74,7 +105,8 @@ replay-to-generation, restart resume).
    *declared* `default` is distinguishable from an absent one (JSON absence ≠ `false`/`null`).
 2. **Atomicity** — `varStore.ts` (Node) and `var_store.go` / `var_runtime.go` (Go). Readers must
    never observe a partially-applied batch. Node relies on immutable snapshot swap; Go on
-   `atomic.Pointer` copy-on-write CAS. **Not race-detector verified** (see Known gaps).
+   `atomic.Pointer` copy-on-write CAS. `removeScope` (new in round 2) must hold the same
+   discipline. Race-detector verified — see Verification status.
 3. **Validate-before-commit** — an invalid revision must never replace last-known-good, on both
    the authoring side (`var-server/src/engine.ts`) and consumer ingest.
 4. **Secret boundary (Critical Rules 4/5)** — `var.*` documents carry opaque `secret.*` refs only.
