@@ -176,6 +176,14 @@ In both cases the SDK drops the runtime tier for the scope (and anything nested 
 fires `watch` callbacks with the static/default snapshot that took over, and reports the
 fallback tier in `varStatus()` with no lingering `revision`/`appliedGeneration`.
 
+A consumer that was **disconnected** when you deactivated still converges: the SDK re-pulls every
+subscribed scope whenever a stream reconnects, so the missed `no_head` is applied then. You do not
+have to re-issue anything after a client outage.
+
+Note also that an `activate` **replaces** its scope: a key the previous revision carried and the
+new one omits stops being served by consumers and falls back to their static/default tiers. Use
+that deliberately when withdrawing an entry from a document rather than expecting a merge.
+
 ### `rollback` — always a new generation
 
 ```bash

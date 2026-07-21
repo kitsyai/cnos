@@ -221,6 +221,20 @@ export interface VarSourceProviderContext {
    * means the provider has given up reconnecting for those scopes.
    */
   onSubscriptionError?(error: Error, info: { terminal: boolean; scopes: string[] }): void;
+  /**
+   * Report that a subscription stream for `scopes` is established. The SDK answers by
+   * RE-PULLING those scopes with their known revisions so a mutation that happened while the
+   * stream was down (an activation, and — worse — a DEACTIVATION) still converges: the server
+   * only ever forwards FUTURE commits, so without this a missed deactivation would serve
+   * withdrawn policy forever.
+   *
+   * The provider must call this AFTER the Subscribe call has been issued, never before: with
+   * the subscription opened first, a commit racing the resync pull arrives on the stream
+   * instead of being dropped. `reconnect` is `false` only for the very first connect of a
+   * subscription — the SDK then skips scopes it already prefetched. Mirrors the Go
+   * `VarProviderContext.OnSubscriptionConnected`.
+   */
+  onSubscriptionConnected?(scopes: string[], info: { reconnect: boolean }): void;
 }
 
 /**

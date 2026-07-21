@@ -71,7 +71,58 @@ the head is absent and consumers degrade to static/default) vs `fileStore(path)`
 event-sourced JSONL: revision-created/activated/deactivated/rejected → audit, history,
 replay-to-generation, restart resume).
 
-## Round 3 — where to aim
+## Round 3 — findings and fixes
+
+Round 3 found **eight** more real defects. Every one was again in **lifecycle or cross-SDK
+semantics**, exactly where round 3 was aimed. All eight are fixed, each with a test on BOTH SDKs.
+
+| # | Severity | Defect | Fix |
+|---|---|---|---|
+| 1 | blocker | **rpc reconnect never re-pulled subscribed scopes.** Both SDKs only reopened the stream, and the server forwards FUTURE commits only, so an activation *or a deactivation* during an outage/backoff was lost permanently. Since round 2 made deactivation a real state change, a missed one meant serving withdrawn policy forever — with no poller to converge (capability rule). | New SDK seam `onSubscriptionConnected` / `OnSubscriptionConnected`. The provider reports every (re)connect AFTER issuing Subscribe; the SDK re-pulls each subscribed scope through the normal pull path (`no-head` → scope removal included). First connect skips scopes with an applied head; every reconnect pulls everything. |
+| 2 | blocker | **`close()` racing an in-flight startup.** `close()` cleaned only the CURRENT providers/timers/subscriptions; a startup still awaiting prefetch went on to create new ones that were never released, and could report success for an already-closed runtime. | Runtime cancellation cancels the prefetch (Go derives the fetch ctx from caller ctx AND runtime ctx); startup re-checks `closed` after every wait and before creating any long-lived resource; `close()` waits for the attempt to stop; a start on a closed runtime fails (`ErrVarClosed` / thrown). |
+| 3 | blocker | **Node bypassed required enforcement when the provider module was missing.** The round-2 `ProviderUnavailableError` branch `return`ed before the post-outcome required check, so a missing transport module + a required prefetch key + no fallback made Node report READY where Go rejected `StartVars`. | The missing module is still warned, but the required check ALWAYS runs. Startup stays non-fatal only while every required key of the group resolves from static/default. |
+| 4 | blocker | **Go merged group snapshots instead of replacing the scope.** `commit` copied all old records then overlaid the updates, so a key present in revision 1 and absent from revision 2 kept being served — a removed allowlist entry or a revoked policy flag persisting indefinitely. Security-relevant staleness on the feature's flagship use case. | Go's store is now keyed by SCOPE, holding each scope's whole batch (Node's shape). A commit replaces the exact scope; other scopes are untouched. Rule implemented and documented: **longest committed dot-prefix scope serves a key; a missing key does not fall through to a broader scope; replacement is per exact scope string.** |
+| 5 | warning | **No ordering between a `no-head` and an in-flight pull.** A stale pull could reintroduce a head after a deactivation; a delayed `no-head` could clear a newer pushed activation — indefinitely for an ondemand/rpc source. | Monotonic per-scope **operation epoch**, bumped on every authoritative application (including a `no-head` that removes nothing). Pushes always apply; a pull applies only if the epoch is unchanged on completion. Pinned as a contract DISTINCT from out-of-order-push last-write-wins. |
+| 6 | warning | **Watcher notification was not ordered against concurrent/reentrant mutation.** A reactivation triggered inside a deactivation callback made later watchers observe the reactivated value and skip the fallback transition; in Go, concurrent notify loops could deliver an older activation after a newer deactivation. | Each commit freezes an immutable event (registry as of the commit + `prev`/`next` captured around the mutation) and queues it in commit order; one event is delivered to EVERY watcher before the next starts. |
+| 7 | warning | **Node rollback did not release providers created by the failed attempt.** A provider whose `subscribe()` allocated and then threw stayed cached and was never closed; the retry reused the poisoned instance. | The attempt snapshots the provider map; rollback closes and evicts providers it created, so a retry goes back to the factory. |
+| 8 | warning | **Go skipped refresh metadata on an empty `no-head`.** `applyNoHead` returned at the `len(removed) == 0` check before updating `lastRefreshAt`/`lastError`, so after a transport failure followed by a definitive `no-head` on an empty store Go kept reporting the stale error while Node reported recovery. | Metadata is updated for every valid `no-head`; only the watcher notification and the deactivation warning depend on whether records were removed. |
+
+### Additional defects surfaced while fixing these
+
+- **Node reported `source: 'runtime', value: undefined`** for a key inside a committed scope whose
+  revision did not carry it (found by the blocker-4 test). Reads already fell back correctly, but
+  `varSnapshot()`, `varStatus()` and watchers did not, and `hasRuntimeScope` suppressed the
+  ondemand fetch Go would have made. Coverage is now per KEY in both SDKs (`servingScope`).
+- **The Go receiver committed at the collapsed GROUP** where the Node receiver commits at the
+  pushed SCOPE. Harmless while everything was merged; a divergence once a revision replaces its
+  scope. Go now commits at the pushed scope.
+
+### Revert-verification (blockers 1, 3, 4)
+
+Each new test was confirmed to FAIL with its fix reverted:
+
+| Fix reverted | Failing test |
+|---|---|
+| 1 — drop `onSubscriptionConnected` wiring (Node) | `var-rpc` `#reconnect re-pulls … ACTIVATION` and `… DEACTIVATION` both fail after the 15 s convergence window |
+| 1 — set `OnSubscriptionConnected: nil` (Go) | `TestRpcReconnectResyncRestoresStaticTierEndToEnd` fails ("a deactivation missed during the outage was never resynced") |
+| 3 — restore the early `return` in `prefetchGroup` | `(c) a MISSING transport module with NO fallback still fails ready()` and `a missing transport module still fails ready() when a required key has no fallback` |
+| 4 — restore merge semantics in `varStore.commit` (Go) | `TestVarRevisionReplacesScopeAndDropsVanishedKeys` ("got b1") |
+| 4 — merge the previous batch values in `LiveVarStore.ingest` (Node) | `a replacement revision DROPS a key the previous revision carried` |
+
+Blocker 3's Go behavior was already correct before this round (Go's `fetchGroup` surfaces the
+missing provider as a fetch error, which the required loop then catches). Its Go test is new
+COVERAGE of the mismatch, not a regression test for a Go fix — which is precisely why the
+divergence survived: the Go suite only covered the with-fallback case.
+
+### Tests that asserted nothing (running total: 7)
+
+The two reconnect tests (`packages/var-rpc/test/integration.test.ts`, `packages/go/varrpc`)
+repeatedly activated until a commit landed after reconnection, so they passed with no resync
+whatsoever. Both are replaced: the new tests mutate **exactly once, while disconnected**, and
+assert convergence with no further mutations. The surviving stream-level Go test now waits for a
+real re-subscription and publishes a single activation afterwards.
+
+## Round 3 — where round 3 was aimed (for the record)
 
 Rounds 1 and 2 found **eight** real defects. Every one was in **lifecycle or cross-SDK
 semantics**; none were in steady-state ingest, validation, or the secret boundary. That is
@@ -92,7 +143,7 @@ at the same seam:
    wire is fixture-pinned; the *semantics* are not. Treat any behavior where only one SDK has a
    test as suspect.
 
-**A recurring failure mode worth targeting directly: tests that assert nothing.** Four have
+**A recurring failure mode worth targeting directly: tests that assert nothing.** Four had
 been found so far — a synthetic empty-batch "deactivation" no transport emits, an rpc test that
 pinned a bug as correct, a WSL low-port hang that silently disabled a retry assertion, and three
 `var-http` tests that only passed *because* of the round-2 blocker. If a test looks like

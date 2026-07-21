@@ -3,7 +3,6 @@ package varrpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -341,28 +340,49 @@ func TestSubscribeReconnectsAfterServerRestart(t *testing.T) {
 	restarted := serveOn(t, service, restartListener)
 	defer restarted.stop()
 
-	// Keep activating until the reconnected stream delivers — the client is backing off.
-	deadline := time.After(15 * time.Second)
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
+	// Round 3: the old version of this test kept activating until SOMETHING landed, which
+	// could not distinguish a reconnected stream from a working resync — and masked the fact
+	// that neither existed. Exactly ONE activation happens, and it happens BEFORE the client
+	// can possibly have reconnected, so only a live stream carrying a later commit or a resync
+	// can satisfy it. Here the stream itself is under test: the single post-restart activation
+	// is published once the client has demonstrably reconnected.
+	//
+	// Convergence for a mutation made DURING the outage is covered by resync_test.go.
+	waitForReconnect(t, service)
 
-	generation := int64(3)
-	for {
-		select {
-		case batch := <-received:
-			if batch.Status != cnos.VarPullOK {
-				t.Fatalf("batch: %#v", batch)
-			}
-			return // reconnected and delivered
-		case <-ticker.C:
-			generation++
-			service.activate("agentic", generation, fmt.Sprintf("sha256:%d", generation), map[string]any{
-				"agentic.lanes.vinci": map[string]any{"enabled": true, "model_target_ref": "after-restart"},
-			})
-		case <-deadline:
-			t.Fatal("subscription did not reconnect after the server restart")
+	service.activate("agentic", 9, "sha256:after-restart", map[string]any{
+		"agentic.lanes.vinci": map[string]any{"enabled": true, "model_target_ref": "after-restart"},
+	})
+
+	select {
+	case batch := <-received:
+		if batch.Status != cnos.VarPullOK {
+			t.Fatalf("batch: %#v", batch)
 		}
+		document, _ := batch.Values["agentic.lanes.vinci"].(map[string]any)
+		if document["model_target_ref"] != "after-restart" {
+			t.Fatalf("values: %#v", batch.Values)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the reconnected subscription never delivered the activation")
 	}
+}
+
+// waitForReconnect blocks until the test server has a live subscriber again, i.e. the client's
+// Subscribe stream has actually been re-established.
+func waitForReconnect(t *testing.T, service *testServer) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		service.mu.Lock()
+		subscribers := len(service.subscribers)
+		service.mu.Unlock()
+		if subscribers > 0 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("subscription did not reconnect after the server restart")
 }
 
 func TestCloseCancelsSubscriptionsAndIsIdempotent(t *testing.T) {

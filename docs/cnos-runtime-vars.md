@@ -67,6 +67,23 @@ The unit of runtime config is an immutable, validated **snapshot** per var key (
 
 **Atomic activation:** concurrent readers observe either the complete old snapshot or the complete new one, never a mixture — store commits swap an immutable snapshot pointer. Batch pushes covering multiple keys commit atomically as one store transaction.
 
+**Scope replacement (canonical, both SDKs).** A revision **replaces its scope**; it does not merge
+into it. The store holds one entry per committed scope carrying that scope's whole batch, so:
+
+- a key present in revision 1 and **absent** from revision 2 stops being served and falls back
+  through the overlay to ② static / ③ default (watchers fire, because the effective value
+  changed). Merging instead — which the Go store used to do — keeps serving a removed allowlist
+  entry or a revoked policy flag forever, which is a security-relevant staleness bug, not a
+  cosmetic one;
+- a key is served by the **longest committed scope that is a dot-prefix of (or equal to) it**.
+  A narrower scope fully shadows the range it owns: a key missing from the serving scope's batch
+  does NOT fall through to a broader scope;
+- an independently authored narrower scope (`g.a`) therefore SURVIVES a commit of the broader
+  scope (`g`), and vice versa — replacement is per exact scope string;
+- coverage is per KEY, not per scope: a key inside a committed scope whose revision does not
+  carry it has no runtime tier at all (no `source: 'runtime'` snapshot, and an ondemand read
+  still triggers a fetch).
+
 **Fail-closed support:** during a transient outage the SDK serves last-known-good within the configured freshness/lease window; after expiry the snapshot reports `stale`/`expired`. CNOS surfaces the state; **the consumer decides the safety action** (e.g. cost-bearing execution fails closed). No consumer-specific enforcement in CNOS.
 
 ## Validation (new: whole-document)
@@ -312,7 +329,52 @@ Age is measured from the snapshot's `observedAt`. Static/default tiers never exp
 | — | set | `age ≤ lease` | `fresh` |
 | — | set | `age > lease` | `expired` (no stale tier) |
 
-Reconnect/resume with backoff+jitter; on reconnect, re-pull subscribed scopes with known revisions to converge. All SDK-owned.
+### Reconnect resync (canonical, both SDKs)
+
+Reconnect/resume with backoff+jitter; **on every successful (re)connect of a subscription stream
+the SDK re-pulls each subscribed scope with its known revision** and routes the result through the
+normal ingest path — including `no-head` → scope removal. All SDK-owned.
+
+This is not an optimization. The server forwards **future** commits only, so an activation *or a
+deactivation* that happens during an outage or a backoff window is otherwise lost permanently, and
+a subscribe-capable source runs no poller to converge with. A missed deactivation means serving
+withdrawn policy forever.
+
+- **Ordering barrier**: the SDK subscribes FIRST, then pulls. A commit racing the pull therefore
+  arrives on the (already open) stream instead of falling between the two, and the scope's
+  operation epoch decides which of the two wins (see mixed pull/push ordering below).
+- **First connect**: a scope is skipped only when a head was already prefetched for it. When in
+  doubt, pull — a redundant pull is far cheaper than a lost deactivation. Every RE-connect always
+  pulls every subscribed scope.
+- **Transport seam**: the provider reports the connect through
+  `VarSourceProviderContext.onSubscriptionConnected(scopes, { reconnect })` /
+  `VarProviderContext.OnSubscriptionConnected(scopes, reconnect)`; the pull itself is issued by
+  the SDK, so every transport gets the same convergence for free.
+
+### Mixed pull/push ordering (canonical, both SDKs)
+
+Two DIFFERENT rules, deliberately:
+
+1. **Push vs push — last write wins.** An out-of-order push is applied as it arrives; the store
+   commits by revision and watchers dedupe on it.
+2. **Pull vs push — the push wins.** Every scope carries a monotonic **operation epoch**, bumped
+   on every authoritative application (an accepted ingest, and a `no-head` even when it removes
+   nothing). A pull captures the epoch before issuing its request and applies its result only if
+   the epoch is unchanged on completion; otherwise the result is dropped as superseded.
+
+Without rule 2 a stale pull response could reintroduce a head the authority had already
+deactivated, and a delayed `no-head` could clear a newer pushed activation — permanently, for an
+ondemand or rpc source with no poller to correct it.
+
+### Watcher dispatch ordering (canonical, both SDKs)
+
+State mutation is atomic AND dispatch is sequenced. Each commit freezes an immutable notification
+event (the watcher registry as of the commit, plus the `prev`/`next` snapshots captured around the
+mutation) and appends it to a queue in commit order. One event is delivered to EVERY watcher
+before the next event starts. A reactivation triggered from inside a deactivation callback
+therefore cannot make the watchers visited later in the same pass skip the fallback transition,
+and two goroutines committing concurrently cannot interleave an older activation behind a newer
+deactivation. Unsubscribing from inside a callback still suppresses a not-yet-delivered fire.
 
 ### Deactivation (`no-head`) semantics — canonical, both SDKs, every transport
 
@@ -341,11 +403,30 @@ is what makes acceptance #15 true end to end without a redeploy.
 
 A **required** key in a `prefetch` group must resolve from *some* tier by the end of startup, or
 `ready()` / `StartVars` fails. The check runs after **every** prefetch outcome — ingested,
-`not-modified`, `no-head`, and validation-`rejected` — not only after a thrown transport error.
-The single carve-out: a **missing transport module** (no provider registered for the declared
-transport) is a deployment gap, warned and non-fatal, with required-but-unresolvable reads failing
-fast lazily. `refreshVar` on a required key rejects on a transport failure or a
-validation-`rejected` revision, but not on a `no-head`.
+`not-modified`, `no-head`, validation-`rejected`, a thrown transport error, **and a missing
+transport module**. A **missing transport module** (no provider registered for the declared
+transport) is a deployment gap that is *warned*; it is non-fatal only while every required key of
+the group still resolves through the static/default tiers. It never waives required enforcement —
+treating it as a blanket carve-out let Node report a ready runtime that failed only later, at read
+time, where Go rejected `StartVars`. `refreshVar` on a required key rejects on a transport failure
+or a validation-`rejected` revision, but not on a `no-head`.
+
+### Startup / close lifecycle (canonical, both SDKs)
+
+`close()` is coordinated with the shared startup attempt, not just with the resources that already
+exist when it is called:
+
+- runtime cancellation cancels the in-flight prefetch (Go runs prefetch on a ctx derived from both
+  the caller's ctx and the runtime's; Node's providers are closed and the attempt re-checked);
+- startup re-checks the closed state after every await/wait and before creating ANY long-lived
+  resource (provider, poller, subscription);
+- `close()` does not return until the attempt has stopped, so the provider/timer/subscription sets
+  it cleans are complete;
+- a startup that observes a closed runtime FAILS — `ErrVarClosed` (Go) / a thrown `closed` error
+  (Node) — rather than reporting a ready runtime with nothing running behind it;
+- a FAILED attempt rolls back everything it created, **including the providers it constructed**:
+  they are closed and evicted so a retry recreates them through the factory instead of reusing a
+  possibly poisoned instance.
 
 ### Projection `schema` block
 
@@ -434,6 +515,25 @@ Recorded during the docs pass; the code is authoritative where these differ from
 14. **Polling is capability-keyed.** Go previously polled any source declaring a `pollInterval`, so an rpc source both subscribed and polled. Both SDKs now poll only providers that do not implement `subscribe`, and warn once when a subscribe-capable source declares a `pollInterval`.
 15. **Node startup is transactional and Go shares its in-flight attempt.** A failed Node start rolls back the timers/subscriptions it created, so the retry permitted by the round-1 latch fix cannot duplicate them. Concurrent Go `StartVars` callers block on one shared attempt and receive the same result instead of the second caller seeing a `started` flag and returning `nil` early; the attempt is cleared on failure (retryable) and kept on success. `StartVars(ctx)` now runs prefetch on the CALLER's ctx (pollers/subscriptions keep the runtime-lifetime ctx, since they must outlive it).
 16. **Node `varStatus()` reports the serving fallback tier.** With no runtime head it names `static`/`default` (matching the Go SDK) rather than always `none`; `none` now means "resolves from no tier at all".
+17. **Round-3 deltas (all cross-SDK parity fixes).**
+   a. **Reconnect resync is real.** Neither SDK re-pulled on reconnect despite the ADR promising
+      it; a single activation or deactivation during an outage was lost permanently. Both now
+      resync via `onSubscriptionConnected` / `OnSubscriptionConnected` (subscribe-then-pull).
+   b. **A revision REPLACES its scope.** The Go store merged per-key updates, so a key dropped by
+      a new revision kept being served. Go now stores one entry per scope, like Node.
+   c. **Coverage is per key.** Node reported `source: 'runtime', value: undefined` for a key
+      inside a committed scope that the revision did not carry; it now has no runtime tier at
+      all, matching Go's store-miss semantics (`hasRuntimeScope` is presence-based too).
+   d. **Mixed pull/push ordering** is a distinct contract from out-of-order-push last-write-wins;
+      see the section above.
+   e. **Watcher dispatch is queued in commit order** in both SDKs.
+   f. **`close()` is coordinated with the in-flight startup** in both SDKs; a start on a closed
+      runtime fails.
+   g. **A missing transport module no longer waives required enforcement** (Node).
+   h. **A Node start rollback also closes the providers the attempt created.**
+   i. **Go records refresh metadata on every valid `no-head`**, including one that removes
+      nothing — it used to keep reporting a stale transport error where Node reported recovery.
+   j. **The Go receiver commits at the pushed SCOPE**, not at the collapsed group, matching Node.
 
 ## Open decisions
 

@@ -110,6 +110,10 @@ func (variables *varRuntime) receiver(sourceName string, configure ...VarReceive
 		}
 
 		batch := varBatch{
+			// The pushed SCOPE owns the commit (a revision replaces its scope), the group only
+			// supplies ttl/lease/status. Matches the Node receiver, which commits at the scope
+			// carried by the URL rather than collapsing it to the group.
+			scope:       scope,
 			group:       groupFromVarKey(scope),
 			generation:  generation,
 			revision:    revision,

@@ -16,6 +16,12 @@ import (
 // from any tier during Ready/refresh — fail fast, never nil-and-continue.
 var ErrVarRequired = errors.New("cnos: required var unavailable")
 
+// ErrVarClosed is returned by StartVars when the var runtime is (or becomes) closed. A closed
+// runtime can never become ready, so reporting success would hand the caller a runtime with no
+// pollers, no subscriptions and no providers, silently serving only the static/default tiers.
+// The Node SDK throws the equivalent error from VarManager.start().
+var ErrVarClosed = errors.New("cnos: var runtime is closed")
+
 // varWatcher is a single registered watch callback with its key/prefix matcher.
 type varWatcher struct {
 	match func(key string) bool
@@ -108,6 +114,38 @@ type varRuntime struct {
 	// startAttempt is the in-flight (or completed-successfully) startup attempt. Concurrent
 	// StartVars callers block on its done channel and share its result instead of racing.
 	startAttempt *varStartAttempt
+
+	// applyMu serializes every AUTHORITATIVE application (an accepted ingest or a no-head
+	// removal) together with its epoch check and its notification enqueue, so a pull cannot
+	// slip its commit in between a push's epoch bump and that push's commit. It is never held
+	// across a watcher callback — dispatch happens outside, off the queue below.
+	applyMu sync.Mutex
+	// epochs is the monotonic per-scope operation counter (guarded by applyMu). A pull captures
+	// it before issuing its request and applies only when it is unchanged on completion.
+	epochs map[string]uint64
+
+	// notifyMu guards the committed-but-undispatched watcher events and the dispatch latch.
+	notifyMu    sync.Mutex
+	notifyQueue []varNotifyEvent
+	dispatching bool
+}
+
+// varNotifyEntry is ONE frozen watcher delivery: both snapshots are captured around the
+// mutation that produced them and never re-read at dispatch time. Re-reading is what let a
+// reactivation triggered from inside a deactivation callback show the reactivated value to the
+// watchers visited later in the same pass, which never saw the fallback transition at all.
+type varNotifyEntry struct {
+	key     string
+	next    Snapshot
+	prev    Snapshot
+	hasPrev bool
+}
+
+// varNotifyEvent is one commit's complete delivery list plus the watcher registry frozen at
+// commit time. Events are dispatched strictly in commit order, one fully before the next.
+type varNotifyEvent struct {
+	watcherIDs []int
+	entries    []varNotifyEntry
 }
 
 // varStartAttempt is one shared startup attempt. `err` is written before `done` is closed, so
@@ -136,6 +174,7 @@ func (runtime *Runtime) initVars(projection ServerProjection) {
 		providers:    map[string]VarSourceProvider{},
 
 		watchers:           map[int]*varWatcher{},
+		epochs:             map[string]uint64{},
 		status:             map[string]*varScopeStatus{},
 		inflight:           map[string]bool{},
 		warnedPollInterval: map[string]bool{},
@@ -236,6 +275,10 @@ func (variables *varRuntime) snapshot(fullKey string) (Snapshot, bool) {
 // generation/revision. Values are keyed by the prefix-stripped key
 // (e.g. "agentic.lanes.vinci").
 type varBatch struct {
+	// scope is the wire scope this revision was authored for (a group, or a dotted key). A
+	// commit REPLACES the scope, so it — not the group — decides what the revision displaces.
+	// Empty means "the group".
+	scope       string
 	group       string
 	generation  int64
 	revision    string
@@ -249,6 +292,20 @@ type varBatch struct {
 // wholesale and last-known-good is retained. Valid batches commit atomically and
 // then notify watchers.
 func (variables *varRuntime) ingest(batch varBatch, origin string) error {
+	_, err := variables.ingestGated(batch, origin, nil)
+	return err
+}
+
+// ingestGated is ingest with the optional mixed pull/push ordering gate. When expect is
+// non-nil the commit is applied ONLY if the scope's operation epoch still matches — i.e. no
+// authoritative event landed while the pull that produced this batch was in flight. Returns
+// whether the batch was applied.
+//
+// CANONICAL RULE (both SDKs): a PUSH always applies (last-write-wins among pushes); a PULL
+// applies only when nothing authoritative superseded it. Without the gate a slow pull could
+// reintroduce a head the authority had already deactivated, and an ondemand source with no
+// poller would stay wrong indefinitely.
+func (variables *varRuntime) ingestGated(batch varBatch, origin string, expect *uint64) (bool, error) {
 	def := variables.groups[batch.group]
 	ttl := parseVarDuration(def.TTL)
 	lease := parseVarDuration(def.Lease)
@@ -257,25 +314,53 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 	leaseSet := def.Lease != ""
 	now := time.Now()
 
+	scope := batch.scope
+	if scope == "" {
+		scope = batch.group
+	}
+
+	// Validation happens before any lock: an invalid revision never reaches the store.
 	for rel, value := range batch.values {
 		fullKey := "var." + rel
 		if err := variables.validateVarValue(fullKey, value); err != nil {
 			variables.recordRejection(batch.group, batch.revision, err.Error())
 			fmt.Fprintf(os.Stderr, "cnos [warn]: rejected var revision %s for group %q (%s): %v\n", shortRevision(batch.revision), batch.group, origin, err)
-			return fmt.Errorf("cnos: reject var revision %s for group %q: %w", shortRevision(batch.revision), batch.group, err)
+			return false, fmt.Errorf("cnos: reject var revision %s for group %q: %w", shortRevision(batch.revision), batch.group, err)
 		}
 	}
 
+	variables.applyMu.Lock()
+
+	if expect != nil && *expect != variables.epochs[scope] {
+		variables.applyMu.Unlock()
+		return false, nil
+	}
+
+	// Affected keys are the UNION of what the scope served and what this revision carries: a
+	// key present in the previous revision and absent from this one loses its runtime head and
+	// must fall back through the overlay, waking its watchers just like a changed value does.
+	affected := map[string]struct{}{}
+	for rel := range batch.values {
+		affected["var."+rel] = struct{}{}
+	}
+	for _, key := range variables.store.scopeKeys(scope) {
+		affected[key] = struct{}{}
+	}
+
+	prev := make(map[string]Snapshot, len(affected))
+	prevFound := make(map[string]bool, len(affected))
+	for key := range affected {
+		snap, ok := variables.snapshot(key)
+		prev[key] = snap
+		prevFound[key] = ok
+	}
+
 	updates := make(map[string]*varRecord, len(batch.values))
-	prev := make(map[string]Snapshot, len(batch.values))
 	for rel, value := range batch.values {
 		fullKey := "var." + rel
 		var lastKnownGood *LastKnownGood
-		if priorRecord, ok := variables.store.get(fullKey); ok {
-			prev[fullKey] = priorRecord.snapshot(now)
-			if priorRecord.base.Source == VarSourceRuntime {
-				lastKnownGood = &LastKnownGood{Generation: priorRecord.base.Generation, Revision: priorRecord.base.Revision}
-			}
+		if priorRecord, ok := variables.store.get(fullKey); ok && priorRecord.base.Source == VarSourceRuntime {
+			lastKnownGood = &LastKnownGood{Generation: priorRecord.base.Generation, Revision: priorRecord.base.Revision}
 		}
 		updates[fullKey] = &varRecord{
 			base: Snapshot{
@@ -295,10 +380,111 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 		}
 	}
 
-	variables.store.commit(updates)
+	variables.store.commit(scope, batch.group, updates)
+	variables.epochs[scope]++
 	variables.recordSuccess(batch.group, batch.generation, batch.revision, now)
-	variables.notify(updates, prev, now)
-	return nil
+
+	event := variables.buildNotifyEvent(affected, prev, prevFound)
+	variables.enqueueNotification(event)
+	variables.applyMu.Unlock()
+
+	variables.drainNotifications()
+	return true, nil
+}
+
+// buildNotifyEvent freezes one commit's watcher deliveries. Must be called under applyMu,
+// AFTER the store mutation, so `next` reflects exactly the state this commit produced.
+func (variables *varRuntime) buildNotifyEvent(affected map[string]struct{}, prev map[string]Snapshot, prevFound map[string]bool) varNotifyEvent {
+	variables.mu.Lock()
+	ids := make([]int, 0, len(variables.watchers))
+	for id := range variables.watchers {
+		ids = append(ids, id)
+	}
+	variables.mu.Unlock()
+
+	entries := make([]varNotifyEntry, 0, len(affected))
+	for key := range affected {
+		// The EFFECTIVE snapshot, not just the runtime tier: after a removal the key still
+		// resolves — from static/default — and that is what the watcher must be handed.
+		next, _ := variables.snapshot(key)
+		previous := prev[key]
+
+		// Revision is content-addressed, so an equal revision means equal content and there is
+		// nothing to react to. Generation is deliberately excluded: a push without an explicit
+		// revision is stamped with a wall-clock generation, so gating on it would wake every
+		// watcher on each replay of an identical document. `source` participates because
+		// static/default snapshots carry no revision at all: runtime→static is a real change
+		// even though both sides compare equal on `revision`. Identical to the Node gate.
+		if prevFound[key] && previous.Revision == next.Revision && previous.Source == next.Source {
+			continue
+		}
+
+		entries = append(entries, varNotifyEntry{key: key, next: next, prev: previous, hasPrev: prevFound[key]})
+	}
+
+	return varNotifyEvent{watcherIDs: ids, entries: entries}
+}
+
+// enqueueNotification appends a committed event. Must be called under applyMu so the queue
+// order is the commit order.
+func (variables *varRuntime) enqueueNotification(event varNotifyEvent) {
+	if len(event.entries) == 0 {
+		return
+	}
+	variables.notifyMu.Lock()
+	variables.notifyQueue = append(variables.notifyQueue, event)
+	variables.notifyMu.Unlock()
+}
+
+// drainNotifications delivers queued events strictly in commit order, finishing one event for
+// EVERY watcher before starting the next.
+//
+// It is both reentrancy- and concurrency-safe: a callback that commits again (a reactivation
+// from inside a deactivation handler) enqueues its event and returns here immediately, and the
+// loop below picks it up once the current event is fully delivered. A second goroutine
+// committing concurrently likewise hands its event to the goroutine already dispatching
+// instead of interleaving with it — which is how an older activation could be delivered after
+// a newer deactivation.
+func (variables *varRuntime) drainNotifications() {
+	variables.notifyMu.Lock()
+	if variables.dispatching {
+		variables.notifyMu.Unlock()
+		return
+	}
+	variables.dispatching = true
+
+	for {
+		if len(variables.notifyQueue) == 0 {
+			variables.dispatching = false
+			variables.notifyMu.Unlock()
+			return
+		}
+		event := variables.notifyQueue[0]
+		variables.notifyQueue = variables.notifyQueue[1:]
+		variables.notifyMu.Unlock()
+
+		variables.dispatch(event)
+
+		variables.notifyMu.Lock()
+	}
+}
+
+// dispatch delivers one frozen event. The registry was snapshotted at commit time (so a
+// watcher registered from inside a callback is not visited by an event committed before it
+// existed) and each entry is re-checked against the live registry (so unsubscribing from
+// inside a callback suppresses a not-yet-delivered fire). Both match the Node SDK.
+func (variables *varRuntime) dispatch(event varNotifyEvent) {
+	for _, entry := range event.entries {
+		for _, id := range event.watcherIDs {
+			variables.mu.Lock()
+			watcher, live := variables.watchers[id]
+			variables.mu.Unlock()
+
+			if live && watcher.match(entry.key) {
+				invokeWatcher(watcher.fn, entry.next, entry.prev)
+			}
+		}
+	}
 }
 
 // applyNoHead clears the runtime tier for a scope after the authority definitively reported it
@@ -312,112 +498,69 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 // no-head for a scope with nothing applied wakes nobody. Mirrors the Node
 // VarManager.applyNoHead / LiveVarStore.removeScope.
 func (variables *varRuntime) applyNoHead(scope string) {
-	now := time.Now()
+	variables.applyNoHeadGated(scope, nil)
+}
 
+// applyNoHeadGated is applyNoHead with the mixed pull/push ordering gate (see ingestGated).
+// A pulled no-head is dropped when an authoritative event landed for the scope while the pull
+// was in flight — otherwise a delayed 404 could clear a newer pushed activation.
+func (variables *varRuntime) applyNoHeadGated(scope string, expect *uint64) bool {
+	now := time.Now()
+	group := groupFromVarKey("var." + scope)
+
+	variables.applyMu.Lock()
+
+	if expect != nil && *expect != variables.epochs[scope] {
+		variables.applyMu.Unlock()
+		return false
+	}
+
+	// A no-head is an authoritative answer even when it removes nothing, so it always
+	// supersedes an in-flight pull.
+	variables.epochs[scope]++
+
+	affected := map[string]struct{}{}
 	prev := map[string]Snapshot{}
+	prevFound := map[string]bool{}
 	for _, key := range variables.store.keys() {
 		if key == "var."+scope || strings.HasPrefix(key, "var."+scope+".") {
-			if record, ok := variables.store.get(key); ok {
-				prev[key] = record.snapshot(now)
-			}
+			affected[key] = struct{}{}
+			snap, ok := variables.snapshot(key)
+			prev[key] = snap
+			prevFound[key] = ok
 		}
 	}
 
 	removed := variables.store.removeScope(scope)
-	if len(removed) == 0 {
-		return
-	}
 
-	group := groupFromVarKey("var." + scope)
+	// Refresh metadata is updated for EVERY valid no-head, removal or not. Returning early on
+	// an empty store left Go reporting a stale transport error after the authority had
+	// definitively answered, while Node reported recovery. Only the watcher notification and
+	// the deactivation warning depend on whether records were actually removed.
 	variables.mu.Lock()
 	status := variables.statusFor(group)
-	// The removed head must not masquerade as still applied in VarStatus().
-	status.desiredGeneration = nil
-	status.revision = ""
 	status.lastRefreshAt = now
 	status.lastError = ""
+	if len(removed) > 0 {
+		// The removed head must not masquerade as still applied in VarStatus().
+		status.desiredGeneration = nil
+		status.revision = ""
+	}
 	variables.mu.Unlock()
+
+	if len(removed) == 0 {
+		variables.applyMu.Unlock()
+		return true
+	}
+
+	event := variables.buildNotifyEvent(affected, prev, prevFound)
+	variables.enqueueNotification(event)
+	variables.applyMu.Unlock()
 
 	fmt.Fprintf(os.Stderr, "cnos [warn]: var scope %q has no active runtime head (deactivated); cleared the runtime tier and restored the static/default tiers\n", scope)
 
-	variables.notifyRemoved(removed, prev, now)
-}
-
-// notifyRemoved fires watchers for keys whose runtime head was just removed, handing them the
-// snapshot the key NOW resolves to (static or default). Shares the dispatch discipline of
-// notify: the registry is snapshotted before dispatch and re-checked per entry.
-func (variables *varRuntime) notifyRemoved(keys []string, prev map[string]Snapshot, now time.Time) {
-	variables.mu.Lock()
-	ids := make([]int, 0, len(variables.watchers))
-	for id := range variables.watchers {
-		ids = append(ids, id)
-	}
-	variables.mu.Unlock()
-
-	for _, key := range keys {
-		next, ok := variables.snapshot(key)
-		if !ok {
-			// The key resolves from no tier at all now; synthesize the empty default snapshot so
-			// a watcher still learns the runtime value went away.
-			next = Snapshot{Key: key, Source: VarSourceDefault, Freshness: FreshnessFresh, ObservedAt: now}
-		}
-
-		previous := prev[key]
-		for _, id := range ids {
-			variables.mu.Lock()
-			watcher, live := variables.watchers[id]
-			variables.mu.Unlock()
-
-			if live && watcher.match(key) {
-				invokeWatcher(watcher.fn, next, previous)
-			}
-		}
-	}
-}
-
-// notify fires matching watchers after a committed update. Callbacks run
-// synchronously with panics contained; a callback error never rolls back the
-// store (the snapshot is already active).
-//
-// Dispatch is IDEMPOTENT: a commit that reproduces the key's existing
-// (revision, generation) — an exact replay of an already-applied push — wakes no
-// watcher. Idempotent push is a core property of the protocol, so a replay must be
-// invisible to consumers. Matches the Node LiveVarStore's watcher gate.
-//
-// The watcher registry is snapshotted before dispatch (so a watcher registered from
-// inside a callback is not visited by the pass that is already running) and each entry
-// is re-checked against the live registry (so unsubscribing from inside a callback
-// suppresses a not-yet-visited fire). Both match the Node SDK.
-func (variables *varRuntime) notify(updates map[string]*varRecord, prev map[string]Snapshot, now time.Time) {
-	variables.mu.Lock()
-	ids := make([]int, 0, len(variables.watchers))
-	for id := range variables.watchers {
-		ids = append(ids, id)
-	}
-	variables.mu.Unlock()
-
-	for key, record := range updates {
-		next := record.snapshot(now)
-		previous := prev[key]
-
-		// Revision is content-addressed, so an equal revision means equal content and there is
-		// nothing for a watcher to react to. Generation is deliberately excluded: a push without
-		// an explicit revision is stamped with a wall-clock generation, so gating on it would
-		// wake every watcher on each replay of an identical document.
-		if previous.Source == VarSourceRuntime && previous.Revision == next.Revision {
-			continue
-		}
-
-		for _, id := range ids {
-			variables.mu.Lock()
-			watcher, live := variables.watchers[id]
-			variables.mu.Unlock()
-
-			if live && watcher.match(key) {
-				invokeWatcher(watcher.fn, next, previous)
-			}
-		}
-	}
+	variables.drainNotifications()
+	return true
 }
 
 func invokeWatcher(fn func(next, prev Snapshot), next, prev Snapshot) {
@@ -515,6 +658,10 @@ func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error
 	if !ok {
 		return fmt.Errorf("cnos: var group %q references unknown source %q", group, def.Source)
 	}
+	// Capture the scope's operation epoch BEFORE the network call: the result is applied only
+	// if nothing authoritative (a pushed batch, a pushed deactivation) landed meanwhile.
+	epoch := variables.scopeEpoch(group)
+
 	result, err := variables.pullScope(ctx, def.Source, source, group, variables.knownRevision(group))
 	if err != nil {
 		variables.recordError(group, err.Error())
@@ -522,23 +669,32 @@ func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error
 	}
 	switch result.status {
 	case pullOK:
-		return variables.ingest(varBatch{
+		_, ingestErr := variables.ingestGated(varBatch{
+			scope:       group,
 			group:       group,
 			generation:  result.generation,
 			revision:    result.revision,
 			schemaId:    result.schemaId,
 			effectiveAt: result.effectiveAt,
 			values:      result.values,
-		}, "poll")
+		}, "poll", &epoch)
+		return ingestErr
 	case pullNotModified:
 		// The known revision is still current — the cached snapshot already IS the head.
 		return nil
 	case pullNoHead:
 		// A definitive "no active head": clear the runtime tier so overlay tiers ②/③ serve.
-		variables.applyNoHead(group)
+		variables.applyNoHeadGated(group, &epoch)
 		return nil
 	}
 	return nil
+}
+
+// scopeEpoch reads the scope's current operation epoch (see ingestGated).
+func (variables *varRuntime) scopeEpoch(scope string) uint64 {
+	variables.applyMu.Lock()
+	defer variables.applyMu.Unlock()
+	return variables.epochs[scope]
 }
 
 // triggerOndemand starts at most one background fetch per group (dedup).
@@ -572,7 +728,9 @@ func (variables *varRuntime) start(ctx context.Context) error {
 	variables.mu.Lock()
 	if variables.closed {
 		variables.mu.Unlock()
-		return nil
+		// A closed runtime can never become ready; reporting success would leave the caller
+		// running on fallback tiers with no pollers and no subscriptions. Mirrors the Node SDK.
+		return ErrVarClosed
 	}
 	if attempt := variables.startAttempt; attempt != nil {
 		variables.mu.Unlock()
@@ -621,15 +779,34 @@ func (variables *varRuntime) runStart(ctx context.Context) error {
 		}
 	}
 
+	// Prefetch runs on a ctx derived from BOTH the caller's ctx and the runtime's, so close()
+	// actually cancels an in-flight startup instead of waiting out a 30s http timeout while the
+	// attempt goes on to create providers, pollers and subscriptions behind its back.
+	fetchCtx, cancelFetch := context.WithCancel(ctx)
+	defer cancelFetch()
+	go func() {
+		select {
+		case <-variables.ctx.Done():
+			cancelFetch()
+		case <-fetchCtx.Done():
+		}
+	}()
+
 	var wg sync.WaitGroup
 	for _, group := range prefetch {
 		wg.Add(1)
 		go func(g string) {
 			defer wg.Done()
-			_ = variables.fetchGroup(ctx, g)
+			_ = variables.fetchGroup(fetchCtx, g)
 		}(group)
 	}
 	wg.Wait()
+
+	// Re-check after every wait and BEFORE creating any long-lived resource: close() may have
+	// run while prefetch was in flight, and anything created now would never be released.
+	if variables.isClosed() {
+		return ErrVarClosed
+	}
 
 	// A cancelled/expired caller ctx means startup did not actually complete — fail rather than
 	// launching pollers behind a half-resolved prefetch.
@@ -663,9 +840,24 @@ func (variables *varRuntime) runStart(ctx context.Context) error {
 		}
 	}
 
+	if variables.isClosed() {
+		return ErrVarClosed
+	}
+
 	variables.startPollers()
 	variables.startSubscriptions()
+
+	if variables.isClosed() {
+		return ErrVarClosed
+	}
 	return nil
+}
+
+// isClosed reports whether close() has run. Checked after every wait in the startup path.
+func (variables *varRuntime) isClosed() bool {
+	variables.mu.Lock()
+	defer variables.mu.Unlock()
+	return variables.closed
 }
 
 // startPollers spawns one poll loop per PULL-ONLY source that declares a pollInterval, covering
@@ -678,6 +870,10 @@ func (variables *varRuntime) runStart(ctx context.Context) error {
 // failure the terminal state exists to advertise. A pollInterval on a subscribe-capable source
 // is ignored — warned once so the config is not silently dropped.
 func (variables *varRuntime) startPollers() {
+	if variables.isClosed() {
+		return
+	}
+
 	bySource := map[string][]string{}
 	for group, def := range variables.groups {
 		if def.Mode != "prefetch" {
@@ -747,8 +943,23 @@ func (variables *varRuntime) close() error {
 		return nil
 	}
 	variables.closed = true
-	variables.watchers = map[int]*varWatcher{}
 	cancel := variables.cancel
+	attempt := variables.startAttempt
+	variables.mu.Unlock()
+
+	// Cancel FIRST so an in-flight prefetch aborts instead of running to its transport timeout,
+	// then WAIT for the startup attempt to stop. Only once it has can the sets below be
+	// complete: a start() that finished prefetch after close() had already walked them created
+	// providers, pollers and subscriptions that nothing ever released.
+	if cancel != nil {
+		cancel()
+	}
+	if attempt != nil {
+		<-attempt.done
+	}
+
+	variables.mu.Lock()
+	variables.watchers = map[int]*varWatcher{}
 	subscriptions := variables.subscriptions
 	variables.subscriptions = nil
 	providers := make([]VarSourceProvider, 0, len(variables.providers))

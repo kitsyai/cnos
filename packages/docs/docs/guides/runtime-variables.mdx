@@ -131,6 +131,29 @@ resolve from `value.*` / the schema `default` again.
   last-known-good (that is what `lease`/`freshness` describe). Only a definitive "no head"
   answer from the authority clears anything.
 
+### A revision replaces its scope
+
+Activating a revision **replaces** everything its scope was serving; it does not merge into it.
+A key the previous revision carried and the new one omits stops being served immediately and
+falls back to `value.*` / the schema `default` — so removing an entry from an allowlist document,
+or dropping a policy flag, takes effect the same way changing one does. Watchers fire, because
+the effective value changed.
+
+A key is served by the **longest activated scope that prefixes it**, and a key missing from that
+scope does not fall through to a broader one. An independently activated narrower scope
+(`agentic.lanes`) therefore survives an activation of the broader scope (`agentic`).
+
+### Reconnect converges what you missed
+
+A subscription only receives commits made while it is connected. Whenever a stream (re)connects,
+the SDK re-pulls every subscribed scope with its known revision, so an activation — or a
+deactivation — that happened while the connection was down is applied on reconnect with no
+further action from the authority. This is what makes an rpc source safe: it runs no poller, so
+without the resync a missed deactivation would keep serving withdrawn policy indefinitely.
+
+If a new commit races the resync pull, the push wins: the SDK subscribes before it pulls, and
+drops a pull result that a pushed batch or deactivation superseded while it was in flight.
+
 ## Fetch modes
 
 Declared per group via `mode`:
@@ -140,9 +163,9 @@ Declared per group via `mode`:
   This is evaluated after every outcome — a transport failure, a source with no active head,
   and a revision your schema rejected all count. If every required key is still resolvable
   through the static/default tiers, CNOS warns and falls back — no runtime head, but the
-  overlay degrades cleanly. The one exception is a **missing transport module** (no provider
-  registered for the declared transport): that is warned and non-fatal, and such a required key
-  fails fast lazily at read time instead.
+  overlay degrades cleanly. A **missing transport module** (no provider registered for the
+  declared transport) is warned as a deployment gap, but it does not waive this check: startup
+  still rejects if a required key of the group resolves from no tier at all.
 - **`ondemand`** — never blocks `ready()`. The first read of an unresolved key in the group
   triggers a background fetch of the whole group (deduped — one in-flight fetch per group,
   not per key) and serves the static/default tier meanwhile.
@@ -307,6 +330,10 @@ Never carries secret material or a full sensitive document — see [Safety](#saf
 ```ts
 await cnos.close(); // stops pollers, cancels subscriptions, releases watchers
 ```
+
+`close()` is safe to call while `ready()` is still in flight: it cancels the in-flight prefetch
+and waits for the startup attempt to stop, so nothing that attempt would have created survives.
+A `ready()` that observes a closed runtime fails rather than reporting success.
 
 ## Restart recovery
 

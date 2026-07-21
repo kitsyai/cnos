@@ -59,6 +59,18 @@ type VarProviderContext struct {
 	// it reports here instead. terminal == true means the provider has given up
 	// reconnecting for those scopes.
 	OnSubscriptionError func(err error, terminal bool, scopes []string)
+	// OnSubscriptionConnected reports that a subscription stream for these scopes is
+	// established. The SDK answers by RE-PULLING them with their known revisions so a mutation
+	// that happened while the stream was down still converges: the server only ever forwards
+	// FUTURE commits, so without this a missed deactivation would serve withdrawn policy
+	// forever — and an rpc source runs no poller to recover with.
+	//
+	// A provider must call it AFTER issuing the Subscribe call, never before: with the
+	// subscription opened first, a commit racing the resync pull arrives on the stream instead
+	// of being dropped. reconnect is false only for the very first connect of a subscription;
+	// the SDK then skips scopes it already prefetched. Mirrors the TypeScript
+	// VarSourceProviderContext.onSubscriptionConnected.
+	OnSubscriptionConnected func(scopes []string, reconnect bool)
 }
 
 // VarSourceProvider is the transport contract, mirroring the TypeScript
@@ -120,6 +132,10 @@ func isBuiltinTransport(transport string) bool {
 // providerFor lazily constructs (and caches) the registered provider for a source.
 func (variables *varRuntime) providerFor(sourceName string, source VarSourceDef) (VarSourceProvider, error) {
 	variables.mu.Lock()
+	if variables.closed {
+		variables.mu.Unlock()
+		return nil, fmt.Errorf("cnos: cannot construct a var source provider for %q: %w", sourceName, ErrVarClosed)
+	}
 	if provider, ok := variables.providers[sourceName]; ok {
 		variables.mu.Unlock()
 		return provider, nil
@@ -135,14 +151,22 @@ func (variables *varRuntime) providerFor(sourceName string, source VarSourceDef)
 	}
 
 	provider, err := factory.Create(source, VarProviderContext{
-		ResolveSecret:       variables.resolveSecretRef,
-		OnSubscriptionError: variables.reportSubscriptionError(sourceName),
+		ResolveSecret:           variables.resolveSecretRef,
+		OnSubscriptionError:     variables.reportSubscriptionError(sourceName),
+		OnSubscriptionConnected: variables.resyncSubscribedScopes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cnos: create var source provider for %q: %w", sourceName, err)
 	}
 
 	variables.mu.Lock()
+	if variables.closed {
+		// close() ran while the factory was constructing. Release ours rather than caching an
+		// instance nothing will ever close.
+		variables.mu.Unlock()
+		_ = provider.Close()
+		return nil, fmt.Errorf("cnos: cannot construct a var source provider for %q: %w", sourceName, ErrVarClosed)
+	}
 	if existing, ok := variables.providers[sourceName]; ok {
 		// Lost a construction race — keep the winner and release ours.
 		variables.mu.Unlock()
@@ -178,6 +202,34 @@ func (variables *varRuntime) reportSubscriptionError(sourceName string) func(err
 		}
 
 		fmt.Fprintf(os.Stderr, "cnos [warn]: var subscription for source %q %s: %v\n", sourceName, detail, err)
+	}
+}
+
+// resyncSubscribedScopes converges every subscribed scope on a (re)connected stream — the SDK
+// half of the ADR's "on reconnect, re-pull subscribed scopes with known revisions to converge".
+//
+// The server only ever forwards FUTURE commits, so a mutation that landed while the stream was
+// down is lost without this: unrecoverable for an rpc source (it runs no poller), and since a
+// deactivation is a real state change, a missed one means serving withdrawn policy forever.
+// The pull is issued AFTER the subscription is open, so a commit racing it arrives on the
+// stream instead of vanishing, and the scope's operation epoch decides which of the two wins.
+//
+// On the FIRST connect a scope is skipped only when a head was already prefetched for it; when
+// in doubt, pull — a redundant pull is far cheaper than a lost deactivation.
+func (variables *varRuntime) resyncSubscribedScopes(scopes []string, reconnect bool) {
+	if variables.isClosed() {
+		return
+	}
+
+	for _, scope := range scopes {
+		if !reconnect && variables.knownRevision(scope) != "" {
+			continue
+		}
+
+		// Routed through the NORMAL pull path: ingest, not-modified, and no-head → scope
+		// removal all behave exactly as they do for a poller. A failure is not fatal — the
+		// stream is live and the next commit converges.
+		go func(target string) { _ = variables.fetchGroup(variables.ctx, target) }(scope)
 	}
 }
 
@@ -279,6 +331,10 @@ func (variables *varRuntime) sourceCanSubscribe(sourceName string, source VarSou
 // path as pulls; pollers still cover pull-only (http) sources. Capability-keyed, never
 // keyed off the transport name.
 func (variables *varRuntime) startSubscriptions() {
+	if variables.isClosed() {
+		return
+	}
+
 	scopesBySource := map[string][]VarScope{}
 	for group, def := range variables.groups {
 		if def.Mode != "prefetch" {
@@ -363,6 +419,7 @@ func (variables *varRuntime) ingestSubscribed(batch VarBatchResult) {
 	}
 
 	_ = variables.ingest(varBatch{
+		scope:       group,
 		group:       group,
 		generation:  batch.Generation,
 		revision:    batch.Revision,

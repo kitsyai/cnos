@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { LiveVarStore, createCnos } from '../src/index.js';
+import { LiveVarStore, createCnos, type LoaderPlugin } from '../src/index.js';
 
 /**
  * Cross-SDK wire fixtures shared with the Go SDK. Its twin is
@@ -75,7 +75,30 @@ describe('cross-SDK var wire fixtures', () => {
     await mkdir(path.join(root, 'cnos'), { recursive: true });
     await writeFile(path.join(root, 'cnos', 'cnos.yml'), MANIFEST);
 
-    const runtime = await createCnos({ root, plugins: [] });
+    // The manifest's required prefetch key has no transport module registered here, so a static
+    // fallback is what keeps startup legal (round-3 blocker 3). It does not touch the projection
+    // blocks under test.
+    const runtime = await createCnos({
+      root,
+      plugins: [
+        {
+          id: 'xsdk-static',
+          kind: 'loader',
+          async load() {
+            return [
+              {
+                key: 'value.agentic.lanes.vinci',
+                value: { enabled: true, model_target_ref: 'static-model' },
+                namespace: 'value',
+                sourceId: 'xsdk-static',
+                pluginId: 'xsdk-static',
+                workspaceId: 'var-cross-sdk',
+              },
+            ];
+          },
+        } as LoaderPlugin,
+      ],
+    });
     const projection = runtime.toServerProjection();
     const fixture = readFixture<ProjectionBlocks>('projection.json');
 

@@ -55,6 +55,12 @@ export class VarManager {
   private readonly subscriptions = new Set<() => void>();
   private overlayReader?: (key: string) => unknown;
   private closed = false;
+  /**
+   * The in-flight {@link start} attempt. `close()` waits on it so an attempt that is still
+   * awaiting prefetch cannot create providers/pollers/subscriptions AFTER close() has already
+   * walked the sets it cleans — which leaked every one of them.
+   */
+  private startAttempt: Promise<void> | undefined;
 
   constructor(options: VarManagerOptions) {
     this.varSources = options.varSources;
@@ -152,6 +158,10 @@ export class VarManager {
   // ---- Provider construction --------------------------------------------
 
   private provider(sourceId: string): VarSourceProvider {
+    if (this.closed) {
+      throw new Error(`[cnos:var] cannot construct a provider for source "${sourceId}": the var runtime is closed.`);
+    }
+
     const cached = this.providers.get(sourceId);
 
     if (cached) {
@@ -176,9 +186,44 @@ export class VarManager {
     const provider = module.create(def, {
       resolveSecret: (ref) => this.resolveSecret(ref),
       onSubscriptionError: (error, info) => this.recordSubscriptionFailure(sourceId, error, info),
+      onSubscriptionConnected: (scopes, info) => this.resyncSubscribedScopes(sourceId, scopes, info.reconnect),
     });
     this.providers.set(sourceId, provider);
     return provider;
+  }
+
+  /**
+   * Converge every subscribed scope on a (re)connected stream — the SDK half of the ADR's
+   * "on reconnect, re-pull subscribed scopes with known revisions to converge".
+   *
+   * The server only ever forwards FUTURE commits, so a mutation that landed while the stream
+   * was down is lost without this. That is unrecoverable for an rpc source (it runs no poller),
+   * and since a deactivation is a real state change a missed one means serving withdrawn policy
+   * forever. The pull is issued AFTER the subscription is open (the provider calls this from
+   * its connect path), so a commit racing the pull arrives on the stream instead of vanishing —
+   * and the store's scope epoch decides which of the two wins.
+   *
+   * On the FIRST connect the scope is skipped only when the caller already prefetched a head
+   * for it; when in doubt, pull — a redundant pull is far cheaper than a lost deactivation.
+   */
+  private resyncSubscribedScopes(sourceId: string, scopes: string[], reconnect: boolean): void {
+    if (this.closed) {
+      return;
+    }
+
+    for (const scopeString of scopes) {
+      if (!reconnect && this.appliedRevision(scopeString) !== undefined) {
+        continue;
+      }
+
+      const group = scopeString.split('.')[0] ?? scopeString;
+      const scope: VarScope = scopeString.includes('.') ? { key: scopeString } : { group: scopeString };
+
+      // Routed through the NORMAL pull path: ingest, `not-modified`, and `no-head` → scope
+      // removal all behave exactly as they do for a poller. A failure is not fatal — the
+      // stream is live and the next commit converges.
+      void this.fetchScope(sourceId, group, scope, scopeString).catch(() => undefined);
+    }
   }
 
   /**
@@ -216,12 +261,24 @@ export class VarManager {
     group: string,
     scope: VarScope,
     scopeString: string,
-  ): Promise<'ingested' | 'rejected' | 'no-head' | 'not-modified'> {
+  ): Promise<'ingested' | 'rejected' | 'no-head' | 'not-modified' | 'superseded'> {
     const provider = this.provider(sourceId);
     const knownRevision = this.appliedRevision(scopeString);
+    // MIXED PULL/PUSH ORDERING (canonical, both SDKs). A push always applies; a pull applies
+    // only if no authoritative event landed for this scope while it was in flight. Without the
+    // gate a slow pull could reintroduce a head the authority already deactivated, or a delayed
+    // `no-head` could wipe a newer pushed activation — permanently, for an rpc source with no
+    // poller. Everything after the `await` is synchronous, so the check and the apply are
+    // atomic in the Node runtime.
+    const epoch = this.store.scopeEpoch(scopeString);
 
     try {
       const batch = await provider.pull(scope, knownRevision);
+
+      if (this.closed || this.store.scopeEpoch(scopeString) !== epoch) {
+        return 'superseded';
+      }
+
       const result = this.store.ingest(scopeString, group, batch);
       this.store.recordRefresh(scopeString, group, batch.generation);
       return result.ok ? 'ingested' : 'rejected';
@@ -232,6 +289,10 @@ export class VarManager {
       }
 
       if (error instanceof CnosVarNoHeadError) {
+        if (this.closed || this.store.scopeEpoch(scopeString) !== epoch) {
+          return 'superseded';
+        }
+
         // A DEFINITIVE answer from the authority: this scope has no active head. Clear the
         // runtime tier so the overlay restores ② static / ③ default without a redeploy
         // (acceptance #15). Contrast with the transport failure below, which is NOT an answer
@@ -320,16 +381,17 @@ export class VarManager {
     try {
       await this.fetchScope(definition.source, group, { group }, group);
     } catch (error) {
-      // A missing transport module is a deployment gap, never fatal: the overlay serves the
-      // static/default tiers and required-but-unresolvable reads fail fast lazily.
+      // A missing transport module is a deployment gap: warned, and non-fatal ONLY while every
+      // required key of the group still resolves through the static/default tiers. Returning
+      // here skipped the required check below, so Node reported a ready runtime where Go
+      // rejected `StartVars` — the carve-out was never meant to waive required enforcement.
       if (error instanceof ProviderUnavailableError) {
         this.warn(
           `[cnos:var] prefetch group "${group}": ${error.message} Serving static/default tiers.`,
         );
-        return;
+      } else {
+        failure = error;
       }
-
-      failure = error;
     }
 
     // The required check runs after EVERY outcome, not only the thrown ones. `fetchScope`
@@ -375,6 +437,10 @@ export class VarManager {
    * subscribe-capable source is ignored — warn once so the config is not silently dropped.
    */
   startPollers(): void {
+    if (this.closed) {
+      return;
+    }
+
     const warnedSources = new Set<string>();
 
     for (const group of this.prefetchGroups()) {
@@ -425,24 +491,61 @@ export class VarManager {
    * duplicating live timers/streams from a half-finished attempt.
    */
   async start(): Promise<void> {
+    if (this.closed) {
+      // A closed runtime can never become ready. Reporting success here would hand the caller a
+      // runtime with no pollers, no subscriptions and no providers, silently serving only the
+      // static/default tiers. Mirrors the Go SDK's `ErrVarClosed`.
+      throw new Error('[cnos:var] start() was called on a closed var runtime.');
+    }
+
     const timersBefore = new Set(this.timers);
     const subscriptionsBefore = new Set(this.subscriptions);
+    const providersBefore = new Set(this.providers.keys());
+
+    const attempt = this.runStart(timersBefore, subscriptionsBefore, providersBefore);
+    this.startAttempt = attempt;
 
     try {
+      await attempt;
+    } finally {
+      if (this.startAttempt === attempt) {
+        this.startAttempt = undefined;
+      }
+    }
+  }
+
+  private async runStart(
+    timersBefore: Set<ReturnType<typeof setTimeout>>,
+    subscriptionsBefore: Set<() => void>,
+    providersBefore: Set<string>,
+  ): Promise<void> {
+    try {
       await this.prefetch();
+      // `close()` can have run while prefetch was in flight. Creating pollers, subscriptions or
+      // providers now would create them behind close()'s back, and nothing would ever release
+      // them. Re-checked after every await and before ANY long-lived resource is created.
+      this.assertOpen();
       this.startPollers();
       this.startSubscriptions();
+      this.assertOpen();
     } catch (error) {
-      this.rollbackStart(timersBefore, subscriptionsBefore);
+      await this.rollbackStart(timersBefore, subscriptionsBefore, providersBefore);
       throw error;
     }
   }
 
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error('[cnos:var] the var runtime was closed while startup was in flight.');
+    }
+  }
+
   /** Undo everything the failed start attempt created; pre-existing resources are untouched. */
-  private rollbackStart(
+  private async rollbackStart(
     timersBefore: Set<ReturnType<typeof setTimeout>>,
     subscriptionsBefore: Set<() => void>,
-  ): void {
+    providersBefore: Set<string>,
+  ): Promise<void> {
     for (const timer of Array.from(this.timers)) {
       if (!timersBefore.has(timer)) {
         clearTimeout(timer);
@@ -461,6 +564,20 @@ export class VarManager {
         this.subscriptions.delete(stop);
       }
     }
+
+    // Providers too. A provider whose `subscribe()` allocated resources and then threw stayed
+    // cached and was never closed, so the retry reused a possibly poisoned instance and the
+    // allocation leaked for the process lifetime.
+    const doomed: Array<Promise<void>> = [];
+
+    for (const [sourceId, provider] of Array.from(this.providers)) {
+      if (!providersBefore.has(sourceId)) {
+        this.providers.delete(sourceId);
+        doomed.push(provider.close().catch(() => undefined));
+      }
+    }
+
+    await Promise.all(doomed);
   }
 
   /**
@@ -471,6 +588,10 @@ export class VarManager {
    * declared capabilities, never the transport name.
    */
   startSubscriptions(): void {
+    if (this.closed) {
+      return;
+    }
+
     const scopesBySource = new Map<string, VarScope[]>();
 
     for (const [group, definition] of Object.entries(this.vars)) {
@@ -603,7 +724,7 @@ export class VarManager {
     }
 
     const required = this.requiredKeys(group).includes(normalized);
-    let outcome: 'ingested' | 'rejected' | 'no-head' | 'not-modified' | undefined;
+    let outcome: 'ingested' | 'rejected' | 'no-head' | 'not-modified' | 'superseded' | undefined;
 
     try {
       outcome = await this.fetchScope(definition.source, group, { group }, group);
@@ -653,6 +774,16 @@ export class VarManager {
 
   async close(): Promise<void> {
     this.closed = true;
+
+    // Coordinate with an in-flight start(). It re-checks `closed` after every await and rolls
+    // back whatever it created, so once it has settled the sets below are complete. Without
+    // this wait, a prefetch that finished AFTER close() had already walked them created
+    // providers, pollers and subscriptions that nothing ever released.
+    const attempt = this.startAttempt;
+
+    if (attempt) {
+      await attempt.catch(() => undefined);
+    }
 
     for (const timer of this.timers) {
       clearTimeout(timer);

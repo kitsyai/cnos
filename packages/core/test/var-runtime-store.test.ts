@@ -230,11 +230,25 @@ describe('var runtime through createCnos', () => {
     );
   });
 
-  it('a read of a required, unresolved var throws CnosVarRequiredError', async () => {
+  // Round-3 blocker 3. This test used to pin the WRONG behavior: a missing transport module let
+  // startup succeed even though a required prefetch key resolved from no tier at all, so Node
+  // reported ready where Go rejected StartVars. The missing module is warned, never waived.
+  it('a missing transport module still fails ready() when a required key has no fallback', async () => {
     const root = await createFixtureRoot(RUNTIME_MANIFEST);
-    // No provider registered -> prefetch degrades to overlay; the required key has no static/default.
-    const runtime = await createCnos({ root, plugins: [] });
-    expect(() => runtime.read('var.agentic.lanes.vinci')).toThrow(CnosVarRequiredError);
+    await expect(createCnos({ root, plugins: [] })).rejects.toBeInstanceOf(CnosVarRequiredError);
+  });
+
+  it('a missing transport module is non-fatal when the required key has a static fallback, and reads serve it', async () => {
+    const root = await createFixtureRoot(RUNTIME_MANIFEST);
+    const staticDocument = { enabled: false, model_target_ref: 'static-tier' };
+    const runtime = await createCnos({
+      root,
+      plugins: [valueLoader([{ key: 'value.agentic.lanes.vinci', value: staticDocument }])],
+    });
+
+    expect(runtime.read('var.agentic.lanes.vinci')).toEqual(staticDocument);
+    // The optional group still degrades to its schema default.
+    expect(runtime.read('var.flags.mode')).toBe('safe');
     await runtime.close?.();
   });
 

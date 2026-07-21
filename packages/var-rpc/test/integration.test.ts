@@ -221,41 +221,126 @@ describe('var rpc transport', () => {
     expect(batch.values).toHaveProperty('agentic.lanes.vinci');
   });
 
-  it('#reconnect resumes the subscription after a server restart', async () => {
+  /**
+   * Round-3 blocker 1. The ADR promises "on reconnect, re-pull subscribed scopes with known
+   * revisions to converge". Neither SDK did it: the client only reopened the stream, and the
+   * server forwards FUTURE commits only — so anything that happened during the outage was lost
+   * permanently. Since round 2 made deactivation a real state change, a missed deactivation
+   * means serving withdrawn policy forever, and an rpc source has no poller to recover with.
+   *
+   * The mutation happens EXACTLY ONCE, while the server is down, and nothing is mutated after
+   * the reconnect. The old "keep activating until something lands" loop could not fail here.
+   */
+  async function resyncHarness(): Promise<{
+    engine: VarEngine;
+    manager: VarManager;
+    restart: () => Promise<void>;
+    down: () => Promise<void>;
+  }> {
     const store = memoryStore();
     const engine = createVarEngine(store, { documents });
     let server = await serveVarRpc(store, { engine, documents, port: 0 });
     const port = server.port;
     servers.push(server);
 
-    const provider = track(providerFor(server.target));
-    const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
-
-    await delay(150);
-    // Restart on the same port with the SAME engine so activations still notify subscribers.
-    await server.close();
-    servers.splice(servers.indexOf(server), 1);
-    server = await serveVarRpc(store, { engine, documents, port });
-    servers.push(server);
-
-    // Deterministic (W5b): rather than sleeping a fixed backoff window and hoping the client
-    // reconnected, keep committing new generations and poll on the delivery condition. The
-    // loop exits the instant the reconnected stream produces a batch.
-    let generation = 0;
-    const deadline = Date.now() + 15_000;
-    while (received.length === 0 && Date.now() < deadline) {
-      await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'after-restart' } }, generation);
-      generation += 1;
-      await until(() => received.length > 0, 250);
-    }
-
-    expect(received.length).toBeGreaterThan(0);
-    expect(received[received.length - 1]?.values).toEqual({
-      'agentic.lanes.vinci': { enabled: true, model_target_ref: 'after-restart' },
+    const source: NormalizedVarSourceDefinition = {
+      transport: 'rpc',
+      url: server.target,
+      auth: {},
+      // Declared deliberately: a subscribe-capable source IGNORES pollInterval (capability
+      // rule), so convergence below can only have come from the reconnect resync.
+      pollInterval: '20ms',
+    };
+    const manager = new VarManager({
+      varSources: { ops: source },
+      vars: { agentic: { source: 'ops', mode: 'prefetch' } },
+      documents,
+      schema: { 'var.agentic.lanes.vinci': { document: 'agentic-lanes/v1' } },
+      providerModules: [{ transport: 'rpc', create: (def, ctx) => track(createRpcVarProvider(def, ctx)) }],
+      resolveSecret: async () => '',
+      warn: () => undefined,
     });
-    stop?.();
-  }, 20_000);
+
+    const staticDocument = { enabled: false, model_target_ref: 'static-tier' };
+    manager.setOverlayReader((key) =>
+      key === 'var.agentic.lanes.vinci' ? staticDocument : undefined,
+    );
+    manager.setFallbackSnapshotReader((key) =>
+      key === 'var.agentic.lanes.vinci'
+        ? { value: staticDocument, source: 'static', freshness: 'fresh' }
+        : undefined,
+    );
+
+    return {
+      engine,
+      manager,
+      down: async () => {
+        await server.close();
+        servers.splice(servers.indexOf(server), 1);
+      },
+      restart: async () => {
+        server = await serveVarRpc(store, { engine, documents, port });
+        servers.push(server);
+      },
+    };
+  }
+
+  it('#reconnect re-pulls subscribed scopes: an ACTIVATION missed during the outage converges', async () => {
+    const { engine, manager, down, restart } = await resyncHarness();
+
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'before' } }, 0);
+    await manager.start();
+    expect(manager.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({
+      enabled: true,
+      model_target_ref: 'before',
+    });
+
+    await delay(200); // let the subscription establish
+    await down();
+
+    // EXACTLY ONE mutation, entirely while the client is disconnected.
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'during-outage' } }, 1);
+
+    await restart();
+
+    await until(
+      () =>
+        (manager.readRuntimeVar('var.agentic.lanes.vinci') as { model_target_ref?: string } | undefined)
+          ?.model_target_ref === 'during-outage',
+      15_000,
+    );
+    expect(manager.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({
+      enabled: true,
+      model_target_ref: 'during-outage',
+    });
+
+    await manager.close();
+  }, 30_000);
+
+  it('#reconnect re-pulls subscribed scopes: a DEACTIVATION missed during the outage converges', async () => {
+    const { engine, manager, down, restart } = await resyncHarness();
+
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'before' } }, 0);
+    await manager.start();
+    expect(manager.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({
+      enabled: true,
+      model_target_ref: 'before',
+    });
+
+    await delay(200);
+    await down();
+
+    // The worst case: a withdrawal the client never hears about. EXACTLY ONE mutation.
+    await engine.deactivate({ scope: 'agentic', expectedGeneration: 1 });
+
+    await restart();
+
+    await until(() => manager.readRuntimeVar('var.agentic.lanes.vinci') === undefined, 15_000);
+    expect(manager.readRuntimeVar('var.agentic.lanes.vinci')).toBeUndefined();
+    expect(manager.status()['agentic.lanes.vinci']?.source).toBe('static');
+
+    await manager.close();
+  }, 30_000);
 
   it('#close resolves cleanly and cancels streams', async () => {
     const { server } = await harness();

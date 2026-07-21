@@ -466,7 +466,13 @@ describe('key and scope edge cases', () => {
     expect(store.readRuntimeVar('var.g.a.b')).toBe('from-key');
     expect(store.readRuntimeVar('var.g.c')).toBe('group-only');
     expect(store.hasRuntimeScope('g.a.b')).toBe(true);
-    expect(store.hasRuntimeScope('g.zzz')).toBe(true); // still covered by the group scope
+    // Round-3: coverage is PER KEY, not per scope. `g.zzz` is inside the committed group scope
+    // but the revision does not carry it, so it has no runtime tier — reads fall through to
+    // static/default and an ondemand read still triggers a fetch. This is what the Go SDK has
+    // always done (a store miss is a miss); Node used to report `source: 'runtime'` with
+    // `value: undefined` for such a key, which is also how a key DROPPED by a replacement
+    // revision used to look.
+    expect(store.hasRuntimeScope('g.zzz')).toBe(false);
   });
 
   it('PINNED: a key whose name collides with a group name is resolved by the group scope', () => {
@@ -1320,7 +1326,11 @@ describe('required prefetch resolvability (round-2 blocker 2)', () => {
     await manager.close();
   });
 
-  it('(c) a MISSING transport module stays non-fatal (the documented carve-out)', async () => {
+  // Round-3 blocker 3. The missing-transport-module carve-out was written to skip the required
+  // check entirely, so a deployment gap + a required prefetch key + no fallback let Node report
+  // a READY runtime that only failed later, at read time, while Go rejected StartVars. The
+  // carve-out warns; it never waives required enforcement.
+  it('(c) a MISSING transport module with NO fallback still fails ready()', async () => {
     const warnings: string[] = [];
     const manager = new VarManager({
       ...managerOptions(noHeadProvider, { schema: { 'var.g.k': { type: 'string', required: true } } }),
@@ -1328,6 +1338,21 @@ describe('required prefetch resolvability (round-2 blocker 2)', () => {
       warn: (message) => warnings.push(message),
     });
     manager.setOverlayReader(() => undefined);
+
+    await expect(manager.prefetch()).rejects.toBeInstanceOf(CnosVarRequiredError);
+    // Still warned about the gap — the diagnosis must not be swallowed by the failure.
+    expect(warnings.join('\n')).toMatch(/No var source provider registered/);
+    await manager.close();
+  });
+
+  it('(c2) a MISSING transport module stays non-fatal WHEN a fallback tier resolves the key', async () => {
+    const warnings: string[] = [];
+    const manager = new VarManager({
+      ...managerOptions(noHeadProvider, { schema: { 'var.g.k': { type: 'string', required: true } } }),
+      providerModules: [],
+      warn: (message) => warnings.push(message),
+    });
+    manager.setOverlayReader((key) => (key === 'var.g.k' ? 'static-tier' : undefined));
 
     await expect(manager.prefetch()).resolves.toBeUndefined();
     expect(warnings.join('\n')).toMatch(/No var source provider registered/);
@@ -1502,5 +1527,272 @@ describe('transactional startup (round-2 warning 6)', () => {
     // close() is still correct after a rolled-back attempt: exactly the live subscription stops.
     await manager.close();
     expect(stopCalls).toBe(1);
+  });
+
+  // Round-3 warning 7: the rollback tracked timers and subscription disposers but NOT the
+  // providers the attempt constructed. A provider whose `subscribe()` allocated resources and
+  // then threw stayed cached and was never closed, so the retry reused a possibly poisoned
+  // instance and the allocation leaked for the process lifetime.
+  it('rolls back PROVIDERS created by a failed attempt, and the retry recreates via the factory', async () => {
+    let created = 0;
+    let providerCloses = 0;
+    let allocations = 0;
+    let releases = 0;
+    let failSubscribe = true;
+
+    const module: VarSourceProviderModule = {
+      transport: 'rpc',
+      create() {
+        created += 1;
+        return {
+          async pull() {
+            return batch({ values: { 'g.k': 'v' } });
+          },
+          subscribe() {
+            // A real transport allocates BEFORE it can fail (a channel, a stream, a timer).
+            allocations += 1;
+
+            if (failSubscribe) {
+              throw new Error('subscribe blew up');
+            }
+
+            return () => {
+              releases += 1;
+            };
+          },
+          async close() {
+            providerCloses += 1;
+            releases += allocations - releases;
+          },
+        };
+      },
+    };
+
+    const subscribing: NormalizedVarSourceDefinition = { transport: 'rpc', url: 'http://unused.local', auth: {} };
+    const manager = new VarManager({
+      ...managerOptions({ async pull() { return batch({ values: {} }); }, async close() { /* noop */ } }),
+      varSources: { svc: subscribing },
+      vars: { g: { source: 'svc', mode: 'prefetch' } },
+      schema: { 'var.g.k': { type: 'string' } },
+      providerModules: [module],
+      warn: () => undefined,
+    });
+
+    await expect(manager.start()).rejects.toThrow(/subscribe blew up/);
+
+    // The failed attempt's provider is closed and evicted — its allocation cannot leak.
+    expect(created).toBe(1);
+    expect(providerCloses).toBe(1);
+    expect(releases).toBe(allocations);
+
+    // The retry must go back to the FACTORY rather than reuse the poisoned instance.
+    failSubscribe = false;
+    await manager.start();
+    expect(created).toBe(2);
+
+    await manager.close();
+    expect(providerCloses).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review round 3 regressions (Node side). Every one of these has a Go twin —
+// cross-SDK semantic parity is the through-line of all three review rounds.
+// ---------------------------------------------------------------------------
+
+describe('scope replacement semantics (round-3 blocker 4)', () => {
+  it('a replacement revision DROPS a key the previous revision carried, and watchers fire', () => {
+    const store = new LiveVarStore({
+      groups: { g: { source: 's', mode: 'prefetch' } },
+      schema: { 'var.g.a': { type: 'string' }, 'var.g.b': { type: 'string' } },
+      documents: {},
+      // `g.b` has a static twin, so its disappearance from the runtime tier is observable as a
+      // real fallback rather than as `undefined`.
+      fallbackSnapshot: (key) =>
+        key === 'var.g.b' ? { value: 'static-b', source: 'static', freshness: 'fresh' } : undefined,
+    });
+
+    const seen: Array<{ value: unknown; source: string }> = [];
+    store.watch('var.g.b', (next) => seen.push({ value: next.value, source: next.source }));
+
+    store.ingest('g', 'g', batch({ revision: 'sha256:r1', values: { 'g.a': 'a1', 'g.b': 'b1' } }));
+    expect(store.readRuntimeVar('var.g.a')).toBe('a1');
+    expect(store.readRuntimeVar('var.g.b')).toBe('b1');
+
+    // Revision 2 OMITS g.b. A merge would keep serving the withdrawn value forever — which is
+    // exactly what a removed allowlist entry or a revoked policy flag looks like.
+    store.ingest('g', 'g', batch({ generation: 2, revision: 'sha256:r2', values: { 'g.a': 'a2' } }));
+
+    expect(store.readRuntimeVar('var.g.a')).toBe('a2');
+    expect(store.readRuntimeVar('var.g.b')).toBeUndefined();
+    expect(seen).toEqual([
+      { value: 'b1', source: 'runtime' },
+      { value: 'static-b', source: 'static' },
+    ]);
+  });
+
+  it('a narrower scope survives a commit of the broader scope, and shadows it', () => {
+    const store = new LiveVarStore({
+      groups: { g: { source: 's', mode: 'prefetch' } },
+      schema: { 'var.g.a.x': { type: 'string' }, 'var.g.b': { type: 'string' } },
+      documents: {},
+    });
+
+    store.ingest('g', 'g', batch({ revision: 'sha256:r1', values: { 'g.a.x': 'broad', 'g.b': 'b1' } }));
+    store.ingest('g.a', 'g', batch({ revision: 'sha256:k1', values: { 'g.a.x': 'narrow' } }));
+
+    // The longest committed scope that prefixes the key wins.
+    expect(store.readRuntimeVar('var.g.a.x')).toBe('narrow');
+
+    // A replacement of the BROAD scope leaves the narrow scope's key untouched.
+    store.ingest('g', 'g', batch({ generation: 2, revision: 'sha256:r2', values: { 'g.b': 'b2' } }));
+    expect(store.readRuntimeVar('var.g.a.x')).toBe('narrow');
+    expect(store.readRuntimeVar('var.g.b')).toBe('b2');
+  });
+});
+
+describe('mixed pull/push ordering (round-3 warning 5)', () => {
+  it('a pull result that a push superseded while it was in flight is DROPPED', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let pushEvent: ((event: VarPushEvent) => void) | undefined;
+    const provider: VarSourceProvider = {
+      async pull() {
+        await gate;
+        // Deliberately STALE: this is the head the authority served before the deactivation.
+        return batch({ generation: 1, revision: 'sha256:stale', values: { 'g.k': 'stale-head' } });
+      },
+      subscribe(_scopes, onEvent) {
+        pushEvent = onEvent;
+        return () => undefined;
+      },
+      async close() {
+        /* noop */
+      },
+    };
+
+    const manager = new VarManager(managerOptions(provider));
+    manager.setOverlayReader((key) => manager.readRuntimeVar(key));
+    const started = manager.start();
+
+    // While the pull hangs, the authority pushes a DEACTIVATION for the same scope.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    manager.startSubscriptions();
+    expect(pushEvent).toBeDefined();
+    pushEvent?.({ kind: 'no-head', scope: 'g' });
+
+    release?.();
+    await started.catch(() => undefined);
+
+    // The stale pull must NOT reintroduce the withdrawn head.
+    expect(manager.readRuntimeVar('var.g.k')).toBeUndefined();
+    await manager.close();
+  });
+});
+
+describe('watcher dispatch ordering (round-3 warning 6)', () => {
+  it('a reactivation triggered INSIDE a deactivation callback is delivered after it, to every watcher', () => {
+    const store = new LiveVarStore({
+      groups: { g: { source: 's', mode: 'prefetch' } },
+      schema: { 'var.g.k': { type: 'string' } },
+      documents: {},
+      fallbackSnapshot: (key) =>
+        key === 'var.g.k' ? { value: 'static', source: 'static', freshness: 'fresh' } : undefined,
+    });
+
+    store.ingest('g', 'g', batch({ revision: 'sha256:r1', values: { 'g.k': 'v1' } }));
+
+    const first: string[] = [];
+    const second: string[] = [];
+    let reactivated = false;
+
+    store.watch('var.g.k', (next) => {
+      first.push(String(next.value));
+
+      // Re-entrant commit from inside the callback. It must NOT be visible to the watchers
+      // that have not yet received the event currently being delivered.
+      if (next.source === 'static' && !reactivated) {
+        reactivated = true;
+        store.ingest('g', 'g', batch({ generation: 3, revision: 'sha256:r3', values: { 'g.k': 'v3' } }));
+      }
+    });
+    store.watch('var.g.k', (next) => second.push(String(next.value)));
+
+    store.removeScope('g', 'g');
+
+    // Both watchers observe the SAME sequence: the fallback transition, then the reactivation.
+    expect(first).toEqual(['static', 'v3']);
+    expect(second).toEqual(['static', 'v3']);
+  });
+});
+
+describe('close() vs an in-flight startup (round-3 blocker 2)', () => {
+  it('close() releases every resource a startup still in flight goes on to create', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let created = 0;
+    let closedCount = 0;
+    let subscribes = 0;
+    let stops = 0;
+
+    const module: VarSourceProviderModule = {
+      transport: 'http',
+      create() {
+        created += 1;
+        return {
+          async pull() {
+            await gate;
+            return batch({ values: { 'g.k': 'v' } });
+          },
+          subscribe() {
+            subscribes += 1;
+            return () => {
+              stops += 1;
+            };
+          },
+          async close() {
+            closedCount += 1;
+          },
+        };
+      },
+    };
+
+    const idleProvider: VarSourceProvider = {
+      async pull() {
+        return batch({ values: {} });
+      },
+      async close() {
+        /* noop */
+      },
+    };
+
+    const manager = new VarManager({
+      ...managerOptions(idleProvider),
+      providerModules: [module],
+    });
+    manager.setOverlayReader((key) => manager.readRuntimeVar(key));
+
+    const started = manager.start();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // close() while prefetch is still awaiting the provider.
+    const closing = manager.close();
+    release?.();
+    await Promise.all([started.catch(() => undefined), closing]);
+
+    expect(created).toBe(1);
+    // Nothing long-lived may survive: the provider is closed and no subscription outlives it.
+    expect(closedCount).toBe(1);
+    expect(subscribes).toBe(stops);
+
+    // And a startup that observed the closed runtime must FAIL, never report success.
+    await expect(started).rejects.toThrow(/closed/);
+    await expect(manager.start()).rejects.toThrow(/closed/);
   });
 });

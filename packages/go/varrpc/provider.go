@@ -131,6 +131,7 @@ type Provider struct {
 	maxFailures    int
 	onError        func(err error, terminal bool, scopes []string)
 	reportSDK      func(err error, terminal bool, scopes []string)
+	reportConnect  func(scopes []string, reconnect bool)
 
 	mu      sync.Mutex
 	closed  bool
@@ -156,6 +157,7 @@ func New(def cnos.VarSourceDef, providerCtx cnos.VarProviderContext, configure .
 		maxFailures:    settings.maxFailures,
 		onError:        settings.onError,
 		reportSDK:      providerCtx.OnSubscriptionError,
+		reportConnect:  providerCtx.OnSubscriptionConnected,
 	}
 
 	if settings.conn != nil {
@@ -322,12 +324,13 @@ func (provider *Provider) report(err error, terminal bool, scopes []string) {
 // RefreshVar explicitly.
 func (provider *Provider) subscribeLoop(ctx context.Context, scopes []string, onBatch func(cnos.VarBatchResult)) {
 	consecutive := 0
+	everConnected := false
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		delivered, streamErr := provider.runStream(ctx, scopes, onBatch)
+		delivered, streamErr := provider.runStream(ctx, scopes, onBatch, &everConnected)
 
 		if ctx.Err() != nil {
 			return
@@ -355,7 +358,7 @@ func (provider *Provider) subscribeLoop(ctx context.Context, scopes []string, on
 
 // runStream runs one Subscribe stream to completion, reporting whether it delivered a batch
 // and the error that ended it.
-func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatch func(cnos.VarBatchResult)) (bool, error) {
+func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatch func(cnos.VarBatchResult), everConnected *bool) (bool, error) {
 	callCtx, err := provider.authContext(ctx)
 	if err != nil {
 		return false, err
@@ -364,6 +367,20 @@ func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatc
 	stream, err := provider.client.Subscribe(callCtx, &SubscribeRequest{Scopes: scopes})
 	if err != nil {
 		return false, err
+	}
+
+	// ORDERING BARRIER: the Subscribe call is on the wire before the SDK issues its resync
+	// pulls, so a commit racing a pull is delivered on this stream instead of being dropped.
+	// Which of the two wins is then decided by the store's scope epoch.
+	if provider.reportConnect != nil {
+		reconnect := *everConnected
+		*everConnected = true
+		func() {
+			defer func() { _ = recover() }()
+			provider.reportConnect(scopes, reconnect)
+		}()
+	} else {
+		*everConnected = true
 	}
 
 	delivered := false

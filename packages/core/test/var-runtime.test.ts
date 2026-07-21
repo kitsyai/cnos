@@ -87,6 +87,24 @@ const VAR_MANIFEST = [
   '',
 ].join('\n');
 
+/**
+ * VAR_MANIFEST declares `var.agentic.lanes.vinci` as REQUIRED in a prefetch group. With no rpc
+ * transport module registered, startup is only legal when a fallback tier resolves it (round-3
+ * blocker 3): the missing module is warned, never a waiver of required enforcement.
+ */
+function staticRequiredVarLoader(): LoaderPlugin {
+  return createFixtureLoader('var-required-static', [
+    {
+      key: 'value.agentic.lanes.vinci',
+      value: { enabled: true, model_target_ref: 'static-model' },
+      namespace: 'value',
+      sourceId: 'var-required-static',
+      pluginId: 'var-required-static',
+      workspaceId: 'var-app',
+    },
+  ]);
+}
+
 describe('var normalization', () => {
   it('is absent-safe: omitting var sections changes nothing', () => {
     const manifest = normalize({});
@@ -311,7 +329,7 @@ describe('var overlay precedence', () => {
 
   it('does not inject var.* schema defaults into the resolved value graph', async () => {
     const root = await createFixtureRoot(VAR_MANIFEST);
-    const runtime = await createCnos({ root, plugins: [] });
+    const runtime = await createCnos({ root, plugins: [staticRequiredVarLoader()] });
     // The overlay serves the default at read time, but no var.* entry pollutes the graph.
     expect(runtime.read('var.user.IN.coupon_allowed')).toBe(false);
     expect(runtime.graph.entries.has('var.user.IN.coupon_allowed')).toBe(false);
@@ -322,7 +340,7 @@ describe('var overlay precedence', () => {
 describe('var projection emit', () => {
   it('emits varSources, vars, and documents blocks (refs only)', async () => {
     const root = await createFixtureRoot(VAR_MANIFEST);
-    const runtime = await createCnos({ root, plugins: [] });
+    const runtime = await createCnos({ root, plugins: [staticRequiredVarLoader()] });
     const projection = runtime.toServerProjection();
 
     expect(projection.varSources?.ops).toEqual({
@@ -373,7 +391,7 @@ describe('var public-safety enforcement', () => {
 
   it('surfaces a var public-exposure issue through validateRuntime', async () => {
     const root = await createFixtureRoot(VAR_MANIFEST);
-    const runtime = await createCnos({ root, plugins: [] });
+    const runtime = await createCnos({ root, plugins: [staticRequiredVarLoader()] });
     const summary = await validateRuntime(runtime);
     // The fully-wired VAR_MANIFEST is valid.
     expect(summary.issues.filter((issue) => issue.code.startsWith('var.'))).toEqual([]);

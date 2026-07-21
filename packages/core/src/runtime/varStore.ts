@@ -44,6 +44,25 @@ interface Watcher {
   callback: VarWatchCallback;
 }
 
+/**
+ * One immutable watcher delivery, frozen at COMMIT time. Both `prev` and `next` are captured
+ * around the mutation that produced them, never re-read at dispatch time — otherwise a
+ * reactivation triggered from inside a deactivation callback would make the watchers visited
+ * later in the same pass observe the reactivated value and never see the fallback transition.
+ */
+interface NotifyEntry {
+  watcher: Watcher;
+  key: string;
+  next: ResolvedVarSnapshot;
+  prev: ResolvedVarSnapshot | undefined;
+}
+
+/** Everything captured BEFORE a mutation so the post-commit event can be built. */
+interface NotifyCapture {
+  watchers: Watcher[];
+  previous: Map<string, ResolvedVarSnapshot | undefined>;
+}
+
 export interface LiveVarStoreOptions {
   groups: Record<string, VarGroupDefinition>;
   schema: Record<string, ConfigSpecRule>;
@@ -75,6 +94,17 @@ export interface IngestResult {
  */
 function extractForScope(_scope: string, path: string, values: Record<string, unknown>): unknown {
   return values[path];
+}
+
+/**
+ * Whether the batch actually CARRIES `path`. A key whose serving scope exists but whose last
+ * revision omitted it has no runtime tier at all: reads, snapshots and status must all fall
+ * through to ② static / ③ default rather than reporting `source: 'runtime', value: undefined`.
+ * Own-property based so a legitimately `null` value still counts as present. Matches the Go
+ * store, where a missing record is simply a miss.
+ */
+function hasValueForScope(path: string, values: Record<string, unknown>): boolean {
+  return Object.prototype.hasOwnProperty.call(values, path);
 }
 
 /**
@@ -163,6 +193,15 @@ export class LiveVarStore {
   private readonly warn: (message: string) => void;
   private fallbackSnapshot: ((key: string) => ResolvedVarSnapshot | undefined) | undefined;
   private closed = false;
+  /**
+   * Monotonic per-scope counter bumped on every AUTHORITATIVE application (an accepted ingest or
+   * a `no-head` removal). A pull captures it before issuing its request and applies only if it
+   * is unchanged on completion — see {@link scopeEpoch}.
+   */
+  private readonly epochs = new Map<string, number>();
+  /** Committed-but-undispatched notification events, in commit order. */
+  private readonly notifyQueue: NotifyEntry[][] = [];
+  private dispatching = false;
 
   constructor(options: LiveVarStoreOptions) {
     this.groups = options.groups;
@@ -185,6 +224,22 @@ export class LiveVarStore {
    */
   private effectiveSnapshot(key: string): ResolvedVarSnapshot | undefined {
     return this.runtimeSnapshot(key) ?? this.fallbackSnapshot?.(key);
+  }
+
+  /**
+   * The scope's current operation epoch. CANONICAL MIXED PULL/PUSH ORDERING (both SDKs): a PUSH
+   * is always applied (last-write-wins among pushes), while a PULL applies only when this value
+   * is unchanged between issuing the request and its completion. Without it a stale pull
+   * response could reintroduce a head the authority already deactivated, or a delayed `no-head`
+   * could clear a newer pushed activation — and an ondemand rpc source, which runs no poller,
+   * would stay wrong indefinitely.
+   */
+  scopeEpoch(scope: string): number {
+    return this.epochs.get(scope) ?? 0;
+  }
+
+  private bumpEpoch(scope: string): void {
+    this.epochs.set(scope, this.scopeEpoch(scope) + 1);
   }
 
   private metaFor(scope: string, group: string): ScopeMeta {
@@ -264,7 +319,7 @@ export class LiveVarStore {
       return { ok: false, issues };
     }
 
-    const previousSnapshots = this.snapshotWatchers();
+    const captured = this.captureForNotify();
     const nowMs = this.clockMs();
     // `lastKnownGood` names the revision this commit DISPLACES — the last one that was
     // validated and served while fresh. Cross-SDK canonical (mirrors the Go SDK).
@@ -283,8 +338,9 @@ export class LiveVarStore {
       ...(lastKnownGood ? { lastKnownGood } : {}),
     });
     meta.desiredGeneration = batch.generation;
+    this.bumpEpoch(scope);
 
-    this.fireWatchers(previousSnapshots);
+    this.enqueueNotification(captured);
 
     return { ok: true };
   }
@@ -313,11 +369,15 @@ export class LiveVarStore {
       (candidate) => candidate === scope || candidate.startsWith(`${scope}.`),
     );
 
+    // Bump BEFORE the idempotence check: a `no-head` is an authoritative answer even when it
+    // removes nothing, so an in-flight pull issued before it must still be superseded.
+    this.bumpEpoch(scope);
+
     if (doomed.length === 0) {
       return false;
     }
 
-    const previousSnapshots = this.snapshotWatchers();
+    const captured = this.captureForNotify();
     // Build the surviving map fully, THEN swap the reference in one assignment: the same
     // immutable-swap discipline the Go store gets from its atomic CAS. No reader — including a
     // reentrant one from a watch callback — can ever observe a half-removed scope.
@@ -337,14 +397,18 @@ export class LiveVarStore {
     const scopeMeta = this.metaFor(scope, group);
     delete scopeMeta.desiredGeneration;
 
-    this.fireWatchers(previousSnapshots);
+    for (const removed of doomed) {
+      this.bumpEpoch(removed);
+    }
+
+    this.enqueueNotification(captured);
     return true;
   }
 
   /** Runtime-tier lookup used by the overlay seam. Returns `undefined` when no runtime head applies. */
   readRuntimeVar(key: string): unknown {
     const path = key.slice(VAR_NAMESPACE_PREFIX.length);
-    const stored = this.findScope(path);
+    const stored = this.servingScope(path);
 
     if (!stored) {
       return undefined;
@@ -353,6 +417,11 @@ export class LiveVarStore {
     return extractForScope(stored.scope, path, stored.batch.values ?? {});
   }
 
+  /**
+   * The scope serving `path`: the LONGEST committed scope that is a dot-prefix of (or equal to)
+   * it. A narrower scope fully shadows the range it owns — a key missing from it does NOT fall
+   * through to a broader scope. Canonical rule, identical to the Go store's `find`.
+   */
   private findScope(path: string): StoredScope | undefined {
     const segments = path.split('.');
 
@@ -366,6 +435,17 @@ export class LiveVarStore {
     }
 
     return undefined;
+  }
+
+  /** The serving scope, but only when its current revision actually carries `path`. */
+  private servingScope(path: string): StoredScope | undefined {
+    const stored = this.findScope(path);
+
+    if (!stored || !hasValueForScope(path, stored.batch.values ?? {})) {
+      return undefined;
+    }
+
+    return stored;
   }
 
   private freshnessFor(group: string, observedAtMs: number): { freshness: VarSnapshotFreshness; leaseExpiresAt?: string } {
@@ -391,7 +471,7 @@ export class LiveVarStore {
   /** Runtime-tier snapshot for a var key, or `undefined` when no runtime head applies. */
   runtimeSnapshot(key: string): ResolvedVarSnapshot | undefined {
     const path = key.slice(VAR_NAMESPACE_PREFIX.length);
-    const stored = this.findScope(path);
+    const stored = this.servingScope(path);
 
     if (!stored) {
       return undefined;
@@ -420,7 +500,7 @@ export class LiveVarStore {
   }
 
   hasRuntimeScope(path: string): boolean {
-    return this.findScope(path) !== undefined;
+    return this.servingScope(path) !== undefined;
   }
 
   recordError(scope: string, group: string, error: unknown): void {
@@ -478,8 +558,8 @@ export class LiveVarStore {
     }
 
     for (const path of paths) {
-      const stored = this.findScope(path);
-      const group = stored?.group ?? path.split('.')[0] ?? path;
+      const stored = this.servingScope(path);
+      const group = stored?.group ?? this.findScope(path)?.group ?? path.split('.')[0] ?? path;
       const meta = this.meta.get(stored?.scope ?? path) ?? this.meta.get(group);
 
       let freshness: VarScopeStatus['freshness'] = 'none';
@@ -555,26 +635,33 @@ export class LiveVarStore {
     return Array.from(keys);
   }
 
-  private snapshotWatchers(): Map<string, ResolvedVarSnapshot | undefined> {
-    const map = new Map<string, ResolvedVarSnapshot | undefined>();
+  /**
+   * Freeze the registry and the pre-mutation snapshots. Taken BEFORE the mutation: a watcher
+   * registered from inside a callback must not be visited by an event committed before it
+   * existed — it never observed that commit.
+   */
+  private captureForNotify(): NotifyCapture {
+    const previous = new Map<string, ResolvedVarSnapshot | undefined>();
 
     for (const key of this.watchedKeys()) {
-      map.set(key, this.effectiveSnapshot(key));
+      previous.set(key, this.effectiveSnapshot(key));
     }
 
-    return map;
+    return { watchers: Array.from(this.watchers), previous };
   }
 
-  private fireWatchers(previous: Map<string, ResolvedVarSnapshot | undefined>): void {
-    // Snapshot the registry BEFORE dispatching: a watcher registered from inside a callback
-    // must not be visited by the pass that is already running — it never observed the commit
-    // that pass is reporting. (Unsubscribing mid-pass still suppresses a pending fire, which
-    // is checked against the live set below.) Mirrors the Go SDK's `notify`.
-    for (const watcher of Array.from(this.watchers)) {
-      if (!this.watchers.has(watcher)) {
-        continue;
-      }
+  /**
+   * Build the immutable delivery list for the commit that just happened, append it to the
+   * queue in COMMIT ORDER, and drain. Ordering matters: a reactivation triggered from inside a
+   * deactivation callback commits while this pass is mid-flight, and its event must be
+   * delivered to every watcher only AFTER the deactivation event has finished being delivered
+   * to every watcher — otherwise watcher #2 would see the reactivated value and never learn
+   * about the fallback transition watcher #1 saw. Identical in the Go SDK.
+   */
+  private enqueueNotification(captured: NotifyCapture): void {
+    const entries: NotifyEntry[] = [];
 
+    for (const watcher of captured.watchers) {
       const keys = watcher.prefix
         ? Object.keys(this.schema).filter((schemaKey) => schemaKey.startsWith(watcher.prefix as string))
         : [watcher.key];
@@ -582,14 +669,15 @@ export class LiveVarStore {
       for (const key of keys) {
         // The EFFECTIVE snapshot, not just the runtime tier: after a deactivation the key still
         // resolves — from the static/default tier — and that new value is precisely what the
-        // watcher must be handed (`source: 'static' | 'default'`).
+        // watcher must be handed (`source: 'static' | 'default'`). Captured NOW, at commit
+        // time, so a later mutation cannot rewrite what this event reports.
         const next = this.effectiveSnapshot(key);
 
         if (!next) {
           continue;
         }
 
-        const prev = previous.get(key);
+        const prev = captured.previous.get(key);
 
         // Revision is content-addressed, so an equal revision means equal content and there is
         // nothing for a watcher to react to. Generation is deliberately excluded: a push without
@@ -601,19 +689,53 @@ export class LiveVarStore {
           continue;
         }
 
-        try {
-          watcher.callback(next, prev);
-        } catch (error) {
-          this.warn(
-            `[cnos:var] watch callback for "${key}" threw (ignored): ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+        entries.push({ watcher, key, next, prev });
       }
+    }
+
+    this.notifyQueue.push(entries);
+    this.drainNotifications();
+  }
+
+  /** Deliver one queued event to every watcher before starting the next. Reentrancy-safe. */
+  private drainNotifications(): void {
+    if (this.dispatching) {
+      // A callback of the event currently being delivered committed again. Its event is queued
+      // and the loop below will pick it up — starting it here would interleave the two.
+      return;
+    }
+
+    this.dispatching = true;
+
+    try {
+      let event = this.notifyQueue.shift();
+
+      while (event) {
+        for (const entry of event) {
+          // Unsubscribing from inside a callback still suppresses a not-yet-delivered fire.
+          if (!this.watchers.has(entry.watcher)) {
+            continue;
+          }
+
+          try {
+            entry.watcher.callback(entry.next, entry.prev);
+          } catch (error) {
+            this.warn(
+              `[cnos:var] watch callback for "${entry.key}" threw (ignored): ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        event = this.notifyQueue.shift();
+      }
+    } finally {
+      this.dispatching = false;
     }
   }
 
   close(): void {
     this.closed = true;
     this.watchers.clear();
+    this.notifyQueue.length = 0;
   }
 }

@@ -188,6 +188,10 @@ export function createRpcVarProvider(
   function subscribe(scopes: VarScope[], onEvent: (event: VarPushEvent) => void): () => void {
     const scopeStrings = scopes.map(scopeValue);
     let cancelled = false;
+    // False only for the very first connect of this subscription; every later connect is a
+    // RECONNECT and must trigger a full resync, because the server forwards future commits
+    // only and anything that happened during the outage is otherwise lost for good.
+    let everConnected = false;
     let current: grpc.ClientReadableStream<WireSnapshotBatch> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -251,6 +255,18 @@ export function createRpcVarProvider(
 
           current = stream;
           activeCalls.add(stream as grpc.ClientReadableStream<unknown>);
+
+          // ORDERING BARRIER: the Subscribe call is on the wire before the SDK issues its
+          // resync pulls, so a commit racing the pull is delivered on this stream rather than
+          // being dropped. Which of the two wins is then decided by the store's scope epoch.
+          const reconnect = everConnected;
+          everConnected = true;
+
+          try {
+            ctx.onSubscriptionConnected?.(scopeStrings, { reconnect });
+          } catch {
+            /* a resync hook must never break the transport */
+          }
 
           let delivered = false;
           let settled = false;

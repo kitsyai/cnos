@@ -327,9 +327,13 @@ func TestVarAtomicSnapshotsUnderConcurrency(t *testing.T) {
 				}
 				// A single atomic load of the store state must yield a
 				// consistent view: a and b from the same committed batch agree.
-				records := variables.store.state.Load().records
-				aVal, aOK := records["var.cfg.a"]
-				bVal, bOK := records["var.cfg.b"]
+				state := variables.store.state.Load()
+				var aVal, bVal *varRecord
+				var aOK, bOK bool
+				if entry, ok := state.scopes["cfg"]; ok {
+					aVal, aOK = entry.records["var.cfg.a"]
+					bVal, bOK = entry.records["var.cfg.b"]
+				}
 				if aOK && bOK {
 					if aVal.base.Value != bVal.base.Value {
 						t.Errorf("mixed batch observed: a=%v b=%v", aVal.base.Value, bVal.base.Value)
@@ -593,7 +597,7 @@ func TestVarExpiredStateVisibleInStatus(t *testing.T) {
 	variables := runtime.vars
 
 	// Commit a record with a backdated ObservedAt so it is already expired.
-	variables.store.commit(map[string]*varRecord{
+	variables.store.commit("user", "user", map[string]*varRecord{
 		"var.user.plan": {
 			base:     Snapshot{Key: "var.user.plan", Value: "pro", Generation: 1, Revision: "sha256:x", Source: VarSourceRuntime, ObservedAt: time.Now().Add(-time.Hour)},
 			lease:    10 * time.Millisecond,
