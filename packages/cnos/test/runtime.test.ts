@@ -377,6 +377,55 @@ describe('@kitsy/cnos root runtime entry', () => {
     delete process.env.OPS_VERIFY;
   });
 
+  it('retries var startup after a failed ready() instead of latching as started', async () => {
+    // A failed __startVars must not mark the runtime started. If it does, the next ready()
+    // skips startup and RESOLVES — the process then runs with no pollers or subscriptions
+    // while reporting success, serving only fallback tiers. The retry must fail the same way.
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cnos-var-retry-'));
+    fixtureRoots.push(root);
+    await mkdir(path.join(root, 'cnos'), { recursive: true });
+    await writeFile(
+      path.join(root, 'cnos', 'cnos.yml'),
+      [
+        'version: 1',
+        'project:',
+        '  name: var-retry',
+        'varSources:',
+        // Nothing listens here, so the prefetch fails at the transport layer.
+        '  svc: { transport: http, url: "http://127.0.0.1:59999" }',
+        'vars:',
+        // Authored as ondemand so building the projection does not itself prefetch; the
+        // projection is flipped to prefetch below, which is what the singleton boots from.
+        '  agentic: { source: svc, mode: ondemand }',
+        'schema:',
+        // Required, with no static value.* mirror and no default — unresolvable from any tier.
+        '  var.agentic.lanes.vinci: { type: string, required: true }',
+        '',
+      ].join('\n'),
+    );
+
+    const authoring = await createCnos({ root, processEnv: {} });
+    const projection = authoring.toServerProjection();
+    await authoring.close?.();
+
+    const agentic = projection.vars?.agentic;
+    if (!agentic) {
+      throw new Error('fixture projection is missing the agentic var group');
+    }
+    agentic.mode = 'prefetch';
+
+    process.env[CNOS_PROJECTION_ENV_VAR] = serializeServerProjection(projection);
+    vi.resetModules();
+
+    const { default: cnos } = await import('../src/index.js');
+
+    await expect(cnos.ready()).rejects.toThrow();
+    // Under the latch bug this second call resolves silently. It must still reject.
+    await expect(cnos.ready()).rejects.toThrow();
+
+    await cnos.close?.();
+  });
+
   it('autoloads from .cnos-server.json before full authoring resolution', async () => {
     const root = await createFixtureRoot();
     const runtime = await createCnos({

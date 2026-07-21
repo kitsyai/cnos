@@ -229,16 +229,37 @@ function getRuntimeOrThrow(): CnosRuntime {
   return runtime;
 }
 
-const startedVarRuntimes = new WeakSet<object>();
+const startedVarRuntimes = new WeakMap<object, Promise<void>>();
 
-/** Kick off var prefetch + pollers once per runtime (projection-bootstrap path). */
+/**
+ * Kick off var prefetch + pollers once per runtime (projection-bootstrap path).
+ *
+ * The in-flight promise is memoized so concurrent ready() calls share one startup, but a
+ * FAILED start is evicted: a transient transport failure must not latch the runtime as
+ * started, which would make every later ready() resolve successfully with no pollers or
+ * subscriptions running — reporting success while silently serving only fallback tiers.
+ */
 async function maybeStartVars(runtime: CnosRuntime): Promise<void> {
   const start = (runtime as { __startVars?: () => Promise<void> }).__startVars;
 
-  if (typeof start === 'function' && !startedVarRuntimes.has(runtime)) {
-    startedVarRuntimes.add(runtime);
-    await start();
+  if (typeof start !== 'function') {
+    return;
   }
+
+  const inFlight = startedVarRuntimes.get(runtime);
+
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const started = start().catch((error: unknown) => {
+    startedVarRuntimes.delete(runtime);
+    throw error;
+  });
+
+  startedVarRuntimes.set(runtime, started);
+
+  return started;
 }
 
 function requireLogicalKey<T = unknown>(runtime: CnosRuntime, key: LogicalKey): T {

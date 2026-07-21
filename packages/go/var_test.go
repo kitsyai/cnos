@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	goruntime "runtime"
@@ -434,6 +435,80 @@ func TestVarRequiredPrefetchFailsReady(t *testing.T) {
 	err := runtime.StartVars(context.Background())
 	if err == nil {
 		t.Fatalf("expected StartVars to fail for unresolved required var")
+	}
+}
+
+func TestVarRequiredOndemandDoesNotBlockReady(t *testing.T) {
+	t.Parallel()
+	// An ondemand group must never gate Ready, even when one of its keys is required:
+	// ondemand is fail-fast LAZILY (refreshVar / read), not at startup. Node resolves only
+	// prefetch groups during ready(), and Go must match or the same manifest boots in one
+	// runtime and fails in the other.
+	server := newFakeVarServer() // no head, no static tier, required key
+	httpServer := httptest.NewServer(server.handler())
+	defer httpServer.Close()
+
+	projection := baseVarProjection()
+	projection.VarSources = map[string]VarSourceDef{"svc": {Transport: "http", URL: httpServer.URL}}
+	projection.Vars = map[string]VarGroupDef{"agentic": {Source: "svc", Mode: "ondemand"}}
+	projection.Schema = map[string]VarKeyRule{"var.agentic.lanes.vinci": {Required: true}}
+
+	runtime := loadVarRuntime(t, projection, nil)
+	defer runtime.Close()
+
+	if err := runtime.StartVars(context.Background()); err != nil {
+		t.Fatalf("ondemand required key must not fail StartVars, got: %v", err)
+	}
+
+	// Still fail-fast, just lazily: the key resolves from no tier, so Require reports it.
+	if _, ok, _ := runtime.Var("agentic.lanes.vinci"); ok {
+		t.Fatalf("expected an unresolvable required ondemand key to read as unresolved")
+	}
+	if _, err := runtime.Require("var.agentic.lanes.vinci"); err == nil {
+		t.Fatalf("expected Require on an unresolvable required var to error")
+	}
+
+	// A 404 no-head is a valid answer ("use the fallback tiers"), not a remote rejection, so
+	// refresh succeeds. A remote that actually fails IS the ErrVarRequired case.
+	if err := runtime.RefreshVar(context.Background(), "var.agentic.lanes.vinci"); err != nil {
+		t.Fatalf("no-head must not fail refresh, got: %v", err)
+	}
+
+	server.setFailure(http.StatusInternalServerError, "store-unsupported")
+
+	if err := runtime.RefreshVar(context.Background(), "var.agentic.lanes.vinci"); !errors.Is(err, ErrVarRequired) {
+		t.Fatalf("expected ErrVarRequired when the remote rejects, got: %v", err)
+	}
+}
+
+func TestVarFailedStartDoesNotLatchStarted(t *testing.T) {
+	t.Parallel()
+	// A failed StartVars must clear the started latch. Otherwise the retry returns nil and the
+	// process runs on with no pollers or subscriptions while reporting success.
+	server := newFakeVarServer()
+	httpServer := httptest.NewServer(server.handler())
+	defer httpServer.Close()
+
+	projection := baseVarProjection()
+	projection.VarSources = map[string]VarSourceDef{"svc": {Transport: "http", URL: httpServer.URL}}
+	projection.Vars = map[string]VarGroupDef{"agentic": {Source: "svc", Mode: "prefetch"}}
+	projection.Schema = map[string]VarKeyRule{"var.agentic.lanes.vinci": {Required: true}}
+
+	runtime := loadVarRuntime(t, projection, nil)
+	defer runtime.Close()
+
+	if err := runtime.StartVars(context.Background()); err == nil {
+		t.Fatalf("expected the first StartVars to fail for an unresolved required var")
+	}
+
+	// The remote recovers; the retry must actually run rather than short-circuit to nil.
+	server.activate(map[string]any{"agentic.lanes.vinci": map[string]any{"enabled": true}}, "sha256:rev1")
+
+	if err := runtime.StartVars(context.Background()); err != nil {
+		t.Fatalf("expected the retry to succeed after the remote recovered, got: %v", err)
+	}
+	if value, ok, _ := runtime.Var("agentic.lanes.vinci"); !ok || value == nil {
+		t.Fatalf("expected the retry to have fetched the head, got ok=%v value=%v", ok, value)
 	}
 }
 

@@ -443,6 +443,18 @@ func (variables *varRuntime) triggerOndemand(group string) {
 	}()
 }
 
+// startFailed clears the started latch so a later StartVars can retry, then returns the error
+// that ended startup. Without this a transient transport failure would leave the runtime marked
+// started forever: the next StartVars would return nil and the process would run on with no
+// pollers or subscriptions — reporting success while silently serving only fallback tiers.
+func (variables *varRuntime) startFailed(err error) error {
+	variables.mu.Lock()
+	variables.started = false
+	variables.mu.Unlock()
+
+	return err
+}
+
 // start runs prefetch resolution and launches pollers. Prefetch groups fetch in
 // parallel; a required key left unresolved fails Ready; optional failures warn.
 func (variables *varRuntime) start(ctx context.Context) error {
@@ -471,14 +483,21 @@ func (variables *varRuntime) start(ctx context.Context) error {
 	}
 	wg.Wait()
 
+	// Only PREFETCH groups gate Ready. A required key in an ondemand group is still fail-fast,
+	// but lazily: refreshVar returns ErrVarRequired and read/Require report it unresolved at
+	// call time. Blocking startup on an ondemand key would defeat the point of ondemand and
+	// diverges from the Node SDK, which only resolves prefetch groups during ready().
 	for fullKey, rule := range variables.rules {
 		if !rule.Required {
 			continue
 		}
+		if def, ok := variables.groups[groupFromVarKey(fullKey)]; !ok || def.Mode != "prefetch" {
+			continue
+		}
 		if _, ok, err := variables.read(fullKey); err != nil {
-			return err
+			return variables.startFailed(err)
 		} else if !ok {
-			return fmt.Errorf("%w: %s", ErrVarRequired, fullKey)
+			return variables.startFailed(fmt.Errorf("%w: %s", ErrVarRequired, fullKey))
 		}
 	}
 
