@@ -19,19 +19,9 @@ func (server *testServer) deactivate(scope string) {
 	batch := &SnapshotBatch{Scope: scope, NoHead: true}
 
 	server.mu.Lock()
+	defer server.mu.Unlock()
 	delete(server.heads, scope)
-	channels := make([]chan *SnapshotBatch, 0, len(server.subscribers))
-	for _, channel := range server.subscribers {
-		channels = append(channels, channel)
-	}
-	server.mu.Unlock()
-
-	for _, channel := range channels {
-		select {
-		case channel <- batch:
-		default:
-		}
-	}
+	server.pushLocked(batch)
 }
 
 func TestSubscribeForwardsNoHeadDeactivations(t *testing.T) {
@@ -52,13 +42,14 @@ func TestSubscribeForwardsNoHeadDeactivations(t *testing.T) {
 	}
 	defer stop()
 
-	time.Sleep(300 * time.Millisecond)
+	// The subscribe yields the current state first — no head yet — then the activation.
+	awaitInitialNoHead(t, received, "agentic")
 	service.activate("agentic", 1, "sha256:aaa", map[string]any{"agentic.lanes.vinci": map[string]any{"enabled": true}})
 
 	select {
 	case batch := <-received:
 		if batch.Status != cnos.VarPullOK {
-			t.Fatalf("first event: %#v", batch)
+			t.Fatalf("activation event: %#v", batch)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for the activation")

@@ -26,6 +26,16 @@ type testServer struct {
 	nextSub     int
 	// requiredToken, when set, makes the server reject calls without a matching bearer.
 	requiredToken string
+	// authGate, when non-nil, blocks every authorize call until it is closed. It exists to
+	// drive the authorization-window race DETERMINISTICALLY instead of hoping to hit a
+	// sub-millisecond window. authEntered counts calls that have reached the block.
+	authGate    chan struct{}
+	authEntered int
+	// suppressInitialEvent makes Subscribe behave like a server PREDATING the
+	// self-synchronizing change: future commits only, no initial state event. The client-side
+	// reconnect resync pull is retained precisely to cover such a server, so the resync tests
+	// set this to keep isolating the pull rather than being satisfied by the initial event.
+	suppressInitialEvent bool
 }
 
 func newTestServer() *testServer {
@@ -35,7 +45,21 @@ func newTestServer() *testServer {
 func (server *testServer) authorize(ctx context.Context) error {
 	server.mu.Lock()
 	required := server.requiredToken
+	gate := server.authGate
+	if gate != nil {
+		server.authEntered++
+	}
 	server.mu.Unlock()
+
+	// Blocking happens OUTSIDE the lock: commits must keep flowing (and buffering) while a
+	// subscription sits in its authorization window.
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 
 	if required == "" {
 		return nil
@@ -51,6 +75,27 @@ func (server *testServer) authorize(ctx context.Context) error {
 		}
 	}
 	return status.Error(codes.Unauthenticated, "not authorized for this var scope")
+}
+
+// authWindowEntered reports how many authorize calls are currently blocked on the gate.
+func (server *testServer) authWindowEntered() int {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return server.authEntered
+}
+
+// push fans a committed batch out to every registered subscriber. It is called with server.mu
+// HELD, so the head map and the subscriber queues advance atomically together — the Go
+// equivalent of the TypeScript server's single-threaded commit path, and what lets Subscribe
+// drain its buffer and read the current head without a commit interleaving between the two.
+// Sends are non-blocking; the queues are sized well above anything the suite commits.
+func (server *testServer) pushLocked(batch *SnapshotBatch) {
+	for _, channel := range server.subscribers {
+		select {
+		case channel <- batch:
+		default:
+		}
+	}
 }
 
 // activate publishes a new head for a scope and pushes it to matching subscribers, mirroring
@@ -69,19 +114,29 @@ func (server *testServer) activate(scope string, generation int64, revision stri
 	}
 
 	server.mu.Lock()
+	defer server.mu.Unlock()
 	server.heads[scope] = batch
-	channels := make([]chan *SnapshotBatch, 0, len(server.subscribers))
-	for _, channel := range server.subscribers {
-		channels = append(channels, channel)
-	}
-	server.mu.Unlock()
+	server.pushLocked(batch)
+}
 
-	for _, channel := range channels {
-		select {
-		case channel <- batch:
-		default:
+// scopeMatches mirrors the server-side prefix rule: a subscription to `g` receives commits on
+// `g` and on `g.<anything>`, but never on a sibling that merely shares a string prefix.
+func scopeMatches(subscribed []string, committed string) bool {
+	for _, scope := range subscribed {
+		if committed == scope || (len(committed) > len(scope) && committed[:len(scope)+1] == scope+".") {
+			return true
 		}
 	}
+	return false
+}
+
+// batchIdentity is the dedup key for "the same state twice in a row": the content-addressed
+// revision, or a sentinel for no_head.
+func batchIdentity(batch *SnapshotBatch) string {
+	if batch.NoHead {
+		return "\x00no-head"
+	}
+	return batch.Revision
 }
 
 func (server *testServer) Pull(ctx context.Context, request *PullRequest) (*SnapshotBatch, error) {
@@ -107,12 +162,17 @@ func (server *testServer) Pull(ctx context.Context, request *PullRequest) (*Snap
 	return head, nil
 }
 
+// Subscribe mirrors the SELF-SYNCHRONIZING contract of the TypeScript server (the only real
+// server implementation), so the Go CLIENT is exercised against the protocol it will actually
+// meet:
+//
+//  1. the subscriber queue is registered BEFORE authorization, so commits landing in the
+//     authorization window are buffered rather than lost;
+//  2. a refused subscription discards that buffer and terminates, having sent nothing;
+//  3. an accepted subscription emits the CURRENT STATE first — each requested scope's head, or
+//     a no_head batch — deduplicated against the flushed buffer by revision.
 func (server *testServer) Subscribe(request *SubscribeRequest, stream VarServiceSubscribeServer) error {
-	if err := server.authorize(stream.Context()); err != nil {
-		return err
-	}
-
-	channel := make(chan *SnapshotBatch, 8)
+	channel := make(chan *SnapshotBatch, 64)
 	server.mu.Lock()
 	id := server.nextSub
 	server.nextSub++
@@ -125,22 +185,72 @@ func (server *testServer) Subscribe(request *SubscribeRequest, stream VarService
 		server.mu.Unlock()
 	}()
 
+	if err := server.authorize(stream.Context()); err != nil {
+		// The buffered commits belong to an identity the server just refused: they go with the
+		// queue, unsent.
+		return err
+	}
+
+	lastSent := map[string]string{}
+	send := func(batch *SnapshotBatch) error {
+		lastSent[batch.Scope] = batchIdentity(batch)
+		return stream.Send(batch)
+	}
+
+	// Flush the authorization-window buffer and snapshot the current heads under ONE lock hold,
+	// so no commit can interleave between the two and be sent twice or not at all.
+	server.mu.Lock()
+	legacy := server.suppressInitialEvent
+	buffered := make([]*SnapshotBatch, 0, len(channel))
+drain:
+	for {
+		select {
+		case batch := <-channel:
+			if scopeMatches(request.Scopes, batch.Scope) {
+				buffered = append(buffered, batch)
+			}
+		default:
+			break drain
+		}
+	}
+	initial := make([]*SnapshotBatch, 0, len(request.Scopes))
+	if !legacy {
+		for _, scope := range request.Scopes {
+			if head := server.heads[scope]; head != nil {
+				initial = append(initial, head)
+			} else {
+				initial = append(initial, &SnapshotBatch{Scope: scope, NoHead: true})
+			}
+		}
+	}
+	server.mu.Unlock()
+
+	for _, batch := range buffered {
+		if err := send(batch); err != nil {
+			return err
+		}
+	}
+
+	// The heads were read AFTER the buffer, so they already reflect every flushed commit;
+	// re-sending an identical revision would only be noise on the wire.
+	for _, batch := range initial {
+		if lastSent[batch.Scope] == batchIdentity(batch) {
+			continue
+		}
+		if err := send(batch); err != nil {
+			return err
+		}
+	}
+
 	for {
 		select {
 		case <-stream.Context().Done():
 			return stream.Context().Err()
 		case batch := <-channel:
-			matched := false
-			for _, scope := range request.Scopes {
-				if batch.Scope == scope || len(batch.Scope) > len(scope) && batch.Scope[:len(scope)+1] == scope+"." {
-					matched = true
-					break
-				}
-			}
-			if !matched {
+			if !scopeMatches(request.Scopes, batch.Scope) {
 				continue
 			}
-			if err := stream.Send(batch); err != nil {
+			if err := send(batch); err != nil {
 				return err
 			}
 		}
@@ -265,6 +375,38 @@ func TestPullBearerAuth(t *testing.T) {
 	}
 }
 
+// awaitInitialNoHead asserts the SELF-SYNCHRONIZING contract: an accepted Subscribe always
+// emits the current state as its first event, which for a scope with no active head is a
+// no_head batch. The Go client needs no special handling for it — it is an ordinary event.
+func awaitInitialNoHead(t *testing.T, received <-chan cnos.VarBatchResult, scope string) {
+	t.Helper()
+	select {
+	case batch := <-received:
+		if batch.Status != cnos.VarPullNoHead || batch.Scope != scope {
+			t.Fatalf("expected an initial no_head event for %q, got %#v", scope, batch)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("an accepted Subscribe never emitted its initial event for %q", scope)
+	}
+}
+
+// awaitStatus drains events until one carrying `want` arrives. Used where a reconnect's own
+// initial event may be interleaved with the event under test.
+func awaitStatus(t *testing.T, received <-chan cnos.VarBatchResult, want int, timeout time.Duration) cnos.VarBatchResult {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case batch := <-received:
+			if batch.Status == want {
+				return batch
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for a batch with status %v", want)
+		}
+	}
+}
+
 func TestSubscribeDeliversActivations(t *testing.T) {
 	service := newTestServer()
 	server := serveOn(t, service, nil)
@@ -283,8 +425,8 @@ func TestSubscribeDeliversActivations(t *testing.T) {
 	}
 	defer stop()
 
-	// Let the stream establish, then activate.
-	time.Sleep(300 * time.Millisecond)
+	// The subscribe itself yields the current state (no head yet), then the activation follows.
+	awaitInitialNoHead(t, received, "agentic")
 	service.activate("agentic", 2, "sha256:bbb", map[string]any{
 		"agentic.lanes.vinci": map[string]any{"enabled": true, "model_target_ref": "pushed"},
 	})
@@ -354,17 +496,12 @@ func TestSubscribeReconnectsAfterServerRestart(t *testing.T) {
 		"agentic.lanes.vinci": map[string]any{"enabled": true, "model_target_ref": "after-restart"},
 	})
 
-	select {
-	case batch := <-received:
-		if batch.Status != cnos.VarPullOK {
-			t.Fatalf("batch: %#v", batch)
-		}
-		document, _ := batch.Values["agentic.lanes.vinci"].(map[string]any)
-		if document["model_target_ref"] != "after-restart" {
-			t.Fatalf("values: %#v", batch.Values)
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("the reconnected subscription never delivered the activation")
+	// Both connects emit their own initial no_head event (nothing was ever activated before the
+	// restart), so drain to the activation under test.
+	batch := awaitStatus(t, received, cnos.VarPullOK, 15*time.Second)
+	document, _ := batch.Values["agentic.lanes.vinci"].(map[string]any)
+	if document["model_target_ref"] != "after-restart" {
+		t.Fatalf("values: %#v", batch.Values)
 	}
 }
 

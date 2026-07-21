@@ -71,6 +71,9 @@ func newResyncProvider(
 
 func TestSubscribeReconnectResyncsAMissedActivation(t *testing.T) {
 	service := newTestServer()
+	// Isolate the CLIENT-side resync pull: behave like a server predating the
+	// self-synchronizing Subscribe, so convergence below can only have come from the pull.
+	service.suppressInitialEvent = true
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -132,6 +135,9 @@ func TestSubscribeReconnectResyncsAMissedActivation(t *testing.T) {
 
 func TestSubscribeReconnectResyncsAMissedDeactivation(t *testing.T) {
 	service := newTestServer()
+	// Isolate the CLIENT-side resync pull: behave like a server predating the
+	// self-synchronizing Subscribe, so convergence below can only have come from the pull.
+	service.suppressInitialEvent = true
 	service.activate("agentic", 1, "sha256:before", map[string]any{
 		"agentic.lanes.vinci": map[string]any{"enabled": true, "model_target_ref": "before"},
 	})
@@ -195,6 +201,9 @@ func TestSubscribeReconnectResyncsAMissedDeactivation(t *testing.T) {
 // capability rule), so only the resync can produce the fallback.
 func TestRpcReconnectResyncRestoresStaticTierEndToEnd(t *testing.T) {
 	service := newTestServer()
+	// Isolate the CLIENT-side resync pull: behave like a server predating the
+	// self-synchronizing Subscribe, so convergence below can only have come from the pull.
+	service.suppressInitialEvent = true
 	service.activate("flags", 1, "sha256:r1", map[string]any{"flags.mode": "runtime-tier"})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

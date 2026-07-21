@@ -12,6 +12,19 @@ service VarService {
   rpc Pull(PullRequest) returns (SnapshotBatch);
   // Subscribe to one or more scopes; the server streams a fresh SnapshotBatch on every
   // accepted activation/deactivation for a matching scope.
+  //
+  // SELF-SYNCHRONIZING: an accepted Subscribe ALWAYS produces an initial event before any
+  // live commit — for each requested scope, its current head batch, or a batch with
+  // no_head=true when the scope has no active runtime head. A (re)connecting client therefore
+  // converges from the stream alone, including the deactivation case, without depending on a
+  // separate pull. Clients must treat these initial messages as ordinary SnapshotBatch /
+  // no_head events; a batch carrying the revision the client already holds is a no-op (the
+  // revision is content-addressed, so watcher dispatch dedupes on it).
+  //
+  // Commits that land while the server is still authorizing the subscription are buffered and
+  // flushed, in commit order, ahead of the initial state, deduplicated against it by revision
+  // so the same revision is never sent twice in a row. A refused subscription discards the
+  // buffer and terminates with UNAUTHENTICATED, having written nothing.
   rpc Subscribe(SubscribeRequest) returns (stream SnapshotBatch);
 }
 

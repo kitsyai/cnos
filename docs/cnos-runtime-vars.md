@@ -298,6 +298,26 @@ service VarService {
   (or a `no_head` batch on deactivation) to every subscriber whose scope matches. Reconnect
   uses the same capped backoff+jitter policy as the pollers, and clients re-pull with known
   revisions on reconnect to converge.
+- **Subscribe is self-synchronizing** (pre-release protocol behavior change; no shim). An
+  accepted `Subscribe` **always emits an initial event** — for each requested scope, its
+  current head batch, or a `no_head` batch when the scope has no active head — **before** any
+  live commit. Convergence on (re)connect therefore comes from the stream alone, including the
+  deactivation case, which has no other path to converge for a source that runs no poller. Two
+  mechanisms make this race-free:
+  - The commit listener is registered **synchronously at handler entry**, before the
+    `await authorize(...)`. Registering it after the await left a sub-millisecond window in
+    which a commit reached neither the stream (no hook yet) nor the client's resync pull
+    (already issued) — a lost activation, or worse a lost deactivation.
+  - Commits arriving during that authorization window are **buffered** and flushed in commit
+    order ahead of the initial state, deduplicated against it by revision so a client never
+    sees the same revision twice in a row. The flush, the initial state and the switch to the
+    live path run in one synchronous block, and `emitCommit` is itself synchronous, so nothing
+    interleaves. A **refused** subscription discards the buffer, writes nothing, and still
+    terminates with `UNAUTHENTICATED`.
+
+  The client-side reconnect resync pull below is retained as belt-and-braces (it covers a
+  server predating this change); in the happy path it is redundant, and the store's
+  content-addressed revision gate suppresses the duplicate watcher fire.
 - **`cnos var serve --rpc <port>`** serves the rpc transport alongside the http plane, sharing
   one store and one engine so http-admin activations reach rpc subscribers.
 - **Wire pinning**: the Go module hand-writes the protobuf encoding (protoc is not a build
@@ -534,6 +554,16 @@ Recorded during the docs pass; the code is authoritative where these differ from
    i. **Go records refresh metadata on every valid `no-head`**, including one that removes
       nothing — it used to keep reporting a stale transport error where Node reported recovery.
    j. **The Go receiver commits at the pushed SCOPE**, not at the collapsed group, matching Node.
+18. **Subscribe is self-synchronizing** (round-3 follow-up; protocol behavior change, pre-release,
+    no compatibility shim). Round-3 delta 17a fixed reconnect resync from the CLIENT side, but the
+    server still registered its `engine.onCommit` listener only after `await authorize(...)`: a
+    commit landing between the Subscribe request arriving and that registration completing was
+    delivered by neither the stream nor the resync pull. The server now registers the listener
+    synchronously and buffers commits across the authorization window, and **an accepted Subscribe
+    always emits an initial event** (current head, or `no_head`) per requested scope. See the rpc
+    transport section. Consequence for every client: **a subscribe now always produces at least one
+    event**; both SDKs already treat it as an ordinary batch/`no_head`, and the content-addressed
+    revision gate in each store suppresses a duplicate watcher fire when it repeats a known revision.
 
 ## Open decisions
 

@@ -157,9 +157,85 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
       });
     },
 
+    /**
+     * SELF-SYNCHRONIZING SUBSCRIBE (round-3 follow-up).
+     *
+     * Two properties, both required for a subscriber to converge without depending on a race:
+     *
+     * 1. The commit listener is registered SYNCHRONOUSLY, at handler entry, BEFORE the
+     *    `await authorize(...)`. Registering it after the await left a window — from the
+     *    Subscribe request landing to the hook existing — in which a commit was delivered by
+     *    neither the stream (no hook yet) nor the client's reconnect resync pull (which may
+     *    have been issued just before that commit). Commits arriving while authorization is
+     *    still resolving are BUFFERED, then flushed in commit order once it succeeds. A failed
+     *    authorization discards the buffer and terminates the stream exactly as before.
+     * 2. An accepted Subscribe emits the CURRENT STATE as its first event(s): each subscribed
+     *    scope's head batch, or a `no_head` batch when it has none. A reconnecting client
+     *    therefore converges from the stream ALONE — including the deactivation case, which
+     *    has no other path to convergence because a subscribe-capable source runs no poller.
+     *
+     * The initial state is deduplicated against the flushed buffer by revision, so a client
+     * never observes the same revision twice in a row. Everything from the flush through
+     * `authorized = true` runs in one synchronous block, and `engine.emitCommit` is itself
+     * synchronous, so no commit can interleave between the buffer flush and the live path.
+     */
     Subscribe(call: grpc.ServerWritableStream<WireSubscribeRequest, WireSnapshotBatch>): void {
       const scopes = call.request.scopes ?? [];
       const token = bearerFromMetadata(call.metadata);
+
+      /** Commits observed while `authorize` is still pending, in commit order. */
+      const buffered: WireSnapshotBatch[] = [];
+      /** Flipped once authorization succeeded and the buffer has been flushed. */
+      let authorized = false;
+      /** Flipped when the call is cancelled/closed/errored, or auth was refused. */
+      let torn = false;
+      /** Last emitted identity per scope — `revision`, or a sentinel for `no_head`. */
+      const lastEmitted = new Map<string, string>();
+
+      const identity = (msg: WireSnapshotBatch): string => (msg.no_head ? '\u0000no-head' : msg.revision);
+
+      const emit = (msg: WireSnapshotBatch): void => {
+        if (torn) {
+          return;
+        }
+
+        lastEmitted.set(msg.scope, identity(msg));
+
+        try {
+          call.write(msg);
+        } catch {
+          /* a write on a torn-down stream is a no-op; cleanup runs via the close handlers */
+        }
+      };
+
+      // Registered SYNCHRONOUSLY — before the authorize await — so the commit path cannot slip
+      // through the gap between the Subscribe request and the hook existing.
+      const unsubscribe = engine.onCommit(({ scope, kind, head }) => {
+        if (!scopes.some((subscribed) => scopeMatches(subscribed, scope))) {
+          return;
+        }
+
+        const msg = kind === 'deactivated' || !head ? noHeadMessage(scope) : headMessage(head);
+
+        if (!authorized) {
+          // Authorization is still resolving: hold the commit rather than writing to a stream
+          // that may yet be refused, and rather than dropping it.
+          buffered.push(msg);
+          return;
+        }
+
+        emit(msg);
+      });
+
+      const cleanup = (): void => {
+        torn = true;
+        buffered.length = 0;
+        unsubscribe();
+      };
+
+      call.on('cancelled', cleanup);
+      call.on('close', cleanup);
+      call.on('error', cleanup);
 
       void (async () => {
         const permitted = await authorize({
@@ -169,35 +245,44 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
         });
 
         if (!permitted) {
-          // `call.destroy(status)` tears the stream down LOCALLY without ever putting a
-          // status on the wire — the client sees no data, no error and no end, and hangs for
-          // the process lifetime. Emitting 'error' is grpc-js's supported way to terminate a
-          // server stream with a status the client can actually observe and classify.
+          // Buffered commits belong to an identity the server just refused: discard them
+          // WITHOUT writing, then terminate. `call.destroy(status)` tears the stream down
+          // LOCALLY without ever putting a status on the wire — the client sees no data, no
+          // error and no end, and hangs for the process lifetime. Emitting 'error' is
+          // grpc-js's supported way to terminate a server stream with an observable status.
+          cleanup();
           endWithStatus(call, grpc.status.UNAUTHENTICATED, 'Not authorized for this var scope.');
           return;
         }
 
-        const unsubscribe = engine.onCommit(({ scope, kind, head }) => {
-          if (!scopes.some((subscribed) => scopeMatches(subscribed, scope))) {
-            return;
+        if (torn) {
+          return;
+        }
+
+        // --- one synchronous block: flush, initial state, go live ---
+
+        for (const msg of buffered) {
+          emit(msg);
+        }
+
+        buffered.length = 0;
+
+        for (const scope of scopes) {
+          const head = store.head(scope);
+          const msg = head ? headMessage(head) : noHeadMessage(scope);
+
+          // `store.head` is read AFTER the buffer, so it already reflects every flushed
+          // commit; re-sending an identical revision would only be noise on the wire.
+          if (lastEmitted.get(scope) === identity(msg)) {
+            continue;
           }
 
-          try {
-            if (kind === 'deactivated' || !head) {
-              call.write(noHeadMessage(scope));
-            } else {
-              call.write(headMessage(head));
-            }
-          } catch {
-            /* a write on a torn-down stream is a no-op; cleanup runs via the close handlers */
-          }
-        });
+          emit(msg);
+        }
 
-        const cleanup = (): void => unsubscribe();
-        call.on('cancelled', cleanup);
-        call.on('close', cleanup);
-        call.on('error', cleanup);
+        authorized = true;
       })().catch((error: unknown) => {
+        cleanup();
         endWithStatus(call, grpc.status.INTERNAL, error instanceof Error ? error.message : String(error));
       });
     },

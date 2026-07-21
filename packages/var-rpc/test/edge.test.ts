@@ -213,10 +213,14 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     const events: VarPushEvent[] = [];
     const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => events.push(event));
 
-    await delay(100);
-    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'r' } }, 0);
+    // A subscribe is SELF-SYNCHRONIZING: the first event is the current state. This scope has
+    // no head yet, so it is a `no-head`.
     expect(await until(() => events.length === 1)).toBe(true);
-    expect(events[0]?.kind).toBe('batch');
+    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic' });
+
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'r' } }, 0);
+    expect(await until(() => events.length === 2)).toBe(true);
+    expect(events[1]?.kind).toBe('batch');
 
     await engine.deactivate({ scope: 'agentic', expectedGeneration: 1 });
 
@@ -224,8 +228,8 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     // said to "converge on the next pull". An rpc source has no poller, so there IS no next
     // pull — the consumer served the deactivated revision indefinitely. The deactivation must
     // reach the SDK, carrying the scope it applies to.
-    expect(await until(() => events.length === 2)).toBe(true);
-    expect(events[1]).toEqual({ kind: 'no-head', scope: 'agentic' });
+    expect(await until(() => events.length === 3)).toBe(true);
+    expect(events[2]).toEqual({ kind: 'no-head', scope: 'agentic' });
     stop?.();
   }, 20_000);
 });
