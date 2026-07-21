@@ -75,7 +75,7 @@ const MANIFEST = [
   'project:',
   '  name: recv-app',
   'varSources:',
-  '  svc: { transport: http, url: "http://127.0.0.1:9", verify: secret.ops.verify }',
+  '  svc: { transport: http, url: "http://127.0.0.1:59999", verify: secret.ops.verify }',
   'vars:',
   '  flags: { source: svc, mode: ondemand }',
   'schema:',

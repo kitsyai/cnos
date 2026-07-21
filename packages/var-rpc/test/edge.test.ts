@@ -1,3 +1,5 @@
+import { createServer } from 'node:net';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -58,6 +60,24 @@ interface SubscriptionFailure {
   error: Error;
   terminal: boolean;
   scopes: string[];
+}
+
+/**
+ * A loopback address guaranteed to refuse connections: bind an ephemeral port, record it, then
+ * close the listener.
+ *
+ * Do NOT hardcode a low port (127.0.0.1:1) for this. Under WSL2 the localhost forwarding shim
+ * swallows connections to low ports — they hang until timeout instead of returning
+ * ECONNREFUSED, so a "nothing is listening" test blocks inside the RPC and never observes the
+ * transport failure it is asserting on.
+ */
+async function deadTarget(): Promise<string> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return `127.0.0.1:${port}`;
 }
 
 function providerFor(
@@ -318,7 +338,7 @@ describe('Subscribe failure policy', () => {
     // subscription goes terminal instead of reconnecting forever.
     const failures: SubscriptionFailure[] = [];
     const provider = track(
-      providerFor('127.0.0.1:1', { onError: (error, info) => failures.push({ error, ...info }) }),
+      providerFor(await deadTarget(), { onError: (error, info) => failures.push({ error, ...info }) }),
     );
     const stop = provider.subscribe?.([{ group: 'agentic' }], () => undefined);
 
@@ -338,7 +358,7 @@ describe('Subscribe failure policy', () => {
   }, 20_000);
 
   it('an unreachable target does not throw synchronously and stops cleanly on unsubscribe', async () => {
-    const provider = track(providerFor('127.0.0.1:1')); // nothing listening
+    const provider = track(providerFor(await deadTarget())); // nothing listening
     const received: VarSnapshotBatch[] = [];
     let stop: (() => void) | undefined;
 
@@ -353,7 +373,7 @@ describe('Subscribe failure policy', () => {
   }, 20_000);
 
   it('a Pull against an unreachable target rejects rather than hanging', async () => {
-    const provider = track(providerFor('127.0.0.1:1'));
+    const provider = track(providerFor(await deadTarget()));
     await expect(provider.pull({ group: 'agentic' })).rejects.toBeInstanceOf(Error);
   }, 20_000);
 

@@ -57,6 +57,28 @@ func serveOnCounting(t *testing.T, service VarServiceServer) *runningServer {
 	return &runningServer{target: listener.Addr().String(), stop: grpcServer.Stop}
 }
 
+// deadTarget returns a loopback address that is guaranteed to refuse connections: it binds
+// an ephemeral port, records it, then closes the listener.
+//
+// Do NOT hardcode a low port (127.0.0.1:1) for this. Under WSL2 the localhost forwarding shim
+// swallows connections to low ports — they hang until timeout instead of returning
+// ECONNREFUSED, so a "nothing is listening" test blocks inside the RPC and never observes the
+// transport failure it is asserting on.
+func deadTarget(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve dead port: %v", err)
+	}
+	target := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close dead port: %v", err)
+	}
+
+	return target
+}
+
 // W5b test hardening for the Go rpc transport: Subscribe failure policy, scope
 // matching, and lifecycle edges. Tests named "Pinned"/"Divergence" encode current
 // behavior that the design doc left unspecified or where Go and Node differ.
@@ -171,7 +193,7 @@ func TestSubscribeRetriesAreBoundedByTheFailureCap(t *testing.T) {
 	var retrying, terminal int
 
 	// Nothing is listening on this target, so every attempt fails at the transport layer.
-	provider := newProviderReporting(t, "127.0.0.1:1", nil, "",
+	provider := newProviderReporting(t, deadTarget(t), nil, "",
 		nil,
 		WithBackoff(time.Millisecond, 2*time.Millisecond),
 		WithMaxSubscribeFailures(3),
@@ -279,7 +301,7 @@ func TestSubscribeAfterCloseReturnsAnError(t *testing.T) {
 
 func TestPullAgainstUnreachableTargetFailsFast(t *testing.T) {
 	t.Parallel()
-	provider := newProvider(t, "127.0.0.1:1", nil, "")
+	provider := newProvider(t, deadTarget(t), nil, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
