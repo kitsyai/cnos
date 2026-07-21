@@ -1,9 +1,11 @@
 # Review Handover — `var.*` Runtime Variables (`main...var-runtime`)
 
-**Branch:** `var-runtime` (18 commits ahead of `main`, clean tree, nothing pushed)
-**Size:** 138 files, +21,300 / −40
-**Review status:** rounds 1 and 2 complete — 2 and 6 findings respectively, all valid, all fixed
-(see the round sections below). **This is the round-3 pass.**
+**Branch:** `var-runtime` (23 commits ahead of `main`, clean tree, nothing pushed)
+**Size:** 153 files, +28,208 / −43
+**Review status:** rounds 1–3 complete — 2, 6 and 8 findings, all valid, all fixed. Since round 3:
+the rpc Subscribe stream is self-synchronizing (`4890a06`), a 44-scenario cross-SDK semantic
+parity suite pins lifecycle behavior in CI (`3f70b1c`), and its four surfaced divergences are
+resolved by architect ruling (`32e09e4`). **This is the round-4 pass.**
 **Target release:** 1.18.0 (minor — purely additive)
 **Design/ADR:** `docs/cnos-runtime-vars.md` · **Agent context:** `.agents/context/runtime-vars.md`
 
@@ -84,6 +86,33 @@ Outcomes:
   merge; Node's round-3 blocker-3 early return). For this pass, the DECISION-4 abort wiring is
   revert-verified (removing it makes the Node close scenario fail), and DECISION-2's aggregate is
   revert-verified (reverting Node to warn+resolve makes the attempts-every-group scenario fail).
+
+## Round 4 — where to aim (architect-directed)
+
+The parity suite now mechanically pins 44 lifecycle scenarios, so re-finding what it covers is
+low-value. Aim at the surfaces it documents as **inexpressible** (see
+`fixtures/var-parity/README.md`), in priority order:
+
+1. **rpc reconnect mechanics** — the initial current-head/`no_head` event on every accepted
+   Subscribe is now the canonical convergence guarantee (client resync pull = defensive
+   redundancy). Attack the guarantee itself: commit racing the authorize window, dedupe of the
+   initial event against buffered flushes, reconnect storms, terminal-failure classification,
+   and the interaction of the initial event with the store's epoch gating.
+2. **Receiver behavior** — the push surface (`varReceiver` / `VarReceiver`) is outside the
+   parity matrix. Signature verification order, body cap, scope-in-URL edge cases, concurrent
+   pushes racing pulls, and receiver-driven deactivation (`no-head` push).
+3. **Narrower-scope semantics** — the store's longest-dot-prefix serving rule and per-exact-scope
+   replacement are parity-pinned only at group scope, because the consumer API only commits at
+   group scope. The receiver and rpc paths CAN commit key-scoped batches: probe mixed
+   key-scope/group-scope interleavings through those paths.
+4. **Freshness boundaries and clock skew** — the suite tests window interiors only (no injectable
+   clock on that path). Exact-boundary (`age == ttl`, `age == lease`) and negative-age behavior
+   are asserted nowhere cross-SDK.
+5. **Poller cadence** — backoff/jitter/interval behavior under flapping sources is untested
+   beyond unit level.
+
+Also standing: any test that cannot fail is a finding (eight found so far); any behavior tested
+in only one SDK is suspect.
 
 ## Architecture in one screen
 
