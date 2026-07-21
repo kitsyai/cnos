@@ -119,6 +119,28 @@ Grep `DEFECT-PIN` / `DIVERGENCE` — only a header comment should remain. The no
   with a wall-clock generation — so replaying an identical document woke every watcher, defeating
   the idempotent-replay property. Now gated on the content-addressed revision alone.
 
+## Review round 1 — findings accepted and fixed (`3a292ef`)
+
+Both findings from the first external review pass were valid and are fixed, each with a
+regression test:
+
+1. **[Blocker] Go gated `Ready` on required *ondemand* vars.** `start()` validated every
+   required rule regardless of its group's mode, so a required ondemand key with no static or
+   default tier failed `StartVars`. Node only resolves prefetch groups during `ready()`, so the
+   same manifest booted under Node and failed under Go. The ADR is explicit that ondemand is
+   fail-fast *lazily* (`refreshVar` / `read` / `Require`), never at startup — Node was right.
+   The gate is now restricted to prefetch groups.
+2. **[Medium] A failed start latched the runtime as "started"** — and the impact was worse than
+   reported: the next `ready()`/`StartVars` did not merely skip the retry, it **resolved
+   successfully** with no pollers or subscriptions running, silently serving only fallback
+   tiers. Both runtimes now clear the latch on failure. **The Go side had the identical flaw,
+   which the review did not flag** (`variables.started` was set before the work and never
+   reset); it is fixed in the same commit. Node keeps an in-flight promise so concurrent
+   `ready()` calls still share one startup.
+
+The Node regression test was verified to fail with the fix reverted, so it genuinely pins the
+behavior rather than passing either way.
+
 ## Pinned behaviors (encoded as contract where the design was silent)
 
 Worth a reviewer's judgement — these were decided by observing the code, not from first principles:
