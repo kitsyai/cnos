@@ -249,6 +249,8 @@ In **every** pull response and push payload, `values` is ALWAYS a JSON object ke
 - **ws / sse**: subscribe scopes on connect; server emits snapshot-batch events.
 - **Consumer-side receiver (latching)**: optional inbound push for http-only environments — `POST /cnos/vars/:scope` handled by the mounted adapter → same ingest path.
 
+**Polling is capability-keyed, never transport-name-keyed (canonical, identical in both SDKs).** A source is polled only when its provider does **not** implement `subscribe`. A pull-only provider (http today) with a `pollInterval` polls; a subscribe-capable provider (rpc) relies on its subscription and is never polled, even when `pollInterval` is declared — the setting is ignored and warned once per source. Polling behind a subscription would double-fetch and, worse, silently paper over a TERMINAL subscription, which is the exact failure the terminal state exists to advertise.
+
 ### rpc (gRPC) transport
 
 The canonical proto lives at **`packages/var-rpc/proto/cnos/var/v1/var.proto`** — a single
@@ -312,6 +314,39 @@ Age is measured from the snapshot's `observedAt`. Static/default tiers never exp
 
 Reconnect/resume with backoff+jitter; on reconnect, re-pull subscribed scopes with known revisions to converge. All SDK-owned.
 
+### Deactivation (`no-head`) semantics — canonical, both SDKs, every transport
+
+A `no-head` is a **definitive answer from the authority**: "this scope has no active head". It is
+not a failure. On receiving one — from an http `404 {code:"no-head"}` pull, an rpc `no_head` pull,
+or an rpc `no_head` **push** — the SDK performs an atomic **scope removal**: the runtime-tier
+entries for that scope and everything nested beneath it are dropped in a single swap (the same
+immutable-swap / CAS discipline as ingest, so no reader ever observes a half-removed scope), and
+reads fall through the overlay to ② static `value.<group>.<rest>` and ③ the schema `default`. This
+is what makes acceptance #15 true end to end without a redeploy.
+
+- **Watchers fire**, because the effective value changed. They receive the snapshot the key now
+  resolves to, whose `source` is `static` or `default`.
+- **Removal is idempotent**: a `no-head` for a scope with nothing applied is a silent no-op that
+  wakes no watcher.
+- **A transport error is NOT a `no-head`** and must never clear anything: an unreachable remote
+  retains last-known-good, which is precisely what the lease/freshness model describes.
+- **`varStatus()` for a deactivated scope** reports the tier that took over (`source: 'static' |
+  'default'`, or `'none'` when the key resolves nowhere), `appliedGeneration: 0`, and no
+  `revision` / `desiredGeneration` — a removed head never masquerades as still applied.
+- **Required keys**: a deactivation does not by itself fail anything at refresh time. A required
+  key left unresolvable stays fail-fast *lazily* (at read/`require` time). Prefetch startup is the
+  exception — see below.
+
+### Required-key enforcement on prefetch (canonical, both SDKs)
+
+A **required** key in a `prefetch` group must resolve from *some* tier by the end of startup, or
+`ready()` / `StartVars` fails. The check runs after **every** prefetch outcome — ingested,
+`not-modified`, `no-head`, and validation-`rejected` — not only after a thrown transport error.
+The single carve-out: a **missing transport module** (no provider registered for the declared
+transport) is a deployment gap, warned and non-fatal, with required-but-unresolvable reads failing
+fast lazily. `refreshVar` on a required key rejects on a transport failure or a
+validation-`rejected` revision, but not on a `no-head`.
+
 ### Projection `schema` block
 
 `toServerProjection` emits an optional var-only `schema` block keyed by the **full var key** (e.g. `var.agentic.lanes.vinci`), carrying `{ document?, required?, type?, enum?, pattern?, default? }`. `default` is emitted ONLY when declared in the manifest (JSON absence = not declared; the Go SDK tracks presence via `HasDefault`). Only keys under `var.` are included; nothing else in the projection changes. Both SDKs consume it when bootstrapped from a projection so ingest validation and required/default enforcement work without the authoring manifest.
@@ -321,9 +356,13 @@ Reconnect/resume with backoff+jitter; on reconnect, re-pull subscribed scopes wi
 ```ts
 interface VarSourceProvider {
   pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch>;
-  subscribe?(scopes: VarScope[], onBatch: (b: VarSnapshotBatch) => void): () => void;
+  // A push transport reports EVERY authoritative outcome, not just head batches: a `no-head`
+  // event is a deactivation the SDK turns into a runtime-tier removal. Mirrors the Go
+  // `VarBatchResult.Status` (`VarPullOK` / `VarPullNoHead`) carried through one callback.
+  subscribe?(scopes: VarScope[], onEvent: (e: VarPushEvent) => void): () => void;
   close(): Promise<void>;
 }
+type VarPushEvent = { kind: 'batch' | 'no-head'; scope?: string; batch?: VarSnapshotBatch };
 type VarScope = { key?: string; group?: string };
 type VarSourceProviderFactory = (def: ProjectedVarSourceDefinition, ctx: { resolveSecret(ref: string): Promise<string> }) => VarSourceProvider;
 ```
@@ -354,7 +393,7 @@ Registered like secret vault factories (`varSourceProviders` create option + `re
 
 | # | Test | Covered by |
 |---|------|-----------|
-| 1 | Static fallback with no runtime revision | overlay precedence tiers ②/③ |
+| 1 | Static fallback with no runtime revision | overlay precedence tiers ②/③ — including after a deactivation, not only before a first activation |
 | 2 | Activation updates running consumer without restart | subscribe/poll → ingest → atomic commit → watch |
 | 3 | Readers see only complete snapshots | immutable snapshot pointer swap; batch = one transaction |
 | 4 | Invalid/unknown-field revisions rejected | document schema validation, `additionalProperties: false` |
@@ -368,7 +407,7 @@ Registered like secret vault factories (`varSourceProviders` create option + `re
 | 12 | Cross-scope reads/writes denied | server-enforced scope claims (business/env/component) |
 | 13 | No secrets in payloads/logs/status | validation-time detection; masking; refs-only rule |
 | 14 | No service-specific delivery code | SDK owns transport entirely; providers pluggable |
-| 15 | static → runtime → static without deployment | activate/deactivate flips precedence tier only |
+| 15 | static → runtime → static without deployment | activate/deactivate flips precedence tier only; deactivation is an atomic runtime-tier **removal** driven by `no-head` (pull or push), covered end to end for http and rpc in both SDKs |
 
 ## Non-goals (inherited)
 
@@ -390,6 +429,11 @@ Recorded during the docs pass; the code is authoritative where these differ from
 10. **Receiver verification fails closed and is presence-based.** A source with no `verify` secret cannot accept pushes (`401`); when the signature header is present the signature alone decides (a wrong signature is `401` even with a valid bearer), otherwise the bearer decides. Inbound bodies are capped (1 MiB default, configurable) with `413` past the cap. Identical in both SDKs since W5d.
 11. **The Node SDK's `generation` range is `0..2^53-1`.** A batch outside it is rejected (`var.generation-range`) rather than committed with a rounded value; the rpc provider raises the same failure while it still holds the exact wire text. Go carries a native int64 and has no limit — so an authority serving both SDKs must stay below 2^53. The wire representation is unchanged (JSON number / decimal string).
 12. **The var-server `authorize` hook has three kinds.** `read` (data plane), `audit` (`GET {base}/admin/*` — the append-only log) and `mutate`. Mutation bodies are parsed before authorization so `scope` is populated for writes too.
+
+13. **A `no-head` CLEARS the applied runtime snapshot** (round-2 review). Earlier builds only recorded a refresh, so a deactivated revision kept being served — and the rpc client dropped `no_head` pushes entirely, which was unrecoverable for an rpc source since it runs no poller. Both SDKs now route every `no-head`, pull or push, through an atomic scope removal. See the deactivation section above.
+14. **Polling is capability-keyed.** Go previously polled any source declaring a `pollInterval`, so an rpc source both subscribed and polled. Both SDKs now poll only providers that do not implement `subscribe`, and warn once when a subscribe-capable source declares a `pollInterval`.
+15. **Node startup is transactional and Go shares its in-flight attempt.** A failed Node start rolls back the timers/subscriptions it created, so the retry permitted by the round-1 latch fix cannot duplicate them. Concurrent Go `StartVars` callers block on one shared attempt and receive the same result instead of the second caller seeing a `started` flag and returning `nil` early; the attempt is cleared on failure (retryable) and kept on success. `StartVars(ctx)` now runs prefetch on the CALLER's ctx (pollers/subscriptions keep the runtime-lifetime ctx, since they must outlive it).
+16. **Node `varStatus()` reports the serving fallback tier.** With no runtime head it names `static`/`default` (matching the Go SDK) rather than always `none`; `none` now means "resolves from no tier at all".
 
 ## Open decisions
 

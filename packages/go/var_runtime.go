@@ -100,10 +100,22 @@ type varRuntime struct {
 	nextWatch int
 	status    map[string]*varScopeStatus
 	inflight  map[string]bool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	closed    bool
-	started   bool
+	// warnedPollInterval dedupes the "pollInterval ignored on a subscribe-capable source" warning.
+	warnedPollInterval map[string]bool
+	ctx                context.Context
+	cancel             context.CancelFunc
+	closed             bool
+	// startAttempt is the in-flight (or completed-successfully) startup attempt. Concurrent
+	// StartVars callers block on its done channel and share its result instead of racing.
+	startAttempt *varStartAttempt
+}
+
+// varStartAttempt is one shared startup attempt. `err` is written before `done` is closed, so
+// every waiter that observes the close also observes the final error (happens-before via the
+// channel), which is what lets concurrent callers agree on a single outcome.
+type varStartAttempt struct {
+	done chan struct{}
+	err  error
 }
 
 // initVars builds the var runtime from the projection's optional var blocks and
@@ -123,11 +135,12 @@ func (runtime *Runtime) initVars(projection ServerProjection) {
 		varFactories: map[string]VarSourceProviderFactory{},
 		providers:    map[string]VarSourceProvider{},
 
-		watchers: map[int]*varWatcher{},
-		status:   map[string]*varScopeStatus{},
-		inflight: map[string]bool{},
-		ctx:      ctx,
-		cancel:   cancel,
+		watchers:           map[int]*varWatcher{},
+		status:             map[string]*varScopeStatus{},
+		inflight:           map[string]bool{},
+		warnedPollInterval: map[string]bool{},
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 	for name, def := range projection.VarSources {
 		variables.sources[name] = def
@@ -166,6 +179,27 @@ func (variables *varRuntime) read(fullKey string) (any, bool, error) {
 	group := groupFromVarKey(fullKey)
 	if def, ok := variables.groups[group]; ok && def.Mode == "ondemand" {
 		variables.triggerOndemand(group)
+	}
+
+	rest := strings.TrimPrefix(fullKey, "var.")
+	if value, ok, err := variables.runtime.readInternal("value."+rest, map[string]bool{}); err != nil {
+		return nil, false, err
+	} else if ok {
+		return value, true, nil
+	}
+
+	if rule, ok := variables.rules[fullKey]; ok && rule.HasDefault {
+		return rule.Default, true, nil
+	}
+	return nil, false, nil
+}
+
+// resolveNoTrigger resolves a var key through the same overlay precedence as read, but never
+// triggers an ondemand background fetch. Used by the required-key gates (startup, refresh),
+// where the caller has just fetched and only wants to know whether ANY tier can satisfy the key.
+func (variables *varRuntime) resolveNoTrigger(fullKey string) (any, bool, error) {
+	if record, ok := variables.store.get(fullKey); ok {
+		return record.base.Value, true, nil
 	}
 
 	rest := strings.TrimPrefix(fullKey, "var.")
@@ -267,6 +301,80 @@ func (variables *varRuntime) ingest(batch varBatch, origin string) error {
 	return nil
 }
 
+// applyNoHead clears the runtime tier for a scope after the authority definitively reported it
+// has NO active head (http 404 {code:"no-head"}, rpc no_head). Reads then fall through the
+// overlay to ② static value.<group>.<rest> and ③ the schema default with no redeploy
+// (acceptance #15). Watchers fire because the EFFECTIVE value changed — they receive the new
+// static/default snapshot.
+//
+// A transport error is NOT a no-head and never lands here: an unreachable remote retains
+// last-known-good, which is what the lease/freshness model exists to describe. Idempotent: a
+// no-head for a scope with nothing applied wakes nobody. Mirrors the Node
+// VarManager.applyNoHead / LiveVarStore.removeScope.
+func (variables *varRuntime) applyNoHead(scope string) {
+	now := time.Now()
+
+	prev := map[string]Snapshot{}
+	for _, key := range variables.store.keys() {
+		if key == "var."+scope || strings.HasPrefix(key, "var."+scope+".") {
+			if record, ok := variables.store.get(key); ok {
+				prev[key] = record.snapshot(now)
+			}
+		}
+	}
+
+	removed := variables.store.removeScope(scope)
+	if len(removed) == 0 {
+		return
+	}
+
+	group := groupFromVarKey("var." + scope)
+	variables.mu.Lock()
+	status := variables.statusFor(group)
+	// The removed head must not masquerade as still applied in VarStatus().
+	status.desiredGeneration = nil
+	status.revision = ""
+	status.lastRefreshAt = now
+	status.lastError = ""
+	variables.mu.Unlock()
+
+	fmt.Fprintf(os.Stderr, "cnos [warn]: var scope %q has no active runtime head (deactivated); cleared the runtime tier and restored the static/default tiers\n", scope)
+
+	variables.notifyRemoved(removed, prev, now)
+}
+
+// notifyRemoved fires watchers for keys whose runtime head was just removed, handing them the
+// snapshot the key NOW resolves to (static or default). Shares the dispatch discipline of
+// notify: the registry is snapshotted before dispatch and re-checked per entry.
+func (variables *varRuntime) notifyRemoved(keys []string, prev map[string]Snapshot, now time.Time) {
+	variables.mu.Lock()
+	ids := make([]int, 0, len(variables.watchers))
+	for id := range variables.watchers {
+		ids = append(ids, id)
+	}
+	variables.mu.Unlock()
+
+	for _, key := range keys {
+		next, ok := variables.snapshot(key)
+		if !ok {
+			// The key resolves from no tier at all now; synthesize the empty default snapshot so
+			// a watcher still learns the runtime value went away.
+			next = Snapshot{Key: key, Source: VarSourceDefault, Freshness: FreshnessFresh, ObservedAt: now}
+		}
+
+		previous := prev[key]
+		for _, id := range ids {
+			variables.mu.Lock()
+			watcher, live := variables.watchers[id]
+			variables.mu.Unlock()
+
+			if live && watcher.match(key) {
+				invokeWatcher(watcher.fn, next, previous)
+			}
+		}
+	}
+}
+
 // notify fires matching watchers after a committed update. Callbacks run
 // synchronously with panics contained; a callback error never rolls back the
 // store (the snapshot is already active).
@@ -361,6 +469,10 @@ func (variables *varRuntime) refreshVar(ctx context.Context, fullKey string) err
 			return nil
 		}
 	}
+	// A transport failure OR a validation-rejected revision on a required key is ErrVarRequired:
+	// the remote failed to produce a usable answer. A no-head is NOT such a failure — it is a
+	// definitive answer ("use the fallback tiers"), so refresh succeeds and the key stays
+	// fail-fast LAZILY at read/Require time. The Node SDK mirrors both halves of this rule.
 	if err := variables.fetchGroup(ctx, group); err != nil {
 		if rule, ok := variables.rules[fullKey]; ok && rule.Required {
 			return fmt.Errorf("%w: %s: %v", ErrVarRequired, fullKey, err)
@@ -391,8 +503,9 @@ func (variables *varRuntime) refreshVars(ctx context.Context) error {
 	return optionalErr
 }
 
-// fetchGroup pulls the group's scope over http and ingests a fresh revision.
-// no-head (404) leaves the store untouched so overlay tiers ②/③ serve.
+// fetchGroup pulls the group's scope and ingests a fresh revision. A no-head (404) CLEARS any
+// applied runtime head for the scope so overlay tiers ②/③ serve again; a transport error leaves
+// last-known-good untouched.
 func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error {
 	def, ok := variables.groups[group]
 	if !ok {
@@ -417,7 +530,12 @@ func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error
 			effectiveAt: result.effectiveAt,
 			values:      result.values,
 		}, "poll")
-	case pullNotModified, pullNoHead:
+	case pullNotModified:
+		// The known revision is still current — the cached snapshot already IS the head.
+		return nil
+	case pullNoHead:
+		// A definitive "no active head": clear the runtime tier so overlay tiers ②/③ serve.
+		variables.applyNoHead(group)
 		return nil
 	}
 	return nil
@@ -443,29 +561,59 @@ func (variables *varRuntime) triggerOndemand(group string) {
 	}()
 }
 
-// startFailed clears the started latch so a later StartVars can retry, then returns the error
-// that ended startup. Without this a transient transport failure would leave the runtime marked
-// started forever: the next StartVars would return nil and the process would run on with no
-// pollers or subscriptions — reporting success while silently serving only fallback tiers.
-func (variables *varRuntime) startFailed(err error) error {
+// start runs prefetch resolution and launches pollers/subscriptions, exactly once.
+//
+// Concurrent callers SHARE the in-flight attempt (mirroring the Node SDK, which memoizes the
+// start promise) instead of the second caller seeing a "started" flag and returning nil before
+// prefetch has finished — which reported a ready runtime that might then fail for caller #1.
+// The stored attempt is cleared on failure so a retry is possible, and kept on success so
+// repeat calls are cheap no-ops.
+func (variables *varRuntime) start(ctx context.Context) error {
 	variables.mu.Lock()
-	variables.started = false
+	if variables.closed {
+		variables.mu.Unlock()
+		return nil
+	}
+	if attempt := variables.startAttempt; attempt != nil {
+		variables.mu.Unlock()
+		select {
+		case <-attempt.done:
+			return attempt.err
+		case <-ctx.Done():
+			// The CALLER gave up waiting. The attempt itself keeps running for whoever started it.
+			return ctx.Err()
+		}
+	}
+	attempt := &varStartAttempt{done: make(chan struct{})}
+	variables.startAttempt = attempt
 	variables.mu.Unlock()
+
+	err := variables.runStart(ctx)
+	if err != nil {
+		// Clear the latch BEFORE releasing the waiters so a retry is possible. Without this a
+		// transient transport failure would leave the runtime marked started forever: the next
+		// StartVars would return nil and the process would run on with no pollers or
+		// subscriptions — reporting success while silently serving only fallback tiers.
+		variables.mu.Lock()
+		if variables.startAttempt == attempt {
+			variables.startAttempt = nil
+		}
+		variables.mu.Unlock()
+	}
+	attempt.err = err
+	close(attempt.done)
 
 	return err
 }
 
-// start runs prefetch resolution and launches pollers. Prefetch groups fetch in
-// parallel; a required key left unresolved fails Ready; optional failures warn.
-func (variables *varRuntime) start(ctx context.Context) error {
-	variables.mu.Lock()
-	if variables.started || variables.closed {
-		variables.mu.Unlock()
-		return nil
-	}
-	variables.started = true
-	variables.mu.Unlock()
-
+// runStart performs one startup attempt: prefetch groups fetch in parallel, a required key left
+// unresolved fails Ready, optional failures warn, then pollers and subscriptions start.
+//
+// Prefetch pulls run on the CALLER's ctx, so a caller deadline/cancellation actually bounds
+// startup (an http pull would otherwise block until the client's 30s timeout). Long-lived
+// pollers and subscriptions deliberately keep variables.ctx: they must outlive the caller's ctx,
+// which is routinely cancelled the moment Ready() returns.
+func (variables *varRuntime) runStart(ctx context.Context) error {
 	prefetch := make([]string, 0)
 	for group, def := range variables.groups {
 		if def.Mode == "prefetch" {
@@ -478,10 +626,16 @@ func (variables *varRuntime) start(ctx context.Context) error {
 		wg.Add(1)
 		go func(g string) {
 			defer wg.Done()
-			_ = variables.fetchGroup(variables.ctx, g)
+			_ = variables.fetchGroup(ctx, g)
 		}(group)
 	}
 	wg.Wait()
+
+	// A cancelled/expired caller ctx means startup did not actually complete — fail rather than
+	// launching pollers behind a half-resolved prefetch.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("cnos: var startup cancelled: %w", err)
+	}
 
 	// Only PREFETCH groups gate Ready. A required key in an ondemand group is still fail-fast,
 	// but lazily: refreshVar returns ErrVarRequired and read/Require report it unresolved at
@@ -494,10 +648,10 @@ func (variables *varRuntime) start(ctx context.Context) error {
 		if def, ok := variables.groups[groupFromVarKey(fullKey)]; !ok || def.Mode != "prefetch" {
 			continue
 		}
-		if _, ok, err := variables.read(fullKey); err != nil {
-			return variables.startFailed(err)
+		if _, ok, err := variables.resolveNoTrigger(fullKey); err != nil {
+			return err
 		} else if !ok {
-			return variables.startFailed(fmt.Errorf("%w: %s", ErrVarRequired, fullKey))
+			return fmt.Errorf("%w: %s", ErrVarRequired, fullKey)
 		}
 	}
 
@@ -514,8 +668,15 @@ func (variables *varRuntime) start(ctx context.Context) error {
 	return nil
 }
 
-// startPollers spawns one poll loop per http source that declares a pollInterval,
-// covering that source's prefetch groups.
+// startPollers spawns one poll loop per PULL-ONLY source that declares a pollInterval, covering
+// that source's prefetch groups.
+//
+// CANONICAL RULE (identical in the Node SDK): polling is keyed off the provider's declared
+// CAPABILITIES, never the transport name — poll only when the provider does NOT implement
+// Subscribe. A subscribe-capable provider (rpc) relies on its stream; polling behind it would
+// double-fetch and, worse, silently paper over a TERMINAL subscription, which is the exact
+// failure the terminal state exists to advertise. A pollInterval on a subscribe-capable source
+// is ignored — warned once so the config is not silently dropped.
 func (variables *varRuntime) startPollers() {
 	bySource := map[string][]string{}
 	for group, def := range variables.groups {
@@ -524,6 +685,9 @@ func (variables *varRuntime) startPollers() {
 		}
 		source, ok := variables.sources[def.Source]
 		if !ok || parseVarDuration(source.PollInterval) <= 0 {
+			continue
+		}
+		if variables.sourceCanSubscribe(def.Source, source) {
 			continue
 		}
 		bySource[def.Source] = append(bySource[def.Source], group)

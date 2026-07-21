@@ -1,6 +1,7 @@
 package cnos
 
 import (
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -63,6 +64,37 @@ func (store *varStore) commit(updates map[string]*varRecord) {
 		}
 		if store.state.CompareAndSwap(old, &varStoreState{records: next}) {
 			return
+		}
+	}
+}
+
+// removeScope atomically drops every committed key belonging to scope — the scope itself
+// ("var.<scope>") and everything nested beneath it ("var.<scope>.…") — and returns the keys it
+// removed. Like commit, it copies the whole map and swaps it with a single CAS, so a concurrent
+// reader observes either all of the scope's keys or none of them, never a half-removed state.
+//
+// This is the deactivation path: the authority definitively answered "no active head" for the
+// scope, so the runtime tier must go and the overlay must fall back to ② static / ③ default. A
+// TRANSPORT FAILURE IS NOT A NO-HEAD and must never reach here — an unreachable remote keeps
+// last-known-good. Returns nil when nothing was applied (idempotent no-op).
+func (store *varStore) removeScope(scope string) []string {
+	prefix := "var." + scope
+	for {
+		old := store.state.Load()
+		removed := make([]string, 0)
+		next := make(map[string]*varRecord, len(old.records))
+		for key, record := range old.records {
+			if key == prefix || strings.HasPrefix(key, prefix+".") {
+				removed = append(removed, key)
+				continue
+			}
+			next[key] = record
+		}
+		if len(removed) == 0 {
+			return nil
+		}
+		if store.state.CompareAndSwap(old, &varStoreState{records: next}) {
+			return removed
 		}
 	}
 }

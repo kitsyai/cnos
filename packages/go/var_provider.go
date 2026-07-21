@@ -235,6 +235,45 @@ func (variables *varRuntime) pullScope(ctx context.Context, sourceName string, s
 	}, nil
 }
 
+// sourceCanSubscribe reports whether a source's provider implements VarSubscribingProvider —
+// the capability that decides whether the source is polled (see startPollers). The built-in http
+// client is pull-only by construction. Warns once per source when a subscribe-capable source
+// also declares a pollInterval, so an ignored manifest setting is never silent.
+func (variables *varRuntime) sourceCanSubscribe(sourceName string, source VarSourceDef) bool {
+	if isBuiltinTransport(source.Transport) {
+		return false
+	}
+
+	provider, err := variables.providerFor(sourceName, source)
+	if err != nil {
+		// No provider module registered: nothing subscribes and nothing can poll either.
+		return false
+	}
+
+	if _, ok := provider.(VarSubscribingProvider); !ok {
+		return false
+	}
+
+	variables.mu.Lock()
+	warned := variables.warnedPollInterval[sourceName]
+	if !warned {
+		if variables.warnedPollInterval == nil {
+			variables.warnedPollInterval = map[string]bool{}
+		}
+		variables.warnedPollInterval[sourceName] = true
+	}
+	variables.mu.Unlock()
+
+	if !warned {
+		fmt.Fprintf(
+			os.Stderr,
+			"cnos [warn]: var source %q declares pollInterval but its transport (%q) supports subscribe; the subscription is authoritative and pollInterval is ignored. Remove it from the manifest to silence this warning\n",
+			sourceName, source.Transport,
+		)
+	}
+	return true
+}
+
 // startSubscriptions opens a live subscription per prefetch source whose provider
 // implements VarSubscribingProvider. Pushed batches route through the SAME validated ingest
 // path as pulls; pollers still cover pull-only (http) sources. Capability-keyed, never
@@ -291,9 +330,20 @@ func scopeStrings(scopes []VarScope) []string {
 	return result
 }
 
-// ingestSubscribed routes a pushed batch through ingest, deriving its group from the
-// batch scope (or, failing that, from the full-key-keyed values).
+// ingestSubscribed routes a pushed result through the SAME validated paths as a pull, deriving
+// its group from the batch scope (or, failing that, from the full-key-keyed values).
+//
+// A pushed VarPullNoHead is a DEACTIVATION and clears the scope's runtime tier. Dropping it — as
+// this did — left an rpc consumer serving a deactivated revision indefinitely, because a
+// subscribe-capable source runs no poller and therefore has no pull to converge on.
 func (variables *varRuntime) ingestSubscribed(batch VarBatchResult) {
+	if batch.Status == VarPullNoHead {
+		if batch.Scope != "" {
+			variables.applyNoHead(batch.Scope)
+		}
+		return
+	}
+
 	if batch.Status != VarPullOK || len(batch.Values) == 0 {
 		return
 	}

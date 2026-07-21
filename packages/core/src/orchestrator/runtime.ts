@@ -208,13 +208,12 @@ export function createRuntime(
     return value;
   }
 
-  function varSnapshotForKey(key: string): ResolvedVarSnapshot {
-    const runtimeSnapshot = varManager?.snapshot(key);
-
-    if (runtimeSnapshot) {
-      return runtimeSnapshot;
-    }
-
+  /**
+   * The NON-runtime tiers only (② static → ③ default). Kept separate from
+   * {@link varSnapshotForKey} so the var store can ask "what does this key fall back to?"
+   * without re-entering the runtime tier it is in the middle of mutating.
+   */
+  function fallbackVarSnapshot(key: string): ResolvedVarSnapshot {
     const staticValue = readLogicalKey(toValueOverlayKey(key));
 
     if (staticValue !== undefined) {
@@ -222,6 +221,16 @@ export function createRuntime(
     }
 
     return { value: manifest.schema[key]?.default, source: 'default', freshness: 'fresh' };
+  }
+
+  function varSnapshotForKey(key: string): ResolvedVarSnapshot {
+    const runtimeSnapshot = varManager?.snapshot(key);
+
+    if (runtimeSnapshot) {
+      return runtimeSnapshot;
+    }
+
+    return fallbackVarSnapshot(key);
   }
 
   const runtime: CnosRuntime = {
@@ -345,12 +354,12 @@ export function createRuntime(
 
   if (varManager) {
     varManager.setOverlayReader((key) => readVarKey(key, false));
-    // Internal hook awaited by createCnos during ready(): prefetch groups then start pollers.
+    varManager.setFallbackSnapshotReader((key) => fallbackVarSnapshot(key));
+    // Internal hook awaited by createCnos during ready(). Transactional: a failed attempt rolls
+    // back any timers/subscriptions it created so a retry cannot duplicate them.
     Object.defineProperty(runtime, '__startVars', {
       value: async () => {
-        await varManager.prefetch();
-        varManager.startPollers();
-        varManager.startSubscriptions();
+        await varManager.start();
       },
       enumerable: false,
     });

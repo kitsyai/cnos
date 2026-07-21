@@ -54,6 +54,13 @@ export interface LiveVarStoreOptions {
   now?: () => string;
   /** stderr warn seam. */
   warn?: (message: string) => void;
+  /**
+   * Resolver for the NON-runtime overlay tiers (② static `value.<group>.<rest>` → ③ schema
+   * `default`). The store owns only the runtime tier, so it needs this seam to report what a
+   * key resolves to once its runtime head is removed — which is exactly what a watcher must be
+   * handed on a deactivation, and what `status()` reports as the serving `source`.
+   */
+  fallbackSnapshot?: (key: string) => ResolvedVarSnapshot | undefined;
 }
 
 export interface IngestResult {
@@ -145,7 +152,7 @@ function validateScalar(key: string, rule: ConfigSpecRule, value: unknown): Vali
  * and observability. Pure in-memory — no network. Providers/pollers live in the manager.
  */
 export class LiveVarStore {
-  private readonly scopes = new Map<string, StoredScope>();
+  private scopes = new Map<string, StoredScope>();
   private readonly meta = new Map<string, ScopeMeta>();
   private readonly watchers = new Set<Watcher>();
   private readonly groups: Record<string, VarGroupDefinition>;
@@ -154,6 +161,7 @@ export class LiveVarStore {
   private readonly clockMs: () => number;
   private readonly now: () => string;
   private readonly warn: (message: string) => void;
+  private fallbackSnapshot: ((key: string) => ResolvedVarSnapshot | undefined) | undefined;
   private closed = false;
 
   constructor(options: LiveVarStoreOptions) {
@@ -163,6 +171,20 @@ export class LiveVarStore {
     this.clockMs = options.clockMs ?? (() => Date.now());
     this.now = options.now ?? (() => new Date().toISOString());
     this.warn = options.warn ?? ((message: string) => console.warn(message));
+    this.fallbackSnapshot = options.fallbackSnapshot;
+  }
+
+  /** Wire (or replace) the static/default tier resolver — see {@link LiveVarStoreOptions.fallbackSnapshot}. */
+  setFallbackSnapshotReader(reader: (key: string) => ResolvedVarSnapshot | undefined): void {
+    this.fallbackSnapshot = reader;
+  }
+
+  /**
+   * The snapshot a key resolves to right now across ALL tiers: runtime head when one applies,
+   * otherwise whatever the static/default seam reports. Used for watcher dispatch and status.
+   */
+  private effectiveSnapshot(key: string): ResolvedVarSnapshot | undefined {
+    return this.runtimeSnapshot(key) ?? this.fallbackSnapshot?.(key);
   }
 
   private metaFor(scope: string, group: string): ScopeMeta {
@@ -265,6 +287,58 @@ export class LiveVarStore {
     this.fireWatchers(previousSnapshots);
 
     return { ok: true };
+  }
+
+  /**
+   * Drop the runtime tier for `scope` (and every scope nested beneath it) so reads fall through
+   * the overlay to ② static `value.<group>.<rest>` and ③ the schema `default`.
+   *
+   * This is the deactivation path: the authority definitively reported "no active head" for the
+   * scope (http `404 {code:"no-head"}`, rpc `no_head`). A TRANSPORT FAILURE IS NOT A NO-HEAD and
+   * must never reach here — an unreachable remote keeps last-known-good, which is the whole
+   * point of the lease/freshness model.
+   *
+   * The removal is one atomic step (the surviving entries are collected first, then swapped in
+   * as a whole) so a concurrent reader observes either every key of the scope or none of them,
+   * exactly like {@link ingest}. Watchers are notified because the EFFECTIVE value changed;
+   * they receive the new static/default snapshot. Idempotent: removing a scope that holds no
+   * runtime head is a silent no-op that fires nobody.
+   */
+  removeScope(scope: string, group: string): boolean {
+    if (this.closed) {
+      return false;
+    }
+
+    const doomed = Array.from(this.scopes.keys()).filter(
+      (candidate) => candidate === scope || candidate.startsWith(`${scope}.`),
+    );
+
+    if (doomed.length === 0) {
+      return false;
+    }
+
+    const previousSnapshots = this.snapshotWatchers();
+    // Build the surviving map fully, THEN swap the reference in one assignment: the same
+    // immutable-swap discipline the Go store gets from its atomic CAS. No reader — including a
+    // reentrant one from a watch callback — can ever observe a half-removed scope.
+    this.scopes = new Map(
+      Array.from(this.scopes.entries()).filter(([candidate]) => !doomed.includes(candidate)),
+    );
+
+    // The removed head must not masquerade as still applied in `varStatus()`.
+    for (const removed of doomed) {
+      const meta = this.meta.get(removed);
+
+      if (meta) {
+        delete meta.desiredGeneration;
+      }
+    }
+
+    const scopeMeta = this.metaFor(scope, group);
+    delete scopeMeta.desiredGeneration;
+
+    this.fireWatchers(previousSnapshots);
+    return true;
   }
 
   /** Runtime-tier lookup used by the overlay seam. Returns `undefined` when no runtime head applies. */
@@ -410,17 +484,30 @@ export class LiveVarStore {
 
       let freshness: VarScopeStatus['freshness'] = 'none';
       let snapshotAge: number | undefined;
+      // Which tier is actually SERVING this key. With no runtime head — never applied, or the
+      // head was deactivated and removed — the report names the fallback tier that took over
+      // (`static`/`default`), and carries no generation/revision, so a removed head can never
+      // masquerade as still applied. `none` means the key resolves nowhere at all.
+      let source: VarScopeStatus['source'] = 'none';
 
       if (stored) {
+        source = 'runtime';
         freshness = this.freshnessFor(group, stored.observedAtMs).freshness;
         snapshotAge = Math.floor((this.clockMs() - stored.observedAtMs) / 1000);
+      } else {
+        const fallback = this.fallbackSnapshot?.(`${VAR_NAMESPACE_PREFIX}${path}`);
+
+        if (fallback && fallback.value !== undefined) {
+          source = fallback.source;
+          freshness = fallback.freshness;
+        }
       }
 
       report[path] = {
         ...(meta?.desiredGeneration !== undefined ? { desiredGeneration: meta.desiredGeneration } : {}),
         appliedGeneration: stored?.batch.generation ?? 0,
         ...(stored?.batch.revision !== undefined ? { revision: stored.batch.revision } : {}),
-        source: stored ? 'runtime' : 'none',
+        source,
         ...(snapshotAge !== undefined ? { snapshotAge } : {}),
         freshness,
         ...(meta?.lastRefreshAt !== undefined ? { lastRefreshAt: meta.lastRefreshAt } : {}),
@@ -472,7 +559,7 @@ export class LiveVarStore {
     const map = new Map<string, ResolvedVarSnapshot | undefined>();
 
     for (const key of this.watchedKeys()) {
-      map.set(key, this.runtimeSnapshot(key));
+      map.set(key, this.effectiveSnapshot(key));
     }
 
     return map;
@@ -493,7 +580,10 @@ export class LiveVarStore {
         : [watcher.key];
 
       for (const key of keys) {
-        const next = this.runtimeSnapshot(key);
+        // The EFFECTIVE snapshot, not just the runtime tier: after a deactivation the key still
+        // resolves — from the static/default tier — and that new value is precisely what the
+        // watcher must be handed (`source: 'static' | 'default'`).
+        const next = this.effectiveSnapshot(key);
 
         if (!next) {
           continue;
@@ -504,8 +594,10 @@ export class LiveVarStore {
         // Revision is content-addressed, so an equal revision means equal content and there is
         // nothing for a watcher to react to. Generation is deliberately excluded: a push without
         // an explicit revision is stamped with a wall-clock generation, so gating on it would
-        // wake every watcher on each replay of an identical document.
-        if (prev && prev.revision === next.revision) {
+        // wake every watcher on each replay of an identical document. `source` participates
+        // because static/default snapshots carry no revision at all: runtime→static is a real
+        // change even though both sides compare equal on `revision`.
+        if (prev && prev.revision === next.revision && prev.source === next.source) {
           continue;
         }
 

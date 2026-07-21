@@ -185,6 +185,33 @@ export interface VarSubscriptionStatus {
   at?: string;
 }
 
+/**
+ * What a push transport delivered for a scope.
+ *
+ * - `batch` — a concrete, ingestable head revision.
+ * - `no-head` — the authority reports the scope has NO active head (it was deactivated or
+ *   rolled off). This is a definitive answer, not a failure: the runtime tier for that scope
+ *   must be CLEARED so the overlay falls back to ② static / ③ default. A transport error is
+ *   never a `no-head` and must retain last-known-good instead.
+ *
+ * Mirrors the Go `VarBatchResult.Status` (`VarPullOK` / `VarPullNoHead`) exactly — both SDKs
+ * carry the same three pull/push outcomes through one callback.
+ */
+export type VarPushEventKind = 'batch' | 'no-head';
+
+/** A single event delivered by a subscribing provider. */
+export interface VarPushEvent {
+  kind: VarPushEventKind;
+  /**
+   * Prefix-stripped scope string (`agentic` or `agentic.lanes.vinci`) the event applies to.
+   * REQUIRED for `no-head` (there are no values to derive it from); optional for `batch`,
+   * where the batch's full-key-keyed `values` identify the group.
+   */
+  scope?: string;
+  /** Present only when `kind === 'batch'`. */
+  batch?: VarSnapshotBatch;
+}
+
 /** Context handed to a provider factory — resolves `secret.*` auth refs to material. */
 export interface VarSourceProviderContext {
   resolveSecret(ref: string): Promise<string>;
@@ -202,7 +229,12 @@ export interface VarSourceProviderContext {
  */
 export interface VarSourceProvider {
   pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch>;
-  subscribe?(scopes: VarScope[], onBatch: (batch: VarSnapshotBatch) => void): () => void;
+  /**
+   * Open a live push stream for `scopes`. The provider owns reconnect/backoff and must never
+   * throw out of the stream. It reports EVERY authoritative outcome through `onEvent` —
+   * including `no-head` deactivations, which the SDK turns into a runtime-tier removal.
+   */
+  subscribe?(scopes: VarScope[], onEvent: (event: VarPushEvent) => void): () => void;
   close(): Promise<void>;
 }
 

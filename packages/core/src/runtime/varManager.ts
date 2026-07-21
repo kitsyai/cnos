@@ -1,10 +1,11 @@
-import { CnosVarNoHeadError, CnosVarNotModifiedError } from '../errors.js';
+import { CnosVarNoHeadError, CnosVarNotModifiedError, CnosVarRequiredError } from '../errors.js';
 import type { ConfigSpecRule } from '../types/spec.js';
 import type {
   DocumentSchemaDefinition,
   NormalizedVarSourceDefinition,
   ResolvedVarSnapshot,
   VarGroupDefinition,
+  VarPushEvent,
   VarScope,
   VarSnapshotBatch,
   VarSourceProvider,
@@ -75,6 +76,14 @@ export class VarManager {
   /** Wire the full-overlay reader (runtime -> static -> default) used to check required resolvability. */
   setOverlayReader(reader: (key: string) => unknown): void {
     this.overlayReader = reader;
+  }
+
+  /**
+   * Wire the static/default tier snapshot reader. The store needs it to report what a key falls
+   * back to once its runtime head is removed — see {@link LiveVarStore.removeScope}.
+   */
+  setFallbackSnapshotReader(reader: (key: string) => ResolvedVarSnapshot | undefined): void {
+    this.store.setFallbackSnapshotReader(reader);
   }
 
   // ---- Read path ---------------------------------------------------------
@@ -223,12 +232,32 @@ export class VarManager {
       }
 
       if (error instanceof CnosVarNoHeadError) {
+        // A DEFINITIVE answer from the authority: this scope has no active head. Clear the
+        // runtime tier so the overlay restores ② static / ③ default without a redeploy
+        // (acceptance #15). Contrast with the transport failure below, which is NOT an answer
+        // and must retain last-known-good.
+        this.applyNoHead(scopeString, group);
         this.store.recordRefresh(scopeString, group);
         return 'no-head';
       }
 
       this.store.recordError(scopeString, group, error);
       throw error;
+    }
+  }
+
+  /**
+   * Apply a `no-head` outcome: atomically drop the scope's runtime tier so reads fall through
+   * the overlay. Idempotent — a `no-head` for a scope that has nothing applied is a silent
+   * no-op that wakes no watcher. Shared by the pull path and the push (`no_head`) path, in
+   * every transport, so a deactivation converges the same way regardless of how it arrived.
+   */
+  private applyNoHead(scopeString: string, group: string): void {
+    if (this.store.removeScope(scopeString, group)) {
+      this.warn(
+        `[cnos:var] scope "${scopeString}" has no active runtime head (deactivated); ` +
+          'cleared the runtime tier and restored the static/default tiers.',
+      );
     }
   }
 
@@ -286,6 +315,7 @@ export class VarManager {
     }
 
     const required = this.groupIsRequired(group);
+    let failure: unknown;
 
     try {
       await this.fetchScope(definition.source, group, { group }, group);
@@ -299,35 +329,59 @@ export class VarManager {
         return;
       }
 
-      // A real transport failure on a REQUIRED group is fatal — ready() rejects (fail fast),
-      // unless the overlay can still satisfy every required key (static/default present).
-      if (required && !this.requiredKeysResolvable(group)) {
-        throw error;
-      }
+      failure = error;
+    }
 
+    // The required check runs after EVERY outcome, not only the thrown ones. `fetchScope`
+    // returns `no-head` / `rejected` WITHOUT throwing, and both leave a required key with no
+    // runtime value — a prefetch mandatory key that resolves from no tier must fail ready(),
+    // exactly as the Go SDK does (`ErrVarRequired`). Checking only the catch path is what let
+    // Node report a ready runtime while Go correctly refused to start.
+    if (required && !this.requiredKeysResolvable(group)) {
+      throw failure ?? new CnosVarRequiredError(this.unresolvedRequiredKey(group) ?? group);
+    }
+
+    if (failure !== undefined) {
       this.warn(
         `[cnos:var] prefetch of group "${group}" failed (falling back to static/default): ${
-          error instanceof Error ? error.message : String(error)
+          failure instanceof Error ? failure.message : String(failure)
         }`,
       );
     }
   }
 
   private requiredKeysResolvable(group: string): boolean {
-    if (!this.overlayReader) {
-      return true;
-    }
-
-    return this.requiredKeys(group).every((key) => this.overlayReader?.(key) !== undefined);
+    return this.unresolvedRequiredKey(group) === undefined;
   }
 
-  /** Start a poller per http prefetch source honoring pollInterval, with If-None-Match short-circuit. */
+  /** The first required key of `group` that resolves from no overlay tier, if any. */
+  private unresolvedRequiredKey(group: string): string | undefined {
+    if (!this.overlayReader) {
+      return undefined;
+    }
+
+    return this.requiredKeys(group).find((key) => this.overlayReader?.(key) === undefined);
+  }
+
+  /**
+   * Start a poller per PULL-ONLY prefetch source honoring `pollInterval`, with the
+   * `If-None-Match` short-circuit.
+   *
+   * CANONICAL RULE (identical in the Go SDK): polling is keyed off the provider's declared
+   * CAPABILITIES, never the transport name — poll only when the provider does NOT implement
+   * `subscribe`. A subscribe-capable provider (rpc) relies on its stream; adding a poll loop
+   * behind it would double-fetch and, worse, silently paper over a TERMINAL subscription, which
+   * is the exact failure the terminal state exists to advertise. A `pollInterval` declared on a
+   * subscribe-capable source is ignored — warn once so the config is not silently dropped.
+   */
   startPollers(): void {
+    const warnedSources = new Set<string>();
+
     for (const group of this.prefetchGroups()) {
       const definition = this.vars[group];
       const source = definition ? this.varSources[definition.source] : undefined;
 
-      if (!definition || !source || source.transport !== 'http') {
+      if (!definition || !source) {
         continue;
       }
 
@@ -337,7 +391,75 @@ export class VarManager {
         continue;
       }
 
+      let provider: VarSourceProvider;
+
+      try {
+        provider = this.provider(definition.source);
+      } catch {
+        // No transport module registered — nothing to poll with; the overlay serves the
+        // static/default tiers and `prefetch()` has already warned about the gap.
+        continue;
+      }
+
+      if (provider.subscribe) {
+        if (!warnedSources.has(definition.source)) {
+          warnedSources.add(definition.source);
+          this.warn(
+            `[cnos:var] source "${definition.source}" declares pollInterval but its transport ` +
+              `("${source.transport}") supports subscribe; the subscription is authoritative and ` +
+              'pollInterval is ignored. Remove it from the manifest to silence this warning.',
+          );
+        }
+
+        continue;
+      }
+
       this.schedulePoll(group, definition.source, interval, interval, 0);
+    }
+  }
+
+  /**
+   * Transactional startup: prefetch, then pollers, then subscriptions. If ANY step throws, every
+   * timer and subscription this attempt created is rolled back before the error propagates, so a
+   * retry (permitted since the round-1 latch fix) starts from a clean slate instead of
+   * duplicating live timers/streams from a half-finished attempt.
+   */
+  async start(): Promise<void> {
+    const timersBefore = new Set(this.timers);
+    const subscriptionsBefore = new Set(this.subscriptions);
+
+    try {
+      await this.prefetch();
+      this.startPollers();
+      this.startSubscriptions();
+    } catch (error) {
+      this.rollbackStart(timersBefore, subscriptionsBefore);
+      throw error;
+    }
+  }
+
+  /** Undo everything the failed start attempt created; pre-existing resources are untouched. */
+  private rollbackStart(
+    timersBefore: Set<ReturnType<typeof setTimeout>>,
+    subscriptionsBefore: Set<() => void>,
+  ): void {
+    for (const timer of Array.from(this.timers)) {
+      if (!timersBefore.has(timer)) {
+        clearTimeout(timer);
+        this.timers.delete(timer);
+      }
+    }
+
+    for (const stop of Array.from(this.subscriptions)) {
+      if (!subscriptionsBefore.has(stop)) {
+        try {
+          stop();
+        } catch {
+          /* provider unsubscribe is best-effort */
+        }
+
+        this.subscriptions.delete(stop);
+      }
     }
   }
 
@@ -375,8 +497,8 @@ export class VarManager {
         continue;
       }
 
-      const stop = provider.subscribe(scopes, (batch) => {
-        this.ingestSubscribed(batch);
+      const stop = provider.subscribe(scopes, (event) => {
+        this.applyPushEvent(event);
       });
 
       for (const scope of scopes) {
@@ -390,19 +512,47 @@ export class VarManager {
     }
   }
 
-  /** Route a pushed batch through ingest, deriving its group from the full-key-keyed values. */
-  private ingestSubscribed(batch: VarSnapshotBatch): void {
+  /**
+   * Route a push event. A `batch` goes through the SAME validated ingest as a pull; a `no-head`
+   * is a deactivation and clears the scope's runtime tier. Dropping `no-head` here is what let
+   * an rpc consumer — which normally has no poller at all — serve a deactivated revision
+   * indefinitely, with no pull to ever converge on.
+   */
+  private applyPushEvent(event: VarPushEvent): void {
     if (this.closed) {
       return;
     }
 
-    const firstKey = Object.keys(batch.values)[0];
+    if (event.kind === 'no-head') {
+      const scope = event.scope;
+
+      if (!scope) {
+        return;
+      }
+
+      this.applyNoHead(scope, scope.split('.')[0] ?? scope);
+      this.store.recordRefresh(scope, scope.split('.')[0] ?? scope);
+      return;
+    }
+
+    const batch = event.batch;
+
+    if (!batch) {
+      return;
+    }
+
+    const firstKey = event.scope ?? Object.keys(batch.values)[0];
 
     if (!firstKey) {
       return;
     }
 
     const group = firstKey.split('.')[0] ?? '';
+
+    if (!group) {
+      return;
+    }
+
     this.ingest(group, group, batch);
   }
 
@@ -453,9 +603,10 @@ export class VarManager {
     }
 
     const required = this.requiredKeys(group).includes(normalized);
+    let outcome: 'ingested' | 'rejected' | 'no-head' | 'not-modified' | undefined;
 
     try {
-      await this.fetchScope(definition.source, group, { group }, group);
+      outcome = await this.fetchScope(definition.source, group, { group }, group);
     } catch (error) {
       if (required) {
         throw error;
@@ -465,6 +616,16 @@ export class VarManager {
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      return;
+    }
+
+    // `fetchScope` returns `rejected` WITHOUT throwing, so the catch above never saw a revision
+    // the authority served but validation refused — a required key silently reported success
+    // where Go returns ErrVarRequired (Go's ingest rejection surfaces as a fetch error). A
+    // `no-head` deliberately does NOT reject here: it is a definitive answer ("use the fallback
+    // tiers"), and a required key with no fallback stays fail-fast LAZILY at read time.
+    if (required && outcome === 'rejected') {
+      throw new CnosVarRequiredError(normalized);
     }
   }
 

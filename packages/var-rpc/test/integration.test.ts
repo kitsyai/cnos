@@ -4,7 +4,9 @@ import {
   LiveVarStore,
   CnosVarNoHeadError,
   CnosVarNotModifiedError,
+  VarManager,
   type DocumentSchemaDefinition,
+  type NormalizedVarSourceDefinition,
   type ProjectedVarSourceDefinition,
   type VarSnapshotBatch,
   type VarSourceProvider,
@@ -130,9 +132,12 @@ describe('var rpc transport', () => {
     });
 
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => {
-      received.push(batch);
-      live.ingest('agentic', 'agentic', batch);
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => {
+      if (!event.batch) {
+        return;
+      }
+      received.push(event.batch);
+      live.ingest('agentic', 'agentic', event.batch);
     });
 
     await delay(150); // let the stream establish before the activation
@@ -143,6 +148,66 @@ describe('var rpc transport', () => {
     expect(live.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({ enabled: true, model_target_ref: 'pushed' });
     stop?.();
   });
+
+  it('#15 a DEACTIVATION over rpc restores the static tier, with no poller in the picture', async () => {
+    // Round-2 blocker 1, rpc half — the worst case: an rpc source has no poller, so if the
+    // no_head push is dropped there is nothing left to converge on and the deactivated revision
+    // is served forever. Driven through the real gRPC transport and the real engine, via the
+    // full VarManager (so the SDK's push routing is exercised, not just the provider).
+    const { engine, server } = await harness();
+    const source: NormalizedVarSourceDefinition = {
+      transport: 'rpc',
+      url: server.target,
+      auth: {},
+      // Declared deliberately: a subscribe-capable source must IGNORE pollInterval (capability
+      // rule), so the fallback below can only have come from the pushed deactivation.
+      pollInterval: '20ms',
+    };
+    const manager = new VarManager({
+      varSources: { ops: source },
+      vars: { agentic: { source: 'ops', mode: 'prefetch' } },
+      documents,
+      schema: { 'var.agentic.lanes.vinci': { document: 'agentic-lanes/v1' } },
+      providerModules: [{ transport: 'rpc', create: (def, ctx) => track(createRpcVarProvider(def, ctx)) }],
+      resolveSecret: async () => '',
+      warn: () => undefined,
+    });
+
+    const staticDocument = { enabled: false, model_target_ref: 'static-tier' };
+    manager.setOverlayReader((key) =>
+      key === 'var.agentic.lanes.vinci' ? staticDocument : undefined,
+    );
+    manager.setFallbackSnapshotReader((key) =>
+      key === 'var.agentic.lanes.vinci'
+        ? { value: staticDocument, source: 'static', freshness: 'fresh' }
+        : undefined,
+    );
+
+    await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'runtime-tier' } }, 0);
+    await manager.start();
+
+    expect(manager.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({
+      enabled: true,
+      model_target_ref: 'runtime-tier',
+    });
+
+    const observed: Array<{ source: string; value: unknown }> = [];
+    manager.watch('var.agentic.lanes.vinci', (next) => observed.push({ source: next.source, value: next.value }));
+
+    await delay(200); // let the subscription establish
+    await engine.deactivate({ scope: 'agentic', expectedGeneration: 1 });
+
+    await until(() => manager.readRuntimeVar('var.agentic.lanes.vinci') === undefined);
+    expect(manager.readRuntimeVar('var.agentic.lanes.vinci')).toBeUndefined();
+    expect(observed).toEqual([{ source: 'static', value: staticDocument }]);
+
+    const status = manager.status()['agentic.lanes.vinci'];
+    expect(status?.source).toBe('static');
+    expect(status?.appliedGeneration).toBe(0);
+    expect(status?.desiredGeneration).toBeUndefined();
+
+    await manager.close();
+  }, 20_000);
 
   it('#auth failure rejects the pull when the bearer token is wrong', async () => {
     const { engine, server } = await harness(staticBearerAuthorize('good-token'));
@@ -165,7 +230,7 @@ describe('var rpc transport', () => {
 
     const provider = track(providerFor(server.target));
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
 
     await delay(150);
     // Restart on the same port with the SAME engine so activations still notify subscribers.

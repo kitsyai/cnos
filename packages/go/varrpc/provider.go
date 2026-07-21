@@ -373,13 +373,21 @@ func (provider *Provider) runStream(ctx context.Context, scopes []string, onBatc
 			return delivered, err
 		}
 
-		// Push-side deactivations (no_head) and no-change acks are not ingestable batches;
-		// the SDK converges on the next pull.
-		if batch.NotModified || batch.NoHead {
+		// A no-change ack carries nothing to apply — the cached snapshot already IS the head.
+		if batch.NotModified {
 			continue
 		}
 
-		result, err := toResult("", batch)
+		// A no_head push is a DEACTIVATION: the authority states the scope has no active head.
+		// It must be forwarded, not dropped — an rpc source runs no poller, so dropping it left
+		// the consumer serving a deactivated revision forever with no pull to converge on. It
+		// also counts as a delivery: the stream is demonstrably healthy.
+		fallbackScope := ""
+		if len(scopes) > 0 {
+			fallbackScope = scopes[0]
+		}
+
+		result, err := toResult(fallbackScope, batch)
 		if err != nil {
 			provider.report(err, false, scopes)
 			continue

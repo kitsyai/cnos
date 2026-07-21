@@ -112,19 +112,37 @@ Reading `var.<group>.<rest>` resolves through one stable precedence, in order:
 4. otherwise `undefined`.
 
 Application code never implements this precedence itself — one read call, one call site.
-Deactivating the runtime head (`cnos var deactivate`) cleanly falls back to tier ② or ③ with
-**no deployment**. This overlay only applies to `var.*` reads — `value.*` reads are never
-affected by it.
+This overlay only applies to `var.*` reads — `value.*` reads are never affected by it.
+
+### Deactivation restores the fallback tiers, live
+
+Deactivating the runtime head (`cnos var deactivate`) falls back to tier ② or ③ with **no
+deployment and no restart**. When a source answers "no active head" — an http
+`404 {code:"no-head"}`, an rpc `no_head` pull, or an rpc `no_head` **push** — CNOS atomically
+removes the runtime tier for that scope and everything nested beneath it, and subsequent reads
+resolve from `value.*` / the schema `default` again.
+
+- `watch()` callbacks fire, receiving the snapshot the key now resolves to (`source: "static"`
+  or `"default"`).
+- `varStatus()` reports that fallback tier, `appliedGeneration: 0`, and no `revision` — a
+  deactivated head is never reported as still applied.
+- Removing a head twice is a silent no-op.
+- A **transport failure is not a deactivation**: an unreachable source keeps serving
+  last-known-good (that is what `lease`/`freshness` describe). Only a definitive "no head"
+  answer from the authority clears anything.
 
 ## Fetch modes
 
 Declared per group via `mode`:
 
 - **`prefetch`** — resolved before `ready()` returns. If the group has any `required: true`
-  key and prefetch fails with no static/default fallback available for every required key,
-  `ready()` rejects (fail fast). If prefetch fails but every required key is still resolvable
+  key that resolves from **no** tier once prefetch finishes, `ready()` rejects (fail fast).
+  This is evaluated after every outcome — a transport failure, a source with no active head,
+  and a revision your schema rejected all count. If every required key is still resolvable
   through the static/default tiers, CNOS warns and falls back — no runtime head, but the
-  overlay degrades cleanly.
+  overlay degrades cleanly. The one exception is a **missing transport module** (no provider
+  registered for the declared transport): that is warned and non-fatal, and such a required key
+  fails fast lazily at read time instead.
 - **`ondemand`** — never blocks `ready()`. The first read of an unresolved key in the group
   triggers a background fetch of the whole group (deduped — one in-flight fetch per group,
   not per key) and serves the static/default tier meanwhile.
@@ -299,6 +317,12 @@ gone on ITS restart and consumers cleanly fall back to the static/default tiers 
 [var-server guide](/guides/var-server) for persistent stores).
 
 ## Receiver mounting (push)
+
+Polling is decided by the provider's **capabilities**, not by the transport name: CNOS polls a
+source only when its provider does not implement `subscribe`. A pull-only transport (http) with
+a `pollInterval` polls; a subscribe-capable transport (rpc) relies on its subscription and is
+never polled, even if you declare a `pollInterval` — the setting is ignored and warned once, so
+a terminal subscription can never be silently masked by a background poll loop.
 
 Pull (poll on an interval, or fetch-on-demand) is the default. For http-only environments
 that want push instead of polling, mount a **latching** receiver on your own server — CNOS

@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CnosVarNoHeadError,
+  CnosVarRequiredError,
   LiveVarStore,
   VarManager,
   createCnos,
@@ -17,6 +19,7 @@ import {
   type LoaderPlugin,
   type NormalizedVarSourceDefinition,
   type ResolvedVarSnapshot,
+  type VarPushEvent,
   type VarSnapshotBatch,
   type VarSourceProvider,
   type VarSourceProviderModule,
@@ -115,6 +118,7 @@ describe('acceptance matrix (consumer plane)', () => {
       groups: { flags: { source: 's', mode: 'prefetch' } },
       schema: { 'var.flags.mode': { type: 'string' } },
       documents: {},
+      fallbackSnapshot: () => ({ value: 'static-tier', source: 'static', freshness: 'fresh' }),
     });
     const manifest = { schema: { 'var.flags.mode': { type: 'string', default: 'safe' } } } as never;
     const read = (): unknown =>
@@ -124,12 +128,59 @@ describe('acceptance matrix (consumer plane)', () => {
         manifest,
       });
 
+    const seen: ResolvedVarSnapshot[] = [];
+    store.watch('var.flags.mode', (next) => seen.push(next));
+
     expect(read()).toBe('static-tier');
     store.ingest('flags', 'flags', batch({ values: { 'flags.mode': 'runtime-tier' } }));
     expect(read()).toBe('runtime-tier');
-    // "Deactivation" delivers a batch with the key absent — the overlay falls back with no restart.
-    store.ingest('flags', 'flags', batch({ generation: 2, revision: 'sha256:r2', values: {} }));
+
+    // A deactivation is a SCOPE REMOVAL — the real representation. (It is emphatically NOT "a
+    // batch whose values map is empty": no transport emits that, and the previous version of
+    // this test passed against a store that never cleared anything, because an empty batch
+    // legitimately commits an empty scope. `removeScope` is what a `no-head` routes to.)
+    expect(store.removeScope('flags', 'flags')).toBe(true);
     expect(read()).toBe('static-tier');
+    expect(store.readRuntimeVar('var.flags.mode')).toBeUndefined();
+    expect(store.runtimeSnapshot('var.flags.mode')).toBeUndefined();
+
+    // The watcher was told, and handed the tier that took over.
+    expect(seen.map((snap) => [snap.source, snap.value])).toEqual([
+      ['runtime', 'runtime-tier'],
+      ['static', 'static-tier'],
+    ]);
+
+    // Idempotent: a second removal is a silent no-op.
+    expect(store.removeScope('flags', 'flags')).toBe(false);
+    expect(seen).toHaveLength(2);
+
+    // ...and the flip works in the other direction again, still with no restart.
+    store.ingest('flags', 'flags', batch({ generation: 3, revision: 'sha256:r3', values: { 'flags.mode': 'back' } }));
+    expect(read()).toBe('back');
+  });
+
+  it('acceptance #15: removing a scope drops nested key scopes and clears status metadata', () => {
+    const store = new LiveVarStore({
+      groups: { agentic: { source: 's', mode: 'prefetch' } },
+      schema: { 'var.agentic.lanes.vinci': {}, 'var.agentic.lanes.other': {} },
+      documents: {},
+    });
+
+    // A key-scoped commit beneath the group, plus a group-scoped one.
+    store.ingest('agentic.lanes.vinci', 'agentic', batch({ values: { 'agentic.lanes.vinci': { enabled: true } } }));
+    store.ingest('agentic', 'agentic', batch({ generation: 2, revision: 'sha256:g', values: { 'agentic.lanes.other': 1 } }));
+    expect(store.readRuntimeVar('var.agentic.lanes.vinci')).toEqual({ enabled: true });
+
+    // A group `no-head` clears the group AND everything nested beneath it.
+    expect(store.removeScope('agentic', 'agentic')).toBe(true);
+    expect(store.readRuntimeVar('var.agentic.lanes.vinci')).toBeUndefined();
+    expect(store.readRuntimeVar('var.agentic.lanes.other')).toBeUndefined();
+
+    const status = store.status()['agentic.lanes.vinci'];
+    expect(status).toMatchObject({ source: 'none', appliedGeneration: 0 });
+    expect(status?.revision).toBeUndefined();
+    // The removed head must not masquerade as a still-pending desired generation either.
+    expect(status?.desiredGeneration).toBeUndefined();
   });
 
   it('acceptance #3: a rejected multi-key batch commits NOTHING (no mixed snapshot)', () => {
@@ -593,7 +644,7 @@ function managerOptions(
 
 describe('VarManager.startSubscriptions', () => {
   it('subscribes prefetch groups to a subscribe-capable provider and ingests pushed batches', async () => {
-    let pushed: ((b: VarSnapshotBatch) => void) | undefined;
+    let pushed: ((event: VarPushEvent) => void) | undefined;
     let subscribedScopes: unknown;
     let stopped = 0;
 
@@ -601,9 +652,9 @@ describe('VarManager.startSubscriptions', () => {
       async pull() {
         return batch({ values: { 'g.k': 'pulled' } });
       },
-      subscribe(scopes, onBatch) {
+      subscribe(scopes, onEvent) {
         subscribedScopes = scopes;
-        pushed = onBatch;
+        pushed = onEvent;
         return () => {
           stopped += 1;
         };
@@ -619,7 +670,7 @@ describe('VarManager.startSubscriptions', () => {
     expect(subscribedScopes).toEqual([{ group: 'g' }]);
     expect(pushed).toBeTypeOf('function');
 
-    pushed?.(batch({ generation: 7, revision: 'sha256:push', values: { 'g.k': 'pushed' } }));
+    pushed?.({ kind: 'batch', batch: batch({ generation: 7, revision: 'sha256:push', values: { 'g.k': 'pushed' } }) });
     expect(manager.readRuntimeVar('var.g.k')).toBe('pushed');
     expect(manager.status()['g.k']?.appliedGeneration).toBe(7);
 
@@ -627,7 +678,7 @@ describe('VarManager.startSubscriptions', () => {
     expect(stopped).toBe(1);
     // PINNED: after close, a late push from a laggy provider is dropped, and the last
     // committed snapshot is retained (close does not clear already-committed scopes).
-    pushed?.(batch({ generation: 8, revision: 'sha256:late', values: { 'g.k': 'late' } }));
+    pushed?.({ kind: 'batch', batch: batch({ generation: 8, revision: 'sha256:late', values: { 'g.k': 'late' } }) });
     expect(manager.readRuntimeVar('var.g.k')).toBe('pushed');
     expect(manager.status()['g.k']?.appliedGeneration).toBe(7);
   });
@@ -674,13 +725,13 @@ describe('VarManager.startSubscriptions', () => {
   });
 
   it('PINNED: a pushed batch with an empty values map is dropped (no group can be derived)', () => {
-    let pushed: ((b: VarSnapshotBatch) => void) | undefined;
+    let pushed: ((event: VarPushEvent) => void) | undefined;
     const provider: VarSourceProvider = {
       async pull() {
         return batch({ values: {} });
       },
-      subscribe(_scopes, onBatch) {
-        pushed = onBatch;
+      subscribe(_scopes, onEvent) {
+        pushed = onEvent;
         return () => undefined;
       },
       async close() {
@@ -689,7 +740,7 @@ describe('VarManager.startSubscriptions', () => {
     };
     const manager = new VarManager(managerOptions(provider));
     manager.startSubscriptions();
-    expect(() => pushed?.(batch({ values: {} }))).not.toThrow();
+    expect(() => pushed?.({ kind: 'batch', batch: batch({ values: {} }) })).not.toThrow();
     // No batch was committed: the only key in the report is the declared schema key, at the
     // `none` tier, carrying the subscription state recorded by startSubscriptions().
     expect(manager.status()['g.k']).toMatchObject({
@@ -1216,5 +1267,240 @@ describe('regression: var-less projections and runtimes are byte-identical to pr
     expect(runtime.graph.entries.has('value.flags.mode')).toBe(false);
     expect(runtime.read('var.flags.mode')).toBe('safe');
     await runtime.close?.();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review round 2 regressions (blockers 2 / warnings 5-6 — Node side)
+// ---------------------------------------------------------------------------
+
+describe('required prefetch resolvability (round-2 blocker 2)', () => {
+  /** A manager whose overlay resolves only the keys present in `staticValues`. */
+  function requiredManager(
+    provider: VarSourceProvider,
+    staticValues: Record<string, unknown> = {},
+  ): VarManager {
+    const manager = new VarManager(
+      managerOptions(provider, { schema: { 'var.g.k': { type: 'string', required: true } } }),
+    );
+    manager.setOverlayReader((key) => manager.readRuntimeVar(key) ?? staticValues[key]);
+    return manager;
+  }
+
+  const noHeadProvider: VarSourceProvider = {
+    async pull() {
+      throw new CnosVarNoHeadError('g');
+    },
+    async close() {
+      /* noop */
+    },
+  };
+
+  const rejectedProvider: VarSourceProvider = {
+    // Type-invalid against `var.g.k: string`, so ingest rejects the whole batch.
+    async pull() {
+      return batch({ values: { 'g.k': 42 } });
+    },
+    async close() {
+      /* noop */
+    },
+  };
+
+  it('(a) a required prefetch key with NO active head and no fallback fails ready()', async () => {
+    // `fetchScope` returns 'no-head' WITHOUT throwing, so the old catch-only check never ran and
+    // Node reported a ready runtime where Go returned ErrVarRequired.
+    const manager = requiredManager(noHeadProvider);
+    await expect(manager.prefetch()).rejects.toBeInstanceOf(CnosVarRequiredError);
+    await manager.close();
+  });
+
+  it('(b) a required prefetch key whose revision is VALIDATION-REJECTED fails ready()', async () => {
+    const manager = requiredManager(rejectedProvider);
+    await expect(manager.prefetch()).rejects.toBeInstanceOf(CnosVarRequiredError);
+    await manager.close();
+  });
+
+  it('(c) a MISSING transport module stays non-fatal (the documented carve-out)', async () => {
+    const warnings: string[] = [];
+    const manager = new VarManager({
+      ...managerOptions(noHeadProvider, { schema: { 'var.g.k': { type: 'string', required: true } } }),
+      providerModules: [],
+      warn: (message) => warnings.push(message),
+    });
+    manager.setOverlayReader(() => undefined);
+
+    await expect(manager.prefetch()).resolves.toBeUndefined();
+    expect(warnings.join('\n')).toMatch(/No var source provider registered/);
+    await manager.close();
+  });
+
+  it('a fallback tier keeps every non-throwing outcome non-fatal', async () => {
+    for (const provider of [noHeadProvider, rejectedProvider]) {
+      const manager = requiredManager(provider, { 'var.g.k': 'static-tier' });
+      await expect(manager.prefetch()).resolves.toBeUndefined();
+      await manager.close();
+    }
+  });
+
+  it('refreshVar on a required key rejects when the revision is validation-rejected', async () => {
+    const manager = requiredManager(rejectedProvider, { 'var.g.k': 'static-tier' });
+    // Go surfaces the same case as ErrVarRequired (its ingest rejection is a fetch error).
+    await expect(manager.refreshVar('var.g.k')).rejects.toBeInstanceOf(CnosVarRequiredError);
+    await manager.close();
+  });
+
+  it('refreshVar on a required key does NOT reject on a no-head (a definitive answer)', async () => {
+    // Parity with Go's TestVarRequiredOndemandDoesNotBlockReady: a no-head means "use the
+    // fallback tiers", so refresh succeeds and the key stays fail-fast lazily at read time.
+    const manager = requiredManager(noHeadProvider);
+    await expect(manager.refreshVar('var.g.k')).resolves.toBeUndefined();
+    await manager.close();
+  });
+});
+
+describe('poller capability rule (round-2 warning 5)', () => {
+  function pollingOptions(
+    provider: VarSourceProvider,
+    transport: 'http' | 'rpc',
+  ): ConstructorParameters<typeof VarManager>[0] {
+    const source: NormalizedVarSourceDefinition = {
+      transport,
+      url: 'http://unused.local',
+      auth: {},
+      pollInterval: '20ms',
+    };
+    return {
+      ...managerOptions(provider),
+      varSources: { svc: source },
+      providerModules: [{ transport, create: () => provider }],
+    };
+  }
+
+  it('a PULL-ONLY provider with a pollInterval is polled', async () => {
+    let pulls = 0;
+    const provider: VarSourceProvider = {
+      async pull() {
+        pulls += 1;
+        return batch({ values: { 'g.k': 'v' } });
+      },
+      async close() {
+        /* noop */
+      },
+    };
+
+    const manager = new VarManager(pollingOptions(provider, 'http'));
+    manager.startPollers();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await manager.close();
+    expect(pulls).toBeGreaterThan(0);
+  });
+
+  it('a SUBSCRIBE-capable provider is never polled, and the ignored pollInterval is warned', async () => {
+    // The rule is capability-based, not transport-name-based: Go polled any source declaring a
+    // pollInterval, so an rpc source both subscribed AND polled — which also undermines the
+    // guarantee that a terminal subscription does not silently fall back to polling.
+    let pulls = 0;
+    const warnings: string[] = [];
+    const provider: VarSourceProvider = {
+      async pull() {
+        pulls += 1;
+        return batch({ values: { 'g.k': 'v' } });
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      async close() {
+        /* noop */
+      },
+    };
+
+    const manager = new VarManager({
+      ...pollingOptions(provider, 'rpc'),
+      warn: (message) => warnings.push(message),
+    });
+    manager.startPollers();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await manager.close();
+
+    expect(pulls).toBe(0);
+    expect(warnings.filter((message) => message.includes('pollInterval is ignored'))).toHaveLength(1);
+  });
+});
+
+describe('transactional startup (round-2 warning 6)', () => {
+  it('rolls back timers and subscriptions created by a failed attempt', async () => {
+    let subscribeCalls = 0;
+    let stopCalls = 0;
+    let pulls = 0;
+    let failSubscribe = true;
+
+    const provider: VarSourceProvider = {
+      async pull() {
+        pulls += 1;
+        return batch({ values: { 'g.k': 'v' } });
+      },
+      subscribe() {
+        subscribeCalls += 1;
+
+        if (failSubscribe) {
+          throw new Error('subscribe blew up');
+        }
+
+        return () => {
+          stopCalls += 1;
+        };
+      },
+      async close() {
+        /* noop */
+      },
+    };
+
+    // A pull-only twin so the attempt really does create a poll timer to roll back: `svc` is
+    // subscribe-capable (never polled), `poller` is not.
+    const subscribing: NormalizedVarSourceDefinition = { transport: 'rpc', url: 'http://unused.local', auth: {} };
+    const pollOnly: NormalizedVarSourceDefinition = {
+      transport: 'http',
+      url: 'http://unused.local',
+      auth: {},
+      pollInterval: '20ms',
+    };
+    const pullOnlyProvider: VarSourceProvider = {
+      async pull() {
+        pulls += 1;
+        return batch({ values: { 'h.k': 'v' } });
+      },
+      async close() {
+        /* noop */
+      },
+    };
+
+    const manager = new VarManager({
+      ...managerOptions(provider),
+      varSources: { svc: subscribing, poller: pollOnly },
+      vars: { g: { source: 'svc', mode: 'prefetch' }, h: { source: 'poller', mode: 'prefetch' } },
+      schema: { 'var.g.k': { type: 'string' }, 'var.h.k': { type: 'string' } },
+      providerModules: [
+        { transport: 'rpc', create: () => provider },
+        { transport: 'http', create: () => pullOnlyProvider },
+      ],
+      warn: () => undefined,
+    });
+
+    await expect(manager.start()).rejects.toThrow(/subscribe blew up/);
+
+    // Nothing the failed attempt created may survive: no poll timer keeps firing...
+    const pullsAfterFailure = pulls;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(pulls).toBe(pullsAfterFailure);
+
+    // ...and the retry the round-1 latch fix permits starts clean rather than duplicating.
+    failSubscribe = false;
+    const subscribesBeforeRetry = subscribeCalls;
+    await manager.start();
+    expect(subscribeCalls).toBe(subscribesBeforeRetry + 1);
+
+    // close() is still correct after a rolled-back attempt: exactly the live subscription stops.
+    await manager.close();
+    expect(stopCalls).toBe(1);
   });
 });

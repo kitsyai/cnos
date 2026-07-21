@@ -187,6 +187,22 @@ func TestExplicitDefaultsDecodeToCanonicalMessage(t *testing.T) {
 		canonical.NotModified != explicit.NotModified || len(explicit.ValuesJSON) != 0 {
 		t.Fatalf("explicit-defaults decode diverged:\n got %+v\nwant %+v", explicit, canonical)
 	}
+
+	// `no_head` is a DEACTIVATION, not a no-op: both SDKs turn it into a runtime-tier removal for
+	// `scope`, so the scope field is the only thing identifying what to clear. A no_head message
+	// with an empty scope is unactionable. Pinned here and in
+	// `packages/var-rpc/test/wire-fixtures.test.ts` so neither encoder can drop it.
+	for _, batch := range []*SnapshotBatch{canonical, explicit} {
+		if !batch.NoHead {
+			t.Fatalf("expected a no_head message, got %+v", batch)
+		}
+		if batch.Scope != "agentic" {
+			t.Fatalf("a no_head message must carry the scope it deactivates, got %q", batch.Scope)
+		}
+		if len(batch.ValuesJSON) != 0 {
+			t.Fatalf("a no_head message must carry no values, got %q", batch.ValuesJSON)
+		}
+	}
 }
 
 func TestRoundTripAndUnknownFieldSkipping(t *testing.T) {

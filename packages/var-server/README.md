@@ -84,6 +84,11 @@ already updated. It returns an unsubscribe function. This is the reusable push s
 rpc `Subscribe` stream in `@kitsy/cnos-var-rpc` (`attachVarRpc` / `serveVarRpc`); ws/sse will
 reuse it unchanged.
 
+A `deactivated` commit pushes a `no_head` `SnapshotBatch` carrying the affected `scope`. That
+message is not decorative: consumer SDKs turn it into an atomic removal of the scope's runtime
+tier so reads fall back to `value.*` / schema defaults. Since a subscribe-capable source is
+never polled, dropping it would leave a consumer serving a deactivated revision indefinitely.
+
 To make http-admin mutations reach rpc subscribers, both planes must share ONE engine:
 
 ```ts

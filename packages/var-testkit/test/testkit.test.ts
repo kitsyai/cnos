@@ -48,9 +48,23 @@ describe('createInMemoryVarSource', () => {
     expect(batch.generation).toBe(1);
 
     const received: unknown[] = [];
-    const stop = source.provider.subscribe?.([{ key: SCOPE }], (next) => received.push(next.values));
+    const events: string[] = [];
+    const stop = source.provider.subscribe?.([{ key: SCOPE }], (event) => {
+      events.push(event.kind);
+      if (event.batch) {
+        received.push(event.batch.values);
+      }
+    });
     source.emit(SCOPE);
     expect(received).toEqual([{ [SCOPE]: DOC }]);
+    expect(events).toEqual(['batch']);
+
+    // Deactivation: the double emits the same `no-head` DEACTIVATION event the rpc server
+    // pushes, so SDK tests can drive an activate -> deactivate -> fallback cycle transport-free.
+    await source.engine.deactivate({ scope: SCOPE, expectedGeneration: 1 });
+    source.emit(SCOPE);
+    expect(events).toEqual(['batch', 'no-head']);
+    expect(received).toHaveLength(1);
     stop?.();
 
     await expect(source.provider.pull({ key: 'unmapped.scope' })).rejects.toThrow(/no active runtime head/i);

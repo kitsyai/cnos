@@ -163,6 +163,19 @@ cnos var deactivate agentic.lanes.vinci --expect-generation 3 --store ./.cnos/va
 Removes the active head as a new generation. Consumers fall back to the static `value.*` /
 schema `default` overlay tiers immediately — no redeploy needed on either side.
 
+How a running consumer learns about it depends on its transport, and both paths clear the
+applied snapshot atomically:
+
+- **http** — the next pull answers `404 {code:"no-head"}` (a poll cycle, or an explicit
+  `refreshVar()` / `refreshVars()`);
+- **rpc** — the commit seam pushes a `no_head` message to every matching subscriber
+  immediately. This push is load-bearing: an rpc source is never polled, so there is no
+  subsequent pull to converge on.
+
+In both cases the SDK drops the runtime tier for the scope (and anything nested beneath it),
+fires `watch` callbacks with the static/default snapshot that took over, and reports the
+fallback tier in `varStatus()` with no lingering `revision`/`appliedGeneration`.
+
 ### `rollback` — always a new generation
 
 ```bash

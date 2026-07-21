@@ -120,4 +120,19 @@ describe('rpc cross-toolchain wire fixtures', () => {
     expect(explicit.revision).toBe(canonical.revision);
     expect(explicit.not_modified).toBe(canonical.not_modified);
   });
+
+  it('a no_head blob carries the SCOPE it deactivates (load-bearing since round 2)', () => {
+    // `no_head` is a DEACTIVATION, not a no-op: both SDKs turn it into a runtime-tier removal
+    // for `scope`, so the scope field is the only thing identifying what to clear. A no_head
+    // message with an empty scope is unactionable — pinned here and in
+    // `packages/go/varrpc/wire_test.go` so neither encoder can drop it.
+    for (const file of ['snapshot-batch-no-head.bin', 'snapshot-batch-explicit-defaults.bin']) {
+      const decoded = service.Pull.responseDeserialize(readFileSync(path.join(FIXTURES, file)));
+
+      expect(decoded.no_head).toBe(true);
+      expect(decoded.scope).toBe('agentic');
+      // ...and it is emphatically NOT an ingestable batch: no values ride along.
+      expect(Buffer.from((decoded.values_json ?? Buffer.alloc(0)) as Buffer)).toHaveLength(0);
+    }
+  });
 });

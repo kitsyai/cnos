@@ -7,6 +7,7 @@ import {
   type DocumentSchemaDefinition,
   type NormalizedVarSourceDefinition,
   type ProjectedVarSourceDefinition,
+  type VarPushEvent,
   type VarSnapshotBatch,
   type VarSourceProvider,
 } from '@kitsy/cnos-core';
@@ -143,7 +144,7 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     const { engine, server } = await harness();
     const provider = track(providerFor(server.target));
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
 
     await delay(100); // let the stream establish before the first commit
     await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'key-scoped' }, 0);
@@ -160,7 +161,7 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     const { engine, server } = await harness();
     const provider = track(providerFor(server.target));
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
 
     await delay(100);
     await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: false, model_target_ref: 'g' } }, 0);
@@ -174,7 +175,7 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     const { engine, server } = await harness();
     const provider = track(providerFor(server.target));
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
 
     await delay(100);
     // `agentics` starts with `agentic` but is a different group — the rule requires a `.` boundary.
@@ -192,7 +193,7 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     const { engine, server } = await harness();
     const provider = track(providerFor(server.target));
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ key: 'agentic.lanes.vinci' }], (batch) => received.push(batch));
+    const stop = provider.subscribe?.([{ key: 'agentic.lanes.vinci' }], (event) => { if (event.batch) received.push(event.batch); });
 
     await delay(100);
     // PINNED: matching is subscribed-is-a-prefix-of-committed, so a group commit does not
@@ -206,20 +207,25 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     stop?.();
   }, 20_000);
 
-  it('PINNED: a deactivation pushes a no_head message that the provider drops (never ingested)', async () => {
+  it('a deactivation is FORWARDED as a no-head event (round-2 blocker 1)', async () => {
     const { engine, server } = await harness();
     const provider = track(providerFor(server.target));
-    const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    const events: VarPushEvent[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => events.push(event));
 
     await delay(100);
     await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'r' } }, 0);
-    expect(await until(() => received.length === 1)).toBe(true);
+    expect(await until(() => events.length === 1)).toBe(true);
+    expect(events[0]?.kind).toBe('batch');
 
     await engine.deactivate({ scope: 'agentic', expectedGeneration: 1 });
-    await delay(400);
-    // The no_head push is filtered client-side; the SDK converges on the next pull instead.
-    expect(received).toHaveLength(1);
+
+    // This test previously PINNED the opposite: the provider dropped no_head and the SDK was
+    // said to "converge on the next pull". An rpc source has no poller, so there IS no next
+    // pull — the consumer served the deactivated revision indefinitely. The deactivation must
+    // reach the SDK, carrying the scope it applies to.
+    expect(await until(() => events.length === 2)).toBe(true);
+    expect(events[1]).toEqual({ kind: 'no-head', scope: 'agentic' });
     stop?.();
   }, 20_000);
 });
@@ -313,7 +319,7 @@ describe('Subscribe failure policy', () => {
       }),
     );
     const received: VarSnapshotBatch[] = [];
-    const stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
 
     // The failure is reported — to both seams — as TERMINAL.
     expect(await until(() => providerErrors.length > 0 && sdkErrors.length > 0, 8000)).toBe(true);
@@ -363,7 +369,7 @@ describe('Subscribe failure policy', () => {
     let stop: (() => void) | undefined;
 
     expect(() => {
-      stop = provider.subscribe?.([{ group: 'agentic' }], (batch) => received.push(batch));
+      stop = provider.subscribe?.([{ group: 'agentic' }], (event) => { if (event.batch) received.push(event.batch); });
     }).not.toThrow();
 
     await delay(200);

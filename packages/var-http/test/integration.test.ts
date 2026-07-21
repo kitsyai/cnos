@@ -28,7 +28,17 @@ const documents = { 'agentic-lanes/v1': AGENTIC_SCHEMA };
 const roots: string[] = [];
 const servers: TestVarServer[] = [];
 
-async function fixture(url: string, extra: string[] = []): Promise<string> {
+/**
+ * `requiredAgentic` controls whether `var.agentic.lanes.vinci` is declared REQUIRED. Tests that
+ * never activate an agentic head must set it to false: a required key in a PREFETCH group that
+ * resolves from no tier legitimately fails ready() (ADR acceptance: prefetch mandatory keys fail
+ * ready; the Go SDK has always enforced it via ErrVarRequired).
+ */
+async function fixture(
+  url: string,
+  extra: string[] = [],
+  options: { requiredAgentic?: boolean } = {},
+): Promise<string> {
   const manifest = [
     'version: 1',
     'project:',
@@ -47,7 +57,7 @@ async function fixture(url: string, extra: string[] = []): Promise<string> {
     '    additionalProperties: false',
     'schema:',
     '  var.flags.enabled: { type: boolean, default: false }',
-    '  var.agentic.lanes.vinci: { document: agentic-lanes/v1, required: true }',
+    `  var.agentic.lanes.vinci: { document: agentic-lanes/v1${options.requiredAgentic === false ? '' : ', required: true'} }`,
     '  var.user.IN.coupon: { type: boolean, default: false }',
     ...extra,
     '',
@@ -85,10 +95,60 @@ afterEach(async () => {
 });
 
 describe('var http runtime integration', () => {
+  it('#15 a DEACTIVATION restores the static tier end to end, with no redeploy', async () => {
+    // Round-2 blocker 1, http half. Driven through the real transport and the real engine:
+    // activate -> the runtime tier serves -> engine.deactivate() -> the next pull answers
+    // 404 no-head -> the applied snapshot is CLEARED and ② static takes over. Before the fix
+    // the deactivated revision was served forever.
+    const server = await startTestVarServer({ documents });
+    servers.push(server);
+    await activate(server, 'flags', { 'flags.enabled': true });
+    const root = await fixture(server.url, [], { requiredAgentic: false });
+
+    const runtime = await createCnos({
+      root,
+      plugins: [loader([{ key: 'value.flags.enabled', value: false }])],
+      varSourceProviders: [httpVarSourceProvider],
+    });
+
+    expect(runtime.read('var.flags.enabled')).toBe(true);
+    expect(runtime.varSnapshot?.('flags.enabled')?.source).toBe('runtime');
+
+    const observed: Array<{ source: string; value: unknown }> = [];
+    runtime.watch?.('var.flags.enabled', (next) => observed.push({ source: next.source, value: next.value }));
+
+    await server.engine.deactivate({ scope: 'flags', expectedGeneration: 1 });
+    await runtime.refreshVars?.();
+
+    // ② static `value.flags.enabled` (false) now serves — not the deactivated `true`.
+    expect(runtime.read('var.flags.enabled')).toBe(false);
+    const snapshot = runtime.varSnapshot?.('flags.enabled');
+    expect(snapshot?.source).toBe('static');
+    expect(snapshot?.revision).toBeUndefined();
+    expect(snapshot?.generation).toBeUndefined();
+
+    // The watcher saw the effective value change, with the tier that took over.
+    expect(observed).toEqual([{ source: 'static', value: false }]);
+
+    // varStatus() reports the fallback tier and no longer claims the removed head is applied.
+    const status = runtime.varStatus?.()['flags.enabled'];
+    expect(status?.source).toBe('static');
+    expect(status?.appliedGeneration).toBe(0);
+    expect(status?.revision).toBeUndefined();
+    expect(status?.desiredGeneration).toBeUndefined();
+
+    // ...and re-activating flips it straight back, still with no restart.
+    await activate(server, 'flags', { 'flags.enabled': true }, 2);
+    await runtime.refreshVars?.();
+    expect(runtime.read('var.flags.enabled')).toBe(true);
+
+    await runtime.close?.();
+  });
+
   it('#1 falls back to static/default when the source has no runtime head (404 no-head)', async () => {
     const server = await startTestVarServer({ documents });
     servers.push(server);
-    const root = await fixture(server.url);
+    const root = await fixture(server.url, [], { requiredAgentic: false });
 
     const runtime = await createCnos({
       root,
@@ -122,7 +182,7 @@ describe('var http runtime integration', () => {
   it('#2 an activation becomes visible to a running consumer via the poller (no restart)', async () => {
     const server = await startTestVarServer({ documents });
     servers.push(server);
-    const root = await fixture(server.url);
+    const root = await fixture(server.url, [], { requiredAgentic: false });
 
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [httpVarSourceProvider] });
     expect(runtime.read('var.flags.enabled')).toBe(false); // default, no head yet
@@ -212,7 +272,7 @@ describe('var http runtime integration', () => {
       },
     };
 
-    const root = await fixture(server.url);
+    const root = await fixture(server.url, [], { requiredAgentic: false });
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [countingProvider] });
 
     // First sync read serves the default (fetch is async), and triggers one background fetch.

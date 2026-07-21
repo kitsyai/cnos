@@ -4,6 +4,7 @@ import {
   CnosVarNoHeadError,
   CnosVarNotModifiedError,
   type ProjectedVarSourceDefinition,
+  type VarPushEvent,
   type VarScope,
   type VarSnapshotBatch,
   type VarSourceProvider,
@@ -184,7 +185,7 @@ export function createRpcVarProvider(
    * state exists to advertise. Consumers observe `subscription.state === 'failed'` and may
    * call `refreshVar()` explicitly.
    */
-  function subscribe(scopes: VarScope[], onBatch: (batch: VarSnapshotBatch) => void): () => void {
+  function subscribe(scopes: VarScope[], onEvent: (event: VarPushEvent) => void): () => void {
     const scopeStrings = scopes.map(scopeValue);
     let cancelled = false;
     let current: grpc.ClientReadableStream<WireSnapshotBatch> | undefined;
@@ -255,9 +256,27 @@ export function createRpcVarProvider(
           let settled = false;
 
           stream.on('data', (msg: WireSnapshotBatch) => {
-            // Push-based deactivations (no_head) and no-change acks are not ingestable batches;
-            // the SDK converges on the next pull. Only forward concrete head batches.
-            if (msg.not_modified || msg.no_head) {
+            // A no-change ack carries nothing to apply — the cached snapshot already IS the head.
+            if (msg.not_modified) {
+              return;
+            }
+
+            // A no_head push is a DEACTIVATION: the authority states the scope has no active
+            // head. It must be forwarded, not dropped. An rpc source normally runs no poller, so
+            // dropping it left the consumer serving a deactivated revision forever with no pull
+            // to converge on. It also counts as a delivery: the stream is demonstrably healthy.
+            if (msg.no_head) {
+              delivered = true;
+              const scope = msg.scope || scopeStrings[0];
+
+              if (scope) {
+                try {
+                  onEvent({ kind: 'no-head', scope });
+                } catch {
+                  /* a downstream ingest error never tears down the subscription */
+                }
+              }
+
               return;
             }
 
@@ -275,7 +294,7 @@ export function createRpcVarProvider(
             delivered = true;
 
             try {
-              onBatch(batch);
+              onEvent({ kind: 'batch', ...(msg.scope ? { scope: msg.scope } : {}), batch });
             } catch {
               /* a downstream ingest error never tears down the subscription */
             }

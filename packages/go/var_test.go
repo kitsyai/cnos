@@ -46,6 +46,17 @@ func (server *fakeVarServer) activate(values map[string]any, revision string) {
 	server.hasHead = true
 }
 
+// deactivate drops the active head, exactly as `cnos var deactivate` does: subsequent pulls
+// answer 404 {"code":"no-head"}, which is a definitive answer, not a transport failure.
+func (server *fakeVarServer) deactivate() {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.generation++
+	server.revision = ""
+	server.values = nil
+	server.hasHead = false
+}
+
 func (server *fakeVarServer) setFailure(status int, code string) {
 	server.mu.Lock()
 	defer server.mu.Unlock()

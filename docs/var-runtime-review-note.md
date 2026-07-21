@@ -141,10 +141,58 @@ regression test:
 The Node regression test was verified to fail with the fix reverted, so it genuinely pins the
 behavior rather than passing either way.
 
+## Review round 2 — findings accepted and fixed
+
+All six findings from the second external review pass were valid. Each is fixed in both SDKs with
+a regression test; the two the reviewer asked to be revert-verified were confirmed to FAIL with the
+fix reverted.
+
+1. **[Blocker] Deactivation never cleared an applied runtime snapshot.** A `no-head` only recorded
+   a refresh, so a deactivated revision kept being served; worse, the rpc clients DROPPED `no_head`
+   push events, and an rpc source runs no poller — so an rpc consumer could serve a deactivated
+   revision forever with no pull to converge on. Both SDKs now route every `no-head` (pull AND
+   push, http AND rpc) through an atomic scope removal (`LiveVarStore.removeScope` /
+   `varStore.removeScope`), notify watchers with the static/default snapshot that took over, and
+   clear the head's generation/revision from status. A transport error is still NOT a no-head and
+   retains last-known-good; removal is idempotent. The TS provider `subscribe` callback now takes a
+   `VarPushEvent` (`{ kind: 'batch' | 'no-head', scope?, batch? }`), mirroring Go's existing
+   `VarBatchResult.Status`.
+2. **[Blocker] Node checked required-resolvability only in the exception path.** `fetchScope`
+   returns `no-head` / `rejected` without throwing, so a required prefetch group with no head and
+   no fallback let Node's `ready()` SUCCEED while Go correctly failed. The check now runs after
+   every outcome. `refreshVar` on a required key also rejects on a validation-`rejected` revision
+   (Go's ingest rejection already surfaced as `ErrVarRequired`) — but deliberately NOT on a
+   `no-head`, which is a definitive answer and stays fail-fast lazily, per the pre-existing Go
+   contract in `TestVarRequiredOndemandDoesNotBlockReady`.
+3. **[Blocker] Go did not share an in-flight startup.** `started = true` before the work meant a
+   concurrent `StartVars` returned `nil` early — a false success if attempt #1 then failed.
+   Replaced with a shared `varStartAttempt` (completion channel + result); the attempt is cleared
+   on failure and kept on success. Verified under `-race`.
+4. **[Warning] `StartVars(ctx)` ignored its context.** Prefetch now runs on the caller's ctx (so a
+   deadline actually bounds startup); pollers and subscriptions keep the runtime-lifetime ctx
+   because they must outlive a ctx routinely cancelled the moment `Ready()` returns. Node has no
+   analogous path — its `start()` takes no ctx and its providers own their own timeouts.
+5. **[Warning] Poller capability diverged.** Canonical rule, now identical in both SDKs and
+   documented: poll only when the provider does NOT implement `subscribe`. A `pollInterval` on a
+   subscribe-capable source is ignored and warned once per source.
+6. **[Warning] Node startup was not transactional.** `VarManager.start()` now rolls back the
+   timers/subscriptions its failed attempt created, so the retry permitted by the round-1 latch fix
+   starts clean; `close()` remains correct afterwards. Go has no equivalent hazard — its startup
+   creates nothing until after the last fallible step.
+
+Fixture/doc follow-through: the existing `snapshot-batch-no-head.bin` already carried the `scope`
+field that is now load-bearing, so both wire tests were extended to pin its presence rather than
+adding new bytes.
+
 ## Pinned behaviors (encoded as contract where the design was silent)
 
 Worth a reviewer's judgement — these were decided by observing the code, not from first principles:
 
+- ~~A deactivation "delivers a batch with the key absent"~~ — **retired in round 2.** No transport
+  emits that; it was a synthetic stand-in that made the acceptance-#15 test pass against a store
+  that never cleared anything. The real representation is a `no-head` → scope removal.
+- ~~The rpc provider drops `no_head` pushes and "the SDK converges on the next pull"~~ — **retired
+  in round 2**: an rpc source has no poller, so there is no next pull.
 - **Out-of-order push conflict rule is last-write-wins** in both SDKs; there is no generation or
   revision comparison on ingest. The ADR's earlier "highest revision wins" idea is *not* what ships.
 - Freshness edges are strict: `fresh` *at* ttl, `stale` *at* lease. Negative age (clock skew) → fresh.

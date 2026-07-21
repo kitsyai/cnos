@@ -1,5 +1,7 @@
+import { CnosVarNoHeadError } from '@kitsy/cnos-core';
 import type {
   DocumentSchemaDefinition,
+  VarPushEvent,
   VarScope,
   VarSnapshotBatch,
   VarSourceProvider,
@@ -88,7 +90,11 @@ export interface InMemoryVarSource {
   provider: VarSourceProvider;
   store: VarStore;
   engine: VarEngine;
-  /** Push the current head batch for a scope to all active subscribers. */
+  /**
+   * Push the scope's current state to all active subscribers: the head batch when one is
+   * active, or a `no-head` DEACTIVATION event when the scope has no head — mirroring what the
+   * rpc server emits on `engine.deactivate`.
+   */
   emit(scope: string): void;
 }
 
@@ -99,14 +105,17 @@ export interface InMemoryVarSource {
 export function createInMemoryVarSource(options: { documents?: Record<string, DocumentSchemaDefinition> } = {}): InMemoryVarSource {
   const store = memoryStore();
   const engine = createVarEngine(store, { ...(options.documents ? { documents: options.documents } : {}) });
-  const subscribers = new Set<(batch: VarSnapshotBatch) => void>();
+  const subscribers = new Set<(event: VarPushEvent) => void>();
 
   const provider: VarSourceProvider = {
     async pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch> {
       const head = store.head(scopeKey(scope));
 
       if (!head) {
-        throw new Error(`No active runtime head for var scope "${scopeKey(scope)}".`);
+        // Same contract as http `404 {code:"no-head"}` and rpc `no_head`: a definitive "there is
+        // no active head", which the SDK turns into a runtime-tier removal (NOT a transport
+        // failure, which would retain last-known-good).
+        throw new CnosVarNoHeadError(scopeKey(scope));
       }
 
       if (knownRevision !== undefined && knownRevision === head.revision) {
@@ -115,9 +124,9 @@ export function createInMemoryVarSource(options: { documents?: Record<string, Do
 
       return toBatch(head);
     },
-    subscribe(_scopes: VarScope[], onBatch: (batch: VarSnapshotBatch) => void): () => void {
-      subscribers.add(onBatch);
-      return () => subscribers.delete(onBatch);
+    subscribe(_scopes: VarScope[], onEvent: (event: VarPushEvent) => void): () => void {
+      subscribers.add(onEvent);
+      return () => subscribers.delete(onEvent);
     },
     async close(): Promise<void> {
       subscribers.clear();
@@ -130,15 +139,12 @@ export function createInMemoryVarSource(options: { documents?: Record<string, Do
     engine,
     emit(scope: string): void {
       const head = store.head(scope);
-
-      if (!head) {
-        return;
-      }
-
-      const batch = toBatch(head);
+      const event: VarPushEvent = head
+        ? { kind: 'batch', scope, batch: toBatch(head) }
+        : { kind: 'no-head', scope };
 
       for (const listener of subscribers) {
-        listener(batch);
+        listener(event);
       }
     },
   };

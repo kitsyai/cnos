@@ -66,13 +66,8 @@ export function createSingletonVarSupport(options: SingletonVarSupportOptions): 
     return value;
   }
 
-  function varSnapshot(key: string): ResolvedVarSnapshot {
-    const runtimeSnapshot = manager.snapshot(key);
-
-    if (runtimeSnapshot) {
-      return runtimeSnapshot;
-    }
-
+  /** The NON-runtime tiers only (② static → ③ default) — see the core runtime's twin. */
+  function fallbackVarSnapshot(key: string): ResolvedVarSnapshot {
     const staticValue = options.readStaticValue(toValueOverlayKey(key));
 
     if (staticValue !== undefined) {
@@ -82,7 +77,18 @@ export function createSingletonVarSupport(options: SingletonVarSupportOptions): 
     return { value: options.schema[key]?.default, source: 'default', freshness: 'fresh' };
   }
 
+  function varSnapshot(key: string): ResolvedVarSnapshot {
+    const runtimeSnapshot = manager.snapshot(key);
+
+    if (runtimeSnapshot) {
+      return runtimeSnapshot;
+    }
+
+    return fallbackVarSnapshot(key);
+  }
+
   manager.setOverlayReader((key) => readVar(key, false));
+  manager.setFallbackSnapshotReader((key) => fallbackVarSnapshot(key));
 
   return {
     manager,
@@ -91,10 +97,10 @@ export function createSingletonVarSupport(options: SingletonVarSupportOptions): 
     varSource: (sourceId) => options.varSources[sourceId],
     ingest: (sourceId, scope, batch) => manager.ingest(sourceId, scope, batch),
     resolveSecret: options.resolveSecret,
+    // Transactional: a failed attempt rolls back the timers/subscriptions it created, so the
+    // retry the round-1 latch fix permits cannot duplicate them.
     async start() {
-      await manager.prefetch();
-      manager.startPollers();
-      manager.startSubscriptions();
+      await manager.start();
     },
   };
 }
