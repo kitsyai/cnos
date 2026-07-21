@@ -132,10 +132,18 @@ Worth a reviewer's judgement — these were decided by observing the code, not f
 
 ## Known gaps (accepted, not blockers)
 
-1. **`go test -race` has never been run** — no cgo/C toolchain on the dev machine. Highest-value
-   targets: `TestVarAtomicSnapshotsUnderConcurrency`, `TestVarWatchPrefixAndExactMatching`,
-   `TestSubscribePinnedAuthFailureRetriesForever`, and `varrpc`'s subscribe/close tests.
-   **Recommend running on macOS/Linux before or immediately after publish.**
+1. ~~`go test -race` has never been run~~ — **RESOLVED.** Run under WSL2 Debian (Go 1.26.3,
+   gcc 14.2.0) via `bash scripts/race-check.sh`: **PASS on both Go modules, no data races
+   detected.** Re-run it in CI on any Linux/macOS runner; it self-locates Go and fails loudly
+   if no C compiler is present.
+
+   That run also exposed a genuine test-portability bug, now fixed (`a65b574`): several tests
+   dialed hardcoded low ports (`127.0.0.1:1`, `:9`) assuming an instant `ECONNREFUSED`. WSL2's
+   localhost forwarding swallows low-port connections — they hang until timeout instead of
+   refusing — so `TestSubscribeRetriesAreBoundedByTheFailureCap` failed deterministically there
+   while passing on Windows. Tests now reserve an ephemeral port and close it, which refuses on
+   every platform. This was a test bug, not a product defect: the bounded-retry policy itself
+   was never exercised because the connection never failed.
 2. **int64 generations above 2^53−1 are rejected, not carried.** Loud failure instead of silent
    corruption, but an authority serving both SDKs must keep generations below that bound.
 3. **`ws`/`sse` are schema-only** — accepted by the manifest enum, no provider exists.
@@ -157,7 +165,7 @@ Worth a reviewer's judgement — these were decided by observing the code, not f
 | `packages/go`: build / vet / test | pass |
 | `packages/go/varrpc`: build / vet / test | pass |
 | `GOWORK=off go build ./...` (root Go) | pass — still stdlib-only, `go.mod` requires only `gopkg.in/yaml.v3` |
-| `go test -race` | **NOT RUN** — no cgo toolchain |
+| `go test -race` (both modules) | **PASS** — no data races (WSL2 Debian, Go 1.26.3 + gcc 14.2.0; `bash scripts/race-check.sh`) |
 | `pnpm -r lint` | passes except `vault-testkit` ("No files matching pattern test" — pre-existing, no test dir) |
 
 ## Dependency review
