@@ -1088,7 +1088,10 @@ func (variables *varRuntime) statusDoc() map[string]VarStatusEntry {
 	result := map[string]VarStatusEntry{}
 	for fullKey := range keys {
 		group := groupFromVarKey(fullKey)
-		entry := VarStatusEntry{Source: VarSourceDefault, Freshness: FreshnessFresh}
+		// `none` until a tier claims the key: a key that resolves from NO tier must not be
+		// reported as served by the `default` tier it has no default in. Matches the Node
+		// SDK's `source: 'none'` and the ADR's definition of the field.
+		entry := VarStatusEntry{Source: VarSourceNone, Freshness: FreshnessFresh}
 		if snap, ok := variables.snapshot(fullKey); ok {
 			entry.Source = snap.Source
 			entry.Freshness = snap.Freshness

@@ -12,7 +12,13 @@ type VarSource string
 const (
 	VarSourceRuntime VarSource = "runtime" // active, validated runtime revision
 	VarSourceStatic  VarSource = "static"  // statically projected value.<group>.<rest>
-	VarSourceDefault VarSource = "default"  // schema rule default
+	VarSourceDefault VarSource = "default" // schema rule default
+	// VarSourceNone is a STATUS-ONLY tier: the key resolves from no tier at all (no runtime
+	// head, no static value, no declared default). Snapshots never carry it — VarSnapshot
+	// reports ok=false instead. Canonical per the ADR's deactivation section, which defines
+	// varStatus()'s `source` as "'static' | 'default', or 'none' when the key resolves
+	// nowhere"; the Node SDK has always reported 'none' here.
+	VarSourceNone VarSource = "none"
 )
 
 // Freshness describes a runtime snapshot's position within its ttl/lease window.

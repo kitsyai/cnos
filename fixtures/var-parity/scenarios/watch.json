@@ -1,0 +1,216 @@
+[
+  {
+    "name": "watchers-fire-on-content-change",
+    "axis": "watch",
+    "why": "baseline: a validated commit that changes the effective value wakes its watchers exactly once",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 2,
+          "revision": "sha256:r2",
+          "effectiveAt": "2026-07-20T00:01:00Z",
+          "values": { "policy.mode": "v2" }
+        }
+      },
+      { "action": "expect", "watch": { "id": "w1", "fires": [{ "source": "runtime", "value": "v2" }] } }
+    ]
+  },
+  {
+    "name": "a-replayed-revision-with-a-new-generation-wakes-nobody",
+    "axis": "watch",
+    "why": "the 11th W5b defect: dispatch is gated on the content-addressed REVISION alone, never on (revision, generation)",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 99,
+          "revision": "sha256:r1",
+          "effectiveAt": "2026-07-20T00:09:00Z",
+          "values": { "policy.mode": "v1" }
+        }
+      },
+      { "action": "expect", "watch": { "id": "w1", "fires": [] } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "appliedGeneration": 99 } }
+    ]
+  },
+  {
+    "name": "unsubscribing-suppresses-later-fires",
+    "axis": "watch",
+    "why": "the stop function must be effective immediately, in both SDKs",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      { "action": "unwatch", "id": "w1" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 2,
+          "revision": "sha256:r2",
+          "effectiveAt": "2026-07-20T00:01:00Z",
+          "values": { "policy.mode": "v2" }
+        }
+      },
+      { "action": "expect", "watch": { "id": "w1", "fires": [] } }
+    ]
+  },
+  {
+    "name": "a-reentrant-commit-is-dispatched-after-the-current-event",
+    "axis": "watch",
+    "why": "round-3 finding 6: one event reaches EVERY watcher before the next starts, so a reactivation raised inside a deactivation callback cannot make a later watcher skip the fallback transition",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      {
+        "action": "watch",
+        "id": "w1",
+        "key": "var.policy.mode",
+        "then": {
+          "action": "push",
+          "scope": "policy",
+          "event": {
+            "kind": "batch",
+            "generation": 2,
+            "revision": "sha256:r2",
+            "effectiveAt": "2026-07-20T00:02:00Z",
+            "values": { "policy.mode": "reactivated" }
+          }
+        }
+      },
+      { "action": "watch", "id": "w2", "key": "var.policy.mode" },
+      { "action": "push", "scope": "policy", "event": { "kind": "no-head" } },
+      {
+        "action": "expect",
+        "watch": {
+          "id": "w2",
+          "fires": [
+            { "source": "static", "value": "static-value" },
+            { "source": "runtime", "value": "reactivated" }
+          ]
+        }
+      },
+      {
+        "action": "expect",
+        "watch": {
+          "id": "w1",
+          "fires": [
+            { "source": "static", "value": "static-value" },
+            { "source": "runtime", "value": "reactivated" }
+          ]
+        }
+      },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "reactivated", "source": "runtime" } }
+    ]
+  },
+  {
+    "name": "a-prefix-watcher-observes-every-key-under-its-prefix",
+    "axis": "watch",
+    "why": "`var.<group>.*` is a documented watch form; both SDKs must deliver the same key set",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": {
+        "var.policy.mode": { "type": "string" },
+        "var.policy.other": { "type": "string" }
+      }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.*" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 1,
+          "revision": "sha256:r1",
+          "effectiveAt": "2026-07-20T00:00:00Z",
+          "values": { "policy.mode": "v1", "policy.other": "o1" }
+        }
+      },
+      {
+        "action": "expect",
+        "watch": {
+          "id": "w1",
+          "unordered": true,
+          "fires": [
+            { "source": "runtime", "value": "v1" },
+            { "source": "runtime", "value": "o1" }
+          ]
+        }
+      }
+    ]
+  }
+]

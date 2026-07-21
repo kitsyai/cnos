@@ -1,0 +1,135 @@
+[
+  {
+    "name": "status-shape-for-an-applied-runtime-head",
+    "axis": "status",
+    "why": "delta 7: varStatus() is keyed by the prefix-stripped full var key and reports the tier actually serving it",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch", "lease": "10m" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 12,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      {
+        "action": "expect",
+        "status": {
+          "key": "var.policy.mode",
+          "source": "runtime",
+          "freshness": "fresh",
+          "appliedGeneration": 12,
+          "revision": true,
+          "desiredGeneration": true,
+          "lastError": false,
+          "lastRejected": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "status-for-a-never-fetched-key-names-the-fallback-tier",
+    "axis": "status",
+    "why": "delta 16: with no runtime head status names static/default, never a phantom `runtime`",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "ondemand" } },
+      "schema": {
+        "var.policy.mode": { "type": "string" },
+        "var.policy.other": { "type": "string", "default": "d" }
+      }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      {
+        "action": "expect",
+        "status": {
+          "key": "var.policy.mode",
+          "source": "static",
+          "freshness": "fresh",
+          "appliedGeneration": 0,
+          "revision": false,
+          "desiredGeneration": false
+        }
+      },
+      { "action": "expect", "status": { "key": "var.policy.other", "source": "default", "appliedGeneration": 0, "revision": false } }
+    ]
+  },
+  {
+    "name": "status-for-a-key-that-resolves-from-no-tier-at-all",
+    "axis": "status",
+    "why": "the ADR names this state `none`; it is the residual Node/Go status divergence",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "ondemand" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      {
+        "action": "expect",
+        "status": { "key": "var.policy.mode", "source": "none", "appliedGeneration": 0, "revision": false },
+        "note": "ADR, deactivation section: varStatus() reports `source: 'static' | 'default'`, or `'none'` when the key resolves nowhere. Go used to report `default` here; fixed in this suite's commit."
+      },
+      {
+        "action": "expect",
+        "status": "divergent",
+        "note": "DIVERGENCE-3: the `freshness` reported for a key that resolves from NO tier. Node reports the sentinel `none`; Go's Freshness enum has no such member and reports `fresh`. The ADR's freshness table only covers runtime snapshots and says nothing about a key with no value at all, so neither side is provably wrong. Widening the Go enum is a public API change; narrowing Node's would drop information.",
+        "adr": "docs/cnos-runtime-vars.md - 'Freshness transitions (canonical)' (runtime snapshots only) and 'Observability'",
+        "observed": {
+          "node": { "status": { "key": "var.policy.mode", "freshness": "none" } },
+          "go": { "status": { "key": "var.policy.mode", "freshness": "fresh" } }
+        }
+      }
+    ]
+  },
+  {
+    "name": "status-after-a-deactivation-never-masquerades-as-applied",
+    "axis": "status",
+    "why": "round-2 blocker 1: a removed head clears revision/desiredGeneration and appliedGeneration returns to 0",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 12,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "status": { "key": "var.policy.mode", "source": "runtime", "appliedGeneration": 12, "revision": true } },
+      { "action": "push", "scope": "policy", "event": { "kind": "no-head" } },
+      {
+        "action": "expect",
+        "status": {
+          "key": "var.policy.mode",
+          "source": "static",
+          "freshness": "fresh",
+          "appliedGeneration": 0,
+          "revision": false,
+          "desiredGeneration": false,
+          "lastError": false
+        }
+      }
+    ]
+  }
+]

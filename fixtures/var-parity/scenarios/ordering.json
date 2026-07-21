@@ -1,0 +1,138 @@
+[
+  {
+    "name": "a-pull-superseded-by-a-push-is-dropped",
+    "axis": "ordering",
+    "why": "round-3 finding 5: the per-scope operation epoch. A stale pull must never reintroduce a head a push already replaced.",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "v1", "source": "runtime" } },
+      { "action": "blockPull", "scope": "policy" },
+      {
+        "action": "setSource",
+        "scope": "policy",
+        "response": {
+          "kind": "head",
+          "generation": 2,
+          "revision": "sha256:r2",
+          "effectiveAt": "2026-07-20T00:01:00Z",
+          "values": { "policy.mode": "v2-from-pull" }
+        }
+      },
+      { "action": "refreshVarsAsync" },
+      { "action": "awaitPullIssued", "scope": "policy", "count": 2, "timeoutMs": 3000 },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 3,
+          "revision": "sha256:r3",
+          "effectiveAt": "2026-07-20T00:02:00Z",
+          "values": { "policy.mode": "v3-from-push" }
+        }
+      },
+      { "action": "releasePull", "scope": "policy" },
+      { "action": "awaitRefresh" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "v3-from-push", "source": "runtime" } }
+    ]
+  },
+  {
+    "name": "a-pulled-no-head-superseded-by-a-push-is-dropped",
+    "axis": "ordering",
+    "why": "the dangerous half of the epoch rule: a delayed 404 must not clear a newer pushed activation",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "blockPull", "scope": "policy" },
+      { "action": "setSource", "scope": "policy", "response": { "kind": "no-head" } },
+      { "action": "refreshVarsAsync" },
+      { "action": "awaitPullIssued", "scope": "policy", "count": 2, "timeoutMs": 3000 },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 9,
+          "revision": "sha256:r9",
+          "effectiveAt": "2026-07-20T00:02:00Z",
+          "values": { "policy.mode": "v9-from-push" }
+        }
+      },
+      { "action": "releasePull", "scope": "policy" },
+      { "action": "awaitRefresh" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "v9-from-push", "source": "runtime" } }
+    ]
+  },
+  {
+    "name": "push-versus-push-is-last-write-wins",
+    "axis": "ordering",
+    "why": "pinned contract, DISTINCT from the pull/push rule: no generation or revision comparison on ingest",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 50,
+          "revision": "sha256:r50",
+          "effectiveAt": "2026-07-20T00:05:00Z",
+          "values": { "policy.mode": "newest-generation" }
+        }
+      },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 2,
+          "revision": "sha256:r2",
+          "effectiveAt": "2026-07-20T00:00:00Z",
+          "values": { "policy.mode": "older-generation-arrives-last" }
+        }
+      },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "older-generation-arrives-last", "source": "runtime" } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "appliedGeneration": 2 } }
+    ]
+  }
+]

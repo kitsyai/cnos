@@ -1,5 +1,10 @@
 # var.* cross-SDK wire fixtures
 
+> Wire shapes only. The **semantics** (startup outcome, overlay tier of a read, deactivation,
+> scope replacement, ordering, watcher dispatch, freshness, `varStatus()`, close) are pinned
+> separately by the shared scenario spec in [`../var-parity/`](../var-parity/README.md). Wire
+> drift and semantic drift both break CI, and they break it in different places.
+
 Canonical wire-shape fixtures for the `var.*` runtime-variables feature, asserted
 **parse-equivalent in both toolchains** so the TypeScript server/SDK and the Go SDK can
 never silently drift:

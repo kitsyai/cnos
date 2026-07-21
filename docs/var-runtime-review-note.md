@@ -47,6 +47,27 @@ namespaces like `process.*`). No aliases.
 Reviewing W1 → W2 → W4 → W3 → W4.5 in order is the intended narrative; W5b/W5d are best read as a
 pair (the pinned test and its fix).
 
+## Shared SEMANTIC parity suite (post-round-3)
+
+Every round found Node and Go disagreeing on lifecycle, and the wire fixtures structurally cannot
+catch that. `fixtures/var-parity/` now pins the semantics the same way `fixtures/var-cross-sdk/`
+pins the wire: **one declarative JSON scenario set, executed by a thin interpreter in each SDK**
+(`packages/cnos/test/var-parity.test.ts`, `packages/go/var_parity_test.go`), asserting only public
+observable results. 44 scenarios across startup, read, deactivation, scope replacement, ordering,
+watcher dispatch, freshness, `varStatus()` and close. Both run in the ordinary suites.
+
+Outcomes:
+
+- **1 fix**: Go's `varStatus()` reported `source: "default"` for a key that resolves from NO tier;
+  the ADR names that state `none` (as Node always did). Fixed (`VarSourceNone`).
+- **4 divergences the ADR does not settle** — recorded in the spec with BOTH observed behaviors,
+  reported without failing the build, and escalated as ADR "Open decisions" 6-9: startup error
+  KIND on a transport failure; `refreshVars()` failure reporting (and its group scope);
+  `varStatus().freshness` for a nowhere-resolving key; and that Node's `close()` cannot cancel an
+  in-flight prefetch (the TS provider contract has no cancellation signal).
+- **Non-vacuity proven** by reverting one behavior per SDK (Go scope-replacement → merge; Node's
+  round-3 blocker-3 early return) and confirming exactly the corresponding scenario fails.
+
 ## Architecture in one screen
 
 **Three planes.** Authoring/control (immutable revisions, validation, atomic activation,

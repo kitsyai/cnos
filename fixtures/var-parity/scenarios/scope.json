@@ -1,0 +1,117 @@
+[
+  {
+    "name": "revision-replaces-scope-and-drops-vanished-keys",
+    "axis": "scope",
+    "why": "round-3 blocker 4: Go merged batches, so a REMOVED allowlist entry kept being served. A revision replaces its scope.",
+    "projection": {
+      "values": { "policy.extra": "static-extra" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": {
+        "var.policy.mode": { "type": "string" },
+        "var.policy.extra": { "type": "string" }
+      }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live", "policy.extra": "runtime-extra" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "read", "key": "var.policy.extra" },
+      { "action": "expect", "read": { "found": true, "value": "runtime-extra", "source": "runtime" } },
+      { "action": "watch", "id": "w1", "key": "var.policy.extra" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 2,
+          "revision": "sha256:r2",
+          "effectiveAt": "2026-07-20T00:01:00Z",
+          "values": { "policy.mode": "live2" }
+        }
+      },
+      { "action": "read", "key": "var.policy.extra" },
+      { "action": "expect", "read": { "found": true, "value": "static-extra", "source": "static", "freshness": "fresh" } },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live2", "source": "runtime" } },
+      { "action": "expect", "watch": { "id": "w1", "fires": [{ "source": "static", "value": "static-extra" }] } }
+    ]
+  },
+  {
+    "name": "coverage-is-per-key-not-per-scope",
+    "axis": "scope",
+    "why": "round-3 delta 17c: a key inside a committed scope that the revision never carried has NO runtime tier (Node reported source:'runtime', value:undefined)",
+    "projection": {
+      "values": { "policy.other": "static-other" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": {
+        "var.policy.mode": { "type": "string" },
+        "var.policy.other": { "type": "string" }
+      }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "read", "key": "var.policy.other" },
+      { "action": "expect", "read": { "found": true, "value": "static-other", "source": "static", "freshness": "fresh" } },
+      { "action": "expect", "status": { "key": "var.policy.other", "source": "static", "appliedGeneration": 0, "revision": false } },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime" } }
+    ]
+  },
+  {
+    "name": "an-invalid-revision-never-replaces-last-known-good",
+    "axis": "scope",
+    "why": "acceptance #4/#5: whole-batch validation happens BEFORE the swap; the rejection is observable in status",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.enabled": { "type": "boolean" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.enabled": true }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.enabled" },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 2,
+          "revision": "sha256:bad",
+          "effectiveAt": "2026-07-20T00:01:00Z",
+          "values": { "policy.enabled": "not-a-boolean" }
+        }
+      },
+      { "action": "read", "key": "var.policy.enabled" },
+      { "action": "expect", "read": { "found": true, "value": true, "source": "runtime" } },
+      { "action": "expect", "watch": { "id": "w1", "fires": [] } },
+      { "action": "expect", "status": { "key": "var.policy.enabled", "source": "runtime", "appliedGeneration": 1, "lastRejected": true } }
+    ]
+  }
+]

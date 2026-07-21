@@ -1,0 +1,188 @@
+[
+  {
+    "name": "deactivate-via-pull-clears-runtime-tier",
+    "axis": "deactivation",
+    "why": "round-2 blocker 1 / acceptance #15: a pulled no-head is an atomic scope removal, watchers fire with the tier that took over",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 4,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime" } },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      { "action": "setSource", "scope": "policy", "response": { "kind": "no-head" } },
+      { "action": "refreshVars" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static", "freshness": "fresh" } },
+      { "action": "expect", "watch": { "id": "w1", "fires": [{ "source": "static", "value": "static-value" }] } },
+      {
+        "action": "expect",
+        "status": {
+          "key": "var.policy.mode",
+          "source": "static",
+          "freshness": "fresh",
+          "appliedGeneration": 0,
+          "revision": false,
+          "desiredGeneration": false,
+          "lastError": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "deactivate-via-push-clears-runtime-tier-and-is-idempotent",
+    "axis": "deactivation",
+    "why": "round-2 blocker 1: a PUSHED no-head must clear too (an rpc source runs no poller); a repeat wakes nobody",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 4,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      { "action": "push", "scope": "policy", "event": { "kind": "no-head" } },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static" } },
+      { "action": "push", "scope": "policy", "event": { "kind": "no-head" } },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static" } },
+      { "action": "expect", "watch": { "id": "w1", "fires": [{ "source": "static", "value": "static-value" }] } }
+    ]
+  },
+  {
+    "name": "deactivate-then-reactivate-restores-runtime-tier",
+    "axis": "deactivation",
+    "why": "acceptance #15 end to end: static -> runtime -> static -> runtime with no redeploy",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static" } },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 1,
+          "revision": "sha256:r1",
+          "effectiveAt": "2026-07-20T00:00:00Z",
+          "values": { "policy.mode": "live" }
+        }
+      },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime" } },
+      { "action": "push", "scope": "policy", "event": { "kind": "no-head" } },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static" } },
+      {
+        "action": "push",
+        "scope": "policy",
+        "event": {
+          "kind": "batch",
+          "generation": 2,
+          "revision": "sha256:r2",
+          "effectiveAt": "2026-07-20T00:00:00Z",
+          "values": { "policy.mode": "live-again" }
+        }
+      },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live-again", "source": "runtime" } }
+    ]
+  },
+  {
+    "name": "transport-error-is-not-a-deactivation",
+    "axis": "deactivation",
+    "why": "acceptance #10: an unreachable remote RETAINS last-known-good; only a definitive no-head clears",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 4,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      { "action": "setSource", "scope": "policy", "response": { "kind": "error", "message": "boom" } },
+      { "action": "refreshVars" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime", "freshness": "fresh" } },
+      { "action": "expect", "watch": { "id": "w1", "fires": [] } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "source": "runtime", "lastError": true } },
+      {
+        "action": "expect",
+        "status": "divergent",
+        "note": "DIVERGENCE-2: refreshVars() on a failing OPTIONAL group resolves in Node (every failure is warned and swallowed) but returns the error in Go. The ADR only says refreshVars 'mirrors refreshSecrets()' and never states whether a partial failure is observable to the caller.",
+        "adr": "docs/cnos-runtime-vars.md - 'Runtime SDK surfaces' (await cnos.refreshVars(); no failure contract)",
+        "observed": {
+          "node": { "refreshOutcome": "ok" },
+          "go": { "refreshOutcome": "error" }
+        }
+      }
+    ]
+  },
+  {
+    "name": "no-head-for-a-scope-with-nothing-applied-is-a-silent-no-op",
+    "axis": "deactivation",
+    "why": "removal is idempotent; a no-head that removes nothing must wake no watcher but still records a successful refresh",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": { "policy": { "kind": "error", "message": "boom" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "watch", "id": "w1", "key": "var.policy.mode" },
+      { "action": "expect", "status": { "key": "var.policy.mode", "lastError": true } },
+      { "action": "setSource", "scope": "policy", "response": { "kind": "no-head" } },
+      { "action": "refreshVars" },
+      { "action": "expect", "watch": { "id": "w1", "fires": [] } },
+      {
+        "action": "expect",
+        "status": { "key": "var.policy.mode", "source": "static", "lastError": false },
+        "note": "round-3 defect 8: Go used to return before updating refresh metadata when a no-head removed nothing, so it kept reporting the stale transport error where Node reported recovery"
+      }
+    ]
+  }
+]

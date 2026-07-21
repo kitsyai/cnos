@@ -1,0 +1,164 @@
+[
+  {
+    "name": "ttl-and-lease-transition-fresh-stale-expired",
+    "axis": "freshness",
+    "why": "canonical freshness table, row 1-3: ttl bounds `fresh`, lease bounds `stale`",
+    "slow": true,
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch", "ttl": "60ms", "lease": "180ms" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "v1", "source": "runtime", "freshness": "fresh" } },
+      { "action": "sleep", "ms": 110 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "v1", "source": "runtime", "freshness": "stale" } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "source": "runtime", "freshness": "stale" } },
+      { "action": "sleep", "ms": 140 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "v1", "source": "runtime", "freshness": "expired" } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "source": "runtime", "freshness": "expired" } }
+    ]
+  },
+  {
+    "name": "ttl-only-goes-stale-and-never-expires",
+    "axis": "freshness",
+    "why": "canonical freshness table, rows 4-5: with no lease there is no expired tier",
+    "slow": true,
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch", "ttl": "50ms" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "sleep", "ms": 250 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "v1", "source": "runtime", "freshness": "stale" } }
+    ]
+  },
+  {
+    "name": "lease-only-expires-with-no-stale-tier",
+    "axis": "freshness",
+    "why": "canonical freshness table, rows 6-7: lease alone is the fresh window and expiry follows it directly",
+    "slow": true,
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch", "lease": "50ms" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "sleep", "ms": 120 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "v1", "source": "runtime", "freshness": "expired" } }
+    ]
+  },
+  {
+    "name": "neither-ttl-nor-lease-stays-fresh-forever",
+    "axis": "freshness",
+    "why": "delta 9: an ABSENT lease never expires (distinct from a declared `lease: 0`)",
+    "slow": true,
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "sleep", "ms": 120 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "v1", "source": "runtime", "freshness": "fresh" } }
+    ]
+  },
+  {
+    "name": "a-declared-zero-lease-expires-immediately",
+    "axis": "freshness",
+    "why": "delta 9, other half: `lease: 0s` is DECLARED and expires at once; presence is tracked from the manifest string",
+    "slow": true,
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch", "lease": "0s" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "v1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "sleep", "ms": 30 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "v1", "source": "runtime", "freshness": "expired" } }
+    ]
+  },
+  {
+    "name": "static-and-default-tiers-never-expire",
+    "axis": "freshness",
+    "why": "ADR: age is measured from a runtime snapshot's observedAt; tiers 2 and 3 are always fresh",
+    "slow": true,
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch", "ttl": "10ms", "lease": "20ms" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "sleep", "ms": 80 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "value": "static-value", "source": "static", "freshness": "fresh" } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "source": "static", "freshness": "fresh" } }
+    ]
+  }
+]

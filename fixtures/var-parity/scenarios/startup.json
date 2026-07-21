@@ -1,0 +1,257 @@
+[
+  {
+    "name": "prefetch-required-head-present",
+    "axis": "startup",
+    "why": "baseline: an applied head serves tier ① and startup succeeds",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 7,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime", "freshness": "fresh" } }
+    ]
+  },
+  {
+    "name": "prefetch-required-no-head-with-static-fallback",
+    "axis": "startup",
+    "why": "round-2 blocker 2 / round-3 blocker 3 axis: a no-head is an ANSWER; required is satisfied by tier ②",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static", "freshness": "fresh" } }
+    ]
+  },
+  {
+    "name": "prefetch-required-no-head-with-default-only",
+    "axis": "startup",
+    "why": "tier ③ alone satisfies a required prefetch key",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true, "default": "from-default" } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "from-default", "source": "default", "freshness": "fresh" } }
+    ]
+  },
+  {
+    "name": "prefetch-required-no-head-no-fallback-fails-start",
+    "axis": "startup",
+    "why": "round-2 blocker 2: fetchScope returns no-head WITHOUT throwing; the required check must still run",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "error", "startErrorKind": "required" }
+    ]
+  },
+  {
+    "name": "prefetch-required-not-modified-no-fallback-fails-start",
+    "axis": "startup",
+    "why": "`not-modified` is the other non-throwing prefetch outcome that leaves a required key unresolved",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "not-modified" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "error", "startErrorKind": "required" }
+    ]
+  },
+  {
+    "name": "prefetch-required-not-modified-with-static-fallback",
+    "axis": "startup",
+    "why": "a 304 with a live static tier is a legal boot",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "not-modified" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static", "freshness": "fresh" } }
+    ]
+  },
+  {
+    "name": "prefetch-required-transport-error-no-fallback-fails-start",
+    "axis": "startup",
+    "why": "a thrown transport error with nothing to fall back to must fail startup in BOTH SDKs; the error KIND is a known divergence",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "error", "message": "boom" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "error" },
+      {
+        "action": "expect",
+        "status": "divergent",
+        "note": "DIVERGENCE-1: on a transport failure Node rethrows the raw transport error (kind `other`) while Go wraps it as ErrVarRequired (kind `required`). The ADR requires only that startup FAIL; it does not name the error type, so neither side is provably wrong.",
+        "adr": "docs/cnos-runtime-vars.md - 'Required-key enforcement on prefetch' (fails ready()/StartVars; no error type specified)",
+        "observed": {
+          "node": { "startErrorKind": "other" },
+          "go": { "startErrorKind": "required" }
+        }
+      }
+    ]
+  },
+  {
+    "name": "prefetch-required-transport-error-with-static-fallback",
+    "axis": "startup",
+    "why": "acceptance #10: an unreachable remote is survivable while every required key resolves from ②/③",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "error", "message": "boom" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static", "freshness": "fresh" } },
+      { "action": "expect", "status": { "key": "var.policy.mode", "source": "static", "lastError": true } }
+    ]
+  },
+  {
+    "name": "prefetch-optional-no-head-no-fallback",
+    "axis": "startup",
+    "why": "an OPTIONAL key that resolves nowhere never gates startup",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": false, "source": "default" } }
+    ]
+  },
+  {
+    "name": "prefetch-required-missing-provider-module-no-fallback-fails-start",
+    "axis": "startup",
+    "why": "round-3 blocker 3: a missing transport module is WARNED, never a waiver of required enforcement",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "missing" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": {},
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "error", "startErrorKind": "required" }
+    ]
+  },
+  {
+    "name": "prefetch-required-missing-provider-module-with-static-fallback",
+    "axis": "startup",
+    "why": "round-3 blocker 3, other half: the deployment gap is non-fatal while ②/③ still resolve every required key",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "missing" } },
+      "vars": { "policy": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": {},
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static", "freshness": "fresh" } }
+    ]
+  },
+  {
+    "name": "ondemand-required-no-head-no-fallback-does-not-gate-start",
+    "axis": "startup",
+    "why": "round-1 blocker 1: ondemand is fail-fast LAZILY; it never gates ready()/StartVars",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "ondemand" } },
+      "schema": { "var.policy.mode": { "type": "string", "required": true } }
+    },
+    "source": { "policy": { "kind": "no-head" } },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": false, "source": "default" } }
+    ]
+  },
+  {
+    "name": "ondemand-first-read-serves-fallback-then-converges",
+    "axis": "read",
+    "why": "ADR: a sync read never blocks; it serves ②/③ and triggers ONE background group fetch",
+    "projection": {
+      "values": { "policy.mode": "static-value" },
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "policy": { "source": "svc", "mode": "ondemand" } },
+      "schema": { "var.policy.mode": { "type": "string" } }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 3,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "static-value", "source": "static" } },
+      { "action": "awaitRead", "key": "var.policy.mode", "source": "runtime", "timeoutMs": 3000 },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime", "freshness": "fresh" } }
+    ]
+  }
+]

@@ -565,6 +565,22 @@ Recorded during the docs pass; the code is authoritative where these differ from
     event**; both SDKs already treat it as an ordinary batch/`no_head`, and the content-addressed
     revision gate in each store suppresses a duplicate watcher fire when it repeats a known revision.
 
+19. **Semantics are fixture-pinned too, as of the parity suite.** `fixtures/var-cross-sdk/` pins the
+    WIRE; `fixtures/var-parity/` pins the observable SEMANTICS. It is one declarative scenario set
+    (JSON) executed by a thin interpreter in each SDK — `packages/cnos/test/var-parity.test.ts` and
+    `packages/go/var_parity_test.go` — against an in-process fake source, asserting only public
+    results (value, tier, freshness, start/refresh outcome KIND, `varStatus()` fields, watcher fire
+    sequences). It covers the axes every one of the 16 review findings lived on: startup outcome ×
+    required × mode × head/no-head/not-modified/transport-error/missing-module × fallback tier,
+    deactivation via pull and push, scope replacement and per-key coverage, mixed pull/push
+    ordering, watcher dispatch (including a reentrant commit), the freshness table, `varStatus()`
+    shape per state, and the close/startup lifecycle. Both runners are part of the ordinary suites.
+    One product fix came out of it: **Go's `varStatus()` now reports `source: "none"`** for a key
+    that resolves from no tier at all (it reported `default`), matching Node and this document's
+    deactivation section. Four behaviors where the SDKs still differ and the ADR does not decide
+    are recorded IN the spec as divergent expectations (each side pinned to what it actually does,
+    reported but not failed) — see Open decisions 7-10.
+
 ## Open decisions
 
 1. ~~Server topology~~ — **resolved**: library-first embeddable var-server, standalone `cnos var serve` as a thin wrapper (see Server topology section). Never a sidecar process. Storage-direct SDK reads (polling GCS/Firestore directly, no server) may come later as a simple mode.
@@ -572,4 +588,29 @@ Recorded during the docs pass; the code is authoritative where these differ from
 3. **Where the control plane's authz identity comes from** (workload identity federation vs static tokens via secret refs) — likely deployment-specific config on `var-server`, pluggable like vault auth. The v1 `authorize` hook is the seam.
 4. ~~Lease vs ttl naming/merge~~ — **resolved**: two fields with distinct semantics (`ttl` = ondemand staleness bound, `lease` = fail-closed freshness window). See the freshness transition table.
 5. ~~Subscribe give-up policy~~ — **resolved (W5d)**: gRPC `UNAUTHENTICATED` / `PERMISSION_DENIED` are **terminal** (never reconnected — the same credentials can only be refused again); transport failures retry with capped exponential backoff + jitter but are **bounded** by a consecutive-failure cap (8), after which the subscription also becomes terminal. Every failure is reported through the provider's `onError` option and the SDK's `onSubscriptionError` seam, surfacing as `subscription: { state: 'failed' | 'retrying' | 'active' }` in `varStatus()` / `VarStatus()`. Nothing throws out of a background stream and nothing fails silently. A terminal subscription deliberately does **not** fall back to periodic pulls: the same credentials would be refused by `Pull`, and a silent poll loop would hide the very failure the terminal state exists to advertise — consumers alert on `failed` and may call `refreshVar()` explicitly. Server-side, an auth-rejected `Subscribe` now ends the stream with `call.emit('error', status)`; `call.destroy(status)` tore the call down locally without ever putting a status on the wire, which is what left Node clients hanging silently.
-6. **`publish-go.yml` does not tag `packages/go/varrpc/v*`** — the submodule layout is compatible, but the tag line must be added before it is consumable from pkg.go.dev.
+6. **Node/Go divergence — startup error KIND on a transport failure.** A required prefetch key with
+   no fallback and an unreachable source fails startup in both SDKs (that part is canonical), but
+   Node rethrows the raw transport error while Go wraps it as `ErrVarRequired`. A caller
+   distinguishing "the remote is down" from "this key is unresolvable" gets different answers.
+   Pinned in `fixtures/var-parity/scenarios/startup.json` as DIVERGENCE-1. **Needs a decision: does
+   the required-enforcement error type belong to the cause or to the rule?**
+7. **Node/Go divergence — `refreshVars()` failure reporting.** Node warns and resolves for every
+   group failure; Go returns the error (required-group failures preferred over optional ones).
+   A consumer cannot write one contract against both. Pinned as DIVERGENCE-2 in
+   `scenarios/deactivation.json`. Related: Node's `refreshVars()` covers PREFETCH groups only while
+   Go covers every group with a source. **Needs a decision on both halves.**
+8. **Node/Go divergence — `varStatus().freshness` for a key that resolves from no tier.** Node
+   reports the sentinel `none`; Go's `Freshness` enum has no such member and reports `fresh`.
+   (`source` is now `none` in both — see delta 19.) Pinned as DIVERGENCE-3 in `scenarios/status.json`.
+   **Needs a decision: widen the Go enum, or narrow Node to the three-state type?**
+9. **Node/Go divergence — `close()` cannot cancel an in-flight prefetch in Node.** Go derives the
+   prefetch ctx from the runtime ctx, so `close()` aborts the pull and returns promptly. The Node
+   provider contract (`pull(scope, knownRevision): Promise<VarSnapshotBatch>`) carries **no
+   cancellation signal at all**, and `VarManager.close()` awaits the start attempt before closing
+   providers — so a Node `close()` blocks until the in-flight pull settles on its own (up to the
+   transport's own timeout, 30s for the http provider). Both honor "close() does not return until
+   the attempt has stopped"; the lifecycle section's parenthetical "Node's providers are closed and
+   the attempt re-checked" describes an intent the shipped code does not implement. Pinned as
+   DIVERGENCE-4 in `scenarios/close.json`. **Needs a decision: add an `AbortSignal`/cancel seam to
+   the TS provider contract (a public API change), or accept and document the shutdown latency?**
+10. **`publish-go.yml` does not tag `packages/go/varrpc/v*`** — the submodule layout is compatible, but the tag line must be added before it is consumable from pkg.go.dev.

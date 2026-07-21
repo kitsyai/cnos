@@ -70,6 +70,14 @@ Keys are `var.<group>.<rest>`. The manifest maps `<group>` to a declared `varSou
 | CLI help surface (`var`, `var create/validate/activate/deactivate/rollback/status/history/replay/serve`) | `packages/cli/src/cli/helpRegistry.ts` |
 | Go SDK: `Var`/`VarSnapshot`+`Decode`/`RefreshVar`/`RefreshVars`/`Watch`/`VarStatus`/`VarReceiver`/`Close` | `packages/go/var_runtime.go`, `var_client.go`, `var_receiver.go`, `var_snapshot.go`, `var_projection.go`, `var_store.go`, `var_validate.go` |
 | Cross-SDK wire fixtures (source of truth for wire shapes) | `fixtures/var-cross-sdk/` (asserted parse-equivalent by `packages/core/test/cross-sdk-wire.test.ts` and `packages/go/var_crosssdk_test.go`) |
+| Cross-SDK SEMANTIC parity spec (source of truth for observable lifecycle behavior) | `fixtures/var-parity/` (one declarative scenario set executed by `packages/cnos/test/var-parity.test.ts` and `packages/go/var_parity_test.go`) |
+
+**Changing any observable `var.*` behavior means changing BOTH.** The wire fixtures catch shape
+drift; the parity spec catches semantic drift (startup outcome, tier + freshness of a read,
+deactivation, scope replacement, pull/push ordering, watcher dispatch, `varStatus()` fields,
+close). Add a scenario there rather than a hand-written twin test — see
+`fixtures/var-parity/README.md`, including the divergence policy for behavior the ADR does not
+settle (recorded with both observed sides, never reconciled by weakening an assertion).
 
 ## Wire conventions (canonical — verify against `fixtures/var-cross-sdk/` before writing any example)
 
