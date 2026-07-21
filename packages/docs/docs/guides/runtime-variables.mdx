@@ -288,10 +288,18 @@ observing at the next commit.
 
 ```ts
 await cnos.refreshVar('var.agentic.lanes.vinci');  // honors the group's ttl (no-op if fresh)
-await cnos.refreshVars();                            // refresh every prefetch group
+await cnos.refreshVars();                            // explicit refresh of EVERY group with a source
 ```
 
-`refreshVar` mirrors `refreshSecret`; `refreshVars` mirrors `refreshSecrets`.
+`refreshVar` mirrors `refreshSecret`. `refreshVars` mirrors `refreshSecrets` in NAME, but its
+failure contract is explicit: because it is an **explicit caller request**, it refreshes **every**
+configured group with a source — `prefetch` **and** `ondemand` — attempts them all (never
+short-circuits), and **rejects** with an aggregate of the per-group failures if any group failed,
+resolving only when every group succeeded. `not-modified` and `no-head` are successful outcomes (a
+`no-head` applies the normal deactivation). A required-group failure surfaces as the required-kind
+error (carrying the aggregate as its cause). Wrap it in `try/catch` if a partial-failure refresh is
+acceptable to your service. (Background pollers stay best-effort and never propagate — this
+contract is for the explicit API only.)
 
 ### Status
 
@@ -331,9 +339,13 @@ Never carries secret material or a full sensitive document — see [Safety](#saf
 await cnos.close(); // stops pollers, cancels subscriptions, releases watchers
 ```
 
-`close()` is safe to call while `ready()` is still in flight: it cancels the in-flight prefetch
-and waits for the startup attempt to stop, so nothing that attempt would have created survives.
-A `ready()` that observes a closed runtime fails rather than reporting success.
+`close()` is safe to call while `ready()` is still in flight: it **aborts** the in-flight prefetch
+(via an `AbortSignal` the SDK owns and passes to each provider's `pull`) so the network wait ends
+promptly rather than blocking on the transport's own timeout, then waits for the startup attempt to
+stop — so nothing that attempt would have created survives. A `ready()` that observes a closed
+runtime (including one aborted mid-prefetch) **fails** with a closed-runtime error rather than
+reporting success. Custom transport providers should honor `pull(scope, knownRevision, { signal })`;
+the built-in `http` and `rpc` providers do.
 
 ## Restart recovery
 

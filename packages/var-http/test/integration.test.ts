@@ -206,10 +206,13 @@ describe('var http runtime integration', () => {
     const runtime = await createCnos({ root, plugins: [], varSourceProviders: [httpVarSourceProvider] });
     expect(runtime.read('var.agentic.lanes.vinci')).toEqual({ enabled: true, model_target_ref: 'ref-1' });
 
-    // Kill the server; a refresh fails but the LKG snapshot is retained.
+    // Kill the server; a refresh fails but the LKG snapshot is retained. Per the refreshVars
+    // failure contract, an explicit refresh REJECTS when a group fails (it attempts every group
+    // and aggregates), so the rejection is expected here — the point of the test is that the
+    // last-known-good snapshot survives the failure.
     await server.close();
     servers.splice(servers.indexOf(server), 1);
-    await runtime.refreshVars?.();
+    await expect(runtime.refreshVars?.()).rejects.toBeInstanceOf(Error);
 
     expect(runtime.read('var.agentic.lanes.vinci')).toEqual({ enabled: true, model_target_ref: 'ref-1' });
     // W5d/D9: varStatus() is keyed by the prefix-stripped FULL KEY (matching the Go SDK and

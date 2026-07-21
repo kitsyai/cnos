@@ -4,6 +4,7 @@ import {
   CnosVarNoHeadError,
   CnosVarNotModifiedError,
   type ProjectedVarSourceDefinition,
+  type VarPullOptions,
   type VarPushEvent,
   type VarScope,
   type VarSnapshotBatch,
@@ -137,17 +138,22 @@ export function createRpcVarProvider(
     return metadata;
   }
 
-  async function pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch> {
+  async function pull(scope: VarScope, knownRevision?: string, options?: VarPullOptions): Promise<VarSnapshotBatch> {
     const value = scopeValue(scope);
     const metadata = await authMetadata();
+    const signal = options?.signal;
+
+    if (signal?.aborted) {
+      throw new DOMException('The var pull was aborted.', 'AbortError');
+    }
 
     const msg = await new Promise<WireSnapshotBatch>((resolve, reject) => {
-      (client as unknown as {
+      const call = (client as unknown as {
         Pull: (
           req: { scope: string; known_revision: string },
           md: grpc.Metadata,
           cb: (err: grpc.ServiceError | null, res?: WireSnapshotBatch) => void,
-        ) => void;
+        ) => grpc.ClientUnaryCall;
       }).Pull({ scope: value, known_revision: knownRevision ?? '' }, metadata, (err, res) => {
         if (err) {
           reject(err);
@@ -156,6 +162,17 @@ export function createRpcVarProvider(
 
         resolve(res as WireSnapshotBatch);
       });
+
+      // Map an abort (close() racing an in-flight startup) onto cancelling the underlying gRPC
+      // call, so the network wait ends promptly rather than blocking close() until a timeout.
+      if (signal) {
+        const onAbort = (): void => {
+          call.cancel();
+          reject(new DOMException('The var pull was aborted.', 'AbortError'));
+        };
+
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
     });
 
     if (msg.not_modified) {

@@ -56,6 +56,7 @@ type parityStep struct {
 
 	StartOutcome    string `json:"startOutcome"`
 	StartErrorKind  string `json:"startErrorKind"`
+	StartErrCause   *bool  `json:"startErrorHasCause"`
 	RefreshOutcome  string `json:"refreshOutcome"`
 	RefreshErrKind  string `json:"refreshErrorKind"`
 	CloseOutcome    string `json:"closeOutcome"`
@@ -291,6 +292,7 @@ func (provider *parityProvider) Close() error { return nil }
 type parityOutcome struct {
 	outcome string
 	kind    string
+	err     error
 }
 
 type parityFire struct {
@@ -527,7 +529,7 @@ func (runner *parityRunner) startAsync() {
 		if err == nil {
 			runner.startOutcome = parityOutcome{outcome: "ok"}
 		} else {
-			runner.startOutcome = parityOutcome{outcome: "error", kind: parityErrorKind(err)}
+			runner.startOutcome = parityOutcome{outcome: "error", kind: parityErrorKind(err), err: err}
 		}
 		runner.mu.Unlock()
 		close(done)
@@ -730,6 +732,14 @@ func (runner *parityRunner) assertAll(label string, step parityStep) {
 	if step.StartErrorKind != "" && startOutcome.kind != step.StartErrorKind {
 		runner.t.Fatalf("%s: startErrorKind = %q, want %q", label, startOutcome.kind, step.StartErrorKind)
 	}
+	if step.StartErrCause != nil {
+		// DECISION 1: the ErrVarRequired startup failure preserves the underlying transport error
+		// in its unwrap chain (errors.Join), so a caller gets both the rule and the actionable cause.
+		got := hasUnderlyingCause(startOutcome.err)
+		if got != *step.StartErrCause {
+			runner.t.Fatalf("%s: startErrorHasCause = %v, want %v", label, got, *step.StartErrCause)
+		}
+	}
 	if step.RefreshOutcome != "" && refreshOut.outcome != step.RefreshOutcome {
 		runner.t.Fatalf("%s: refreshOutcome = %q, want %q", label, refreshOut.outcome, step.RefreshOutcome)
 	}
@@ -883,6 +893,24 @@ func equalJSON(got, want any) bool {
 	_ = json.Unmarshal(gotData, &gotValue)
 	_ = json.Unmarshal(wantData, &wantValue)
 	return reflect.DeepEqual(gotValue, wantValue)
+}
+
+// hasUnderlyingCause reports whether err carries a real underlying cause beyond the
+// ErrVarRequired sentinel — i.e. the transport error was preserved (via errors.Join) rather than
+// stringified away. An errors.Join of the sentinel-wrap and the transport error exposes both
+// through Unwrap() []error; a bare fmt.Errorf("%w", ErrVarRequired) exposes only the sentinel.
+func hasUnderlyingCause(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch x := err.(type) {
+	case interface{ Unwrap() []error }:
+		return len(x.Unwrap()) > 1
+	case interface{ Unwrap() error }:
+		inner := x.Unwrap()
+		return inner != nil && !errors.Is(inner, ErrVarRequired)
+	}
+	return false
 }
 
 func canonicalFire(source string, value any) string {

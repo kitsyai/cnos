@@ -2,6 +2,7 @@ import {
   CnosVarNoHeadError,
   CnosVarNotModifiedError,
   type ProjectedVarSourceDefinition,
+  type VarPullOptions,
   type VarScope,
   type VarSourceProvider,
   type VarSourceProviderContext,
@@ -70,7 +71,7 @@ export function createHttpVarProvider(
   }
 
   return {
-    async pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch> {
+    async pull(scope: VarScope, knownRevision?: string, options?: VarPullOptions): Promise<VarSnapshotBatch> {
       const { param, value } = scopeQuery(scope);
       const url = `${endpoint}?${param}=${encodeURIComponent(value)}`;
       const headers: Record<string, string> = {
@@ -79,7 +80,13 @@ export function createHttpVarProvider(
         ...(knownRevision ? { 'if-none-match': knownRevision } : {}),
       };
 
-      const response = await fetch(url, { method: 'GET', headers });
+      // `fetch` honors the AbortSignal natively, so a `close()` racing an in-flight startup
+      // aborts the request promptly instead of waiting out the socket timeout.
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        ...(options?.signal ? { signal: options.signal } : {}),
+      });
 
       if (response.status === 304) {
         throw new CnosVarNotModifiedError(value, knownRevision ?? '');

@@ -155,7 +155,7 @@ cnos.varSnapshot('agentic.lanes.vinci')    // { value, generation, revision, sch
                                            // cheap in-memory read, usable per request
 
 await cnos.refreshVar('var.agentic.lanes.vinci')   // mirrors refreshSecret(key); honors ttl
-await cnos.refreshVars()                           // mirrors refreshSecrets()
+await cnos.refreshVars()                            // explicit refresh of EVERY group; see contract below
 
 const stop = cnos.watch('var.agentic.lanes.vinci', (snap, prev) => { ... })  // fires only on validated activations
 cnos.watch('var.user.*', cb)               // group/prefix watch
@@ -164,6 +164,7 @@ cnos.varStatus()                           // observability doc (below)
 await cnos.close()                         // stop pollers, cancel subscriptions, release watchers
 ```
 
+- `refreshVars()` mirrors `refreshSecrets()` in NAME, but its failure contract is explicit (both SDKs): it is an EXPLICIT caller request, so it attempts EVERY configured group with a source — prefetch AND ondemand — never short-circuits, and REJECTS with an aggregate of the per-group failures if any failed (resolving only when all succeeded). `not-modified` and `no-head` are successful outcomes. A required-group failure surfaces as the required-kind error (carrying the aggregate as cause); otherwise `AggregateError` (Node) / `errors.Join` (Go). Background pollers stay best-effort (warn, never propagate) — this contract is for the explicit API only.
 - Sync reads never block on the network; unfetched `ondemand` optional keys serve the static/default tier and trigger a background fetch.
 - Watch callbacks receive **snapshots** (value + metadata) so consumers can apply fail-closed policy; a callback error never rolls back the store — the snapshot is already active (consumer-side apply failures are the consumer's concern, reported by the consumer).
 - Go mirrors: `cnos.Var(key)`, `cnos.VarSnapshot(key)` + `snapshot.Decode(&policy)` typed decode, `cnos.RefreshVar(ctx, key)`, `cnos.Watch(key, fn)`, `cnos.VarStatus()`, `cnos.Close()`.
@@ -318,6 +319,14 @@ service VarService {
   The client-side reconnect resync pull below is retained as belt-and-braces (it covers a
   server predating this change); in the happy path it is redundant, and the store's
   content-addressed revision gate suppresses the duplicate watcher fire.
+
+  **Convergence hierarchy (canonical).** The initial current-head/`no_head` event that every
+  accepted `Subscribe` emits (above) is THE protocol convergence guarantee: a (re)connecting
+  client converges from the stream ALONE, deactivation included. The client-side resync pull is
+  DEFENSIVE REDUNDANCY layered on top — it is not independently mandatory, and a client whose
+  isolation of it is weaker than the other SDK's is acceptable precisely because the stream's
+  initial event already guarantees convergence. Neither the client pull nor its tests are removed
+  (they cover a pre-change server); no production test-only option is added.
 - **`cnos var serve --rpc <port>`** serves the rpc transport alongside the http plane, sharing
   one store and one engine so http-admin activations reach rpc subscribers.
 - **Wire pinning**: the Go module hand-writes the protobuf encoding (protoc is not a build
@@ -348,6 +357,12 @@ Age is measured from the snapshot's `observedAt`. Static/default tiers never exp
 | set | — | `age > ttl` | `stale` (never expires) |
 | — | set | `age ≤ lease` | `fresh` |
 | — | set | `age > lease` | `expired` (no stale tier) |
+| n/a | n/a | key resolves from NO tier (status only) | `none` |
+
+The `none` row is `varStatus().freshness` for a key that resolves from no tier at all (paired with
+`source: 'none'`); it is exclusively that state — an actual runtime/static/default snapshot is
+always `fresh`/`stale`/`expired`. Both SDKs report `none`/`none` (Go's `Freshness` enum carries a
+`none` member, `VarFreshnessNone`; Node's `VarScopeStatus.freshness` is `VarSnapshotFreshness | 'none'`).
 
 ### Reconnect resync (canonical, both SDKs)
 
@@ -359,6 +374,13 @@ This is not an optimization. The server forwards **future** commits only, so an 
 deactivation* that happens during an outage or a backoff window is otherwise lost permanently, and
 a subscribe-capable source runs no poller to converge with. A missed deactivation means serving
 withdrawn policy forever.
+
+**Hierarchy (canonical).** For the rpc transport, the CANONICAL convergence guarantee is the
+initial current-head/`no_head` event an accepted `Subscribe` always emits (see the rpc section) —
+a (re)connecting client converges from the stream alone. This client-side resync pull is
+DEFENSIVE REDUNDANCY on top of that guarantee (and the sole path for a hypothetical transport with
+no such initial event); it is not independently mandatory, so a weaker per-SDK isolation of it is
+acceptable. It is retained everywhere and never gated behind a production test-only option.
 
 - **Ordering barrier**: the SDK subscribes FIRST, then pulls. A commit racing the pull therefore
   arrives on the (already open) stream instead of falling between the two, and the scope's
@@ -431,19 +453,31 @@ treating it as a blanket carve-out let Node report a ready runtime that failed o
 time, where Go rejected `StartVars`. `refreshVar` on a required key rejects on a transport failure
 or a validation-`rejected` revision, but not on a `no-head`.
 
+**Error KIND and cause (canonical, both SDKs).** When a required prefetch key is left unresolvable
+by an underlying transport/authentication failure, startup fails with the required/unavailable
+typed error — `CnosVarRequiredError` (Node) / `ErrVarRequired` (Go) — carrying the transport error
+as the CAUSE (Node `error.cause`; Go a second `%w` so `errors.Is(err, ErrVarRequired)` AND
+`errors.Is/As` against the transport error both hold). The configuration-level meaning (this key is
+required and unresolved) is the error's identity; the actionable underlying failure is its cause.
+
 ### Startup / close lifecycle (canonical, both SDKs)
 
 `close()` is coordinated with the shared startup attempt, not just with the resources that already
 exist when it is called:
 
-- runtime cancellation cancels the in-flight prefetch (Go runs prefetch on a ctx derived from both
-  the caller's ctx and the runtime's; Node's providers are closed and the attempt re-checked);
+- runtime cancellation cancels the in-flight prefetch PROMPTLY, aborting the network wait rather
+  than blocking `close()` until the transport's own timeout (Go runs prefetch on a ctx derived
+  from both the caller's ctx and the runtime's; Node owns an `AbortController` per startup attempt,
+  aborts it FIRST in `close()`, and threads its `AbortSignal` through `pull(scope, knownRevision,
+  { signal })` — the TS provider contract carries the cancellation seam as of this change);
 - startup re-checks the closed state after every await/wait and before creating ANY long-lived
   resource (provider, poller, subscription);
 - `close()` does not return until the attempt has stopped, so the provider/timer/subscription sets
-  it cleans are complete;
-- a startup that observes a closed runtime FAILS — `ErrVarClosed` (Go) / a thrown `closed` error
-  (Node) — rather than reporting a ready runtime with nothing running behind it;
+  it cleans are complete — and because the prefetch is aborted, "has stopped" is prompt, not
+  bounded by the transport timeout;
+- a startup that observes a closed runtime (including one aborted mid-prefetch) FAILS —
+  `ErrVarClosed` (Go) / `CnosVarClosedError` (Node) — rather than reporting a ready runtime with
+  nothing running behind it;
 - a FAILED attempt rolls back everything it created, **including the providers it constructed**:
   they are closed and evicted so a retry recreates them through the factory instead of reusing a
   possibly poisoned instance.
@@ -456,10 +490,17 @@ exist when it is called:
 
 ```ts
 interface VarSourceProvider {
-  pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch>;
+  // `options.signal` is an AbortSignal the SDK aborts from close(), so a close() racing an
+  // in-flight startup cancels the network wait promptly instead of blocking on a transport
+  // timeout. A provider that honors it rejects with an abort-shaped error once signalled; the
+  // SDK surfaces the aborted startup as CnosVarClosedError. (Breaking type change, pre-release —
+  // no external implementors. Go achieves the same via the ctx already threaded through Pull.)
+  pull(scope: VarScope, knownRevision?: string, options?: { signal?: AbortSignal }): Promise<VarSnapshotBatch>;
   // A push transport reports EVERY authoritative outcome, not just head batches: a `no-head`
   // event is a deactivation the SDK turns into a runtime-tier removal. Mirrors the Go
   // `VarBatchResult.Status` (`VarPullOK` / `VarPullNoHead`) carried through one callback.
+  // `subscribe` was NOT given a signal: it already returns a stop function and close() closes
+  // the provider, so its teardown seam is complete; only pull needed cancellation.
   subscribe?(scopes: VarScope[], onEvent: (e: VarPushEvent) => void): () => void;
   close(): Promise<void>;
 }
@@ -577,9 +618,27 @@ Recorded during the docs pass; the code is authoritative where these differ from
     shape per state, and the close/startup lifecycle. Both runners are part of the ordinary suites.
     One product fix came out of it: **Go's `varStatus()` now reports `source: "none"`** for a key
     that resolves from no tier at all (it reported `default`), matching Node and this document's
-    deactivation section. Four behaviors where the SDKs still differ and the ADR does not decide
-    are recorded IN the spec as divergent expectations (each side pinned to what it actually does,
-    reported but not failed) — see Open decisions 7-10.
+    deactivation section. Four behaviors where the SDKs differed and the ADR did not yet decide were
+    recorded IN the spec as divergent expectations; all four are now RESOLVED and canonical — see
+    delta 20 and Open decisions 6-9.
+
+20. **The four parity divergences are resolved and canonical** (this pass). Each divergent
+    expectation in `fixtures/var-parity/` flipped to a single canonical assertion, exercised
+    identically by both runners:
+    a. **Startup transport failure → required-kind error WITH cause.** A required prefetch group
+       whose source is unreachable fails startup with `CnosVarRequiredError` / `ErrVarRequired`
+       carrying the transport error as `cause` (Node `error.cause`; Go a second `%w`). Was
+       DIVERGENCE-1 (Node rethrew raw / kind `other`).
+    b. **`refreshVars()` attempts every group and rejects with an aggregate.** Explicit refresh
+       covers prefetch AND ondemand, never short-circuits, and rejects after all attempts when any
+       failed (required-kind preferred, else aggregate). Was DIVERGENCE-2 (Node warned + resolved;
+       and covered prefetch only) — both halves fixed.
+    c. **Nowhere-resolving `varStatus()` is `none`/`none`.** Go's `Freshness` gained `FreshnessNone`.
+       Was DIVERGENCE-3 (Go reported `fresh`).
+    d. **`close()` aborts an in-flight prefetch.** The TS `VarSourceProvider.pull` gained an
+       `AbortSignal` option; `VarManager` aborts it from `close()`, so a Node `close()` racing a
+       blocked prefetch returns promptly and the startup caller gets `CnosVarClosedError`. Was
+       DIVERGENCE-4 (Node blocked until the pull's own timeout; the contract had no signal).
 
 ## Open decisions
 
@@ -588,29 +647,34 @@ Recorded during the docs pass; the code is authoritative where these differ from
 3. **Where the control plane's authz identity comes from** (workload identity federation vs static tokens via secret refs) — likely deployment-specific config on `var-server`, pluggable like vault auth. The v1 `authorize` hook is the seam.
 4. ~~Lease vs ttl naming/merge~~ — **resolved**: two fields with distinct semantics (`ttl` = ondemand staleness bound, `lease` = fail-closed freshness window). See the freshness transition table.
 5. ~~Subscribe give-up policy~~ — **resolved (W5d)**: gRPC `UNAUTHENTICATED` / `PERMISSION_DENIED` are **terminal** (never reconnected — the same credentials can only be refused again); transport failures retry with capped exponential backoff + jitter but are **bounded** by a consecutive-failure cap (8), after which the subscription also becomes terminal. Every failure is reported through the provider's `onError` option and the SDK's `onSubscriptionError` seam, surfacing as `subscription: { state: 'failed' | 'retrying' | 'active' }` in `varStatus()` / `VarStatus()`. Nothing throws out of a background stream and nothing fails silently. A terminal subscription deliberately does **not** fall back to periodic pulls: the same credentials would be refused by `Pull`, and a silent poll loop would hide the very failure the terminal state exists to advertise — consumers alert on `failed` and may call `refreshVar()` explicitly. Server-side, an auth-rejected `Subscribe` now ends the stream with `call.emit('error', status)`; `call.destroy(status)` tore the call down locally without ever putting a status on the wire, which is what left Node clients hanging silently.
-6. **Node/Go divergence — startup error KIND on a transport failure.** A required prefetch key with
-   no fallback and an unreachable source fails startup in both SDKs (that part is canonical), but
-   Node rethrows the raw transport error while Go wraps it as `ErrVarRequired`. A caller
-   distinguishing "the remote is down" from "this key is unresolvable" gets different answers.
-   Pinned in `fixtures/var-parity/scenarios/startup.json` as DIVERGENCE-1. **Needs a decision: does
-   the required-enforcement error type belong to the cause or to the rule?**
-7. **Node/Go divergence — `refreshVars()` failure reporting.** Node warns and resolves for every
-   group failure; Go returns the error (required-group failures preferred over optional ones).
-   A consumer cannot write one contract against both. Pinned as DIVERGENCE-2 in
-   `scenarios/deactivation.json`. Related: Node's `refreshVars()` covers PREFETCH groups only while
-   Go covers every group with a source. **Needs a decision on both halves.**
-8. **Node/Go divergence — `varStatus().freshness` for a key that resolves from no tier.** Node
-   reports the sentinel `none`; Go's `Freshness` enum has no such member and reports `fresh`.
-   (`source` is now `none` in both — see delta 19.) Pinned as DIVERGENCE-3 in `scenarios/status.json`.
-   **Needs a decision: widen the Go enum, or narrow Node to the three-state type?**
-9. **Node/Go divergence — `close()` cannot cancel an in-flight prefetch in Node.** Go derives the
-   prefetch ctx from the runtime ctx, so `close()` aborts the pull and returns promptly. The Node
-   provider contract (`pull(scope, knownRevision): Promise<VarSnapshotBatch>`) carries **no
-   cancellation signal at all**, and `VarManager.close()` awaits the start attempt before closing
-   providers — so a Node `close()` blocks until the in-flight pull settles on its own (up to the
-   transport's own timeout, 30s for the http provider). Both honor "close() does not return until
-   the attempt has stopped"; the lifecycle section's parenthetical "Node's providers are closed and
-   the attempt re-checked" describes an intent the shipped code does not implement. Pinned as
-   DIVERGENCE-4 in `scenarios/close.json`. **Needs a decision: add an `AbortSignal`/cancel seam to
-   the TS provider contract (a public API change), or accept and document the shutdown latency?**
+6. ~~Node/Go divergence — startup error KIND on a transport failure~~ — **RESOLVED**: startup
+   failure for a required prefetch group surfaces as the required/unavailable typed error
+   (`CnosVarRequiredError` / `ErrVarRequired`), with the underlying transport/authentication error
+   preserved as the CAUSE (Node `error.cause`; Go a second `%w`). The type belongs to the RULE; the
+   transport failure belongs to the CAUSE — callers get both. The parity scenario asserts KIND
+   `required` and cause presence in both SDKs (`startup.json`, formerly DIVERGENCE-1).
+7. ~~Node/Go divergence — `refreshVars()` failure reporting~~ — **RESOLVED**: `refreshVars()` is an
+   explicit caller request. It attempts EVERY configured group with a source (prefetch AND
+   ondemand — Node no longer covers prefetch-only), never short-circuits, and REJECTS with an
+   aggregate after all attempts when any failed (Node `AggregateError`, or `CnosVarRequiredError`
+   carrying the aggregate when a required group failed; Go `errors.Join`, required preferred). It
+   resolves only when every group succeeded; `not-modified`/`no-head` are successes. Background
+   pollers stay best-effort. Parity scenarios assert rejection-after-all-attempted (via per-scope
+   pull counts) and all-healthy resolution (`deactivation.json`, formerly DIVERGENCE-2).
+8. ~~Node/Go divergence — `varStatus().freshness` for a nowhere-resolving key~~ — **RESOLVED**:
+   both SDKs report `source: 'none'`, `freshness: 'none'`. Go's `Freshness` enum gained a `none`
+   member (`FreshnessNone`); `none` is exclusively the nowhere-resolving state (actual snapshots
+   stay fresh/stale/expired). Parity scenario asserts `none`/`none` (`status.json`, formerly
+   DIVERGENCE-3); freshness table gained a `none` row.
+9. ~~Node/Go divergence — `close()` cannot cancel an in-flight prefetch in Node~~ — **RESOLVED**:
+   the TS provider contract gained a cancellation seam — `pull(scope, knownRevision, { signal })`,
+   an `AbortSignal` the SDK aborts from `close()` (breaking type change, acceptable pre-release, no
+   external implementors). `VarManager` owns an `AbortController` per startup attempt, aborts it
+   first in `close()`, then awaits the attempt (which now settles promptly); an aborted startup
+   rejects with `CnosVarClosedError` and the round-3 transactional rollback runs. The built-in
+   providers (`var-http` via native `fetch` signal, `var-rpc` mapping abort to `call.cancel()`,
+   `var-testkit`) and the parity fakes honor it. Parity scenario asserts close settles within 400ms
+   while the pull is still gated — only possible with a real abort — and startup observes closed-
+   kind (`close.json`, formerly DIVERGENCE-4). Revert-verified: removing the abort wiring makes the
+   Node scenario fail.
 10. **`publish-go.yml` does not tag `packages/go/varrpc/v*`** — the submodule layout is compatible, but the tag line must be added before it is consumable from pkg.go.dev.

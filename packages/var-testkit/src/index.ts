@@ -1,6 +1,7 @@
 import { CnosVarNoHeadError } from '@kitsy/cnos-core';
 import type {
   DocumentSchemaDefinition,
+  VarPullOptions,
   VarPushEvent,
   VarScope,
   VarSnapshotBatch,
@@ -108,7 +109,12 @@ export function createInMemoryVarSource(options: { documents?: Record<string, Do
   const subscribers = new Set<(event: VarPushEvent) => void>();
 
   const provider: VarSourceProvider = {
-    async pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch> {
+    async pull(scope: VarScope, knownRevision?: string, options?: VarPullOptions): Promise<VarSnapshotBatch> {
+      // Honor an abort (close() racing startup) even though this double resolves synchronously.
+      if (options?.signal?.aborted) {
+        throw new DOMException('The var pull was aborted.', 'AbortError');
+      }
+
       const head = store.head(scopeKey(scope));
 
       if (!head) {

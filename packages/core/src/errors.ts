@@ -63,11 +63,42 @@ export class CnosRuntimeProviderError extends CnosError {
  * A mandatory (`required: true`) `var.*` key could not be resolved through any overlay tier
  * (no runtime revision, no static `value.*`, no default). Thrown on read and surfaced when a
  * prefetch group fails to make a required var available during ready().
+ *
+ * When the unresolvability was caused by an underlying transport/authentication failure, that
+ * error is preserved as the standard `cause` (`new CnosVarRequiredError(key, { cause })`), so a
+ * caller gets BOTH the configuration-level meaning (this key is required and unresolved) and the
+ * actionable underlying failure. The message summarizes the cause. Mirrors the Go SDK, where the
+ * same failure is `errors.Join(ErrVarRequired, <transport error>)`.
  */
 export class CnosVarRequiredError extends CnosError {
-  constructor(readonly key: string) {
+  constructor(readonly key: string, options?: { cause?: unknown }) {
+    const causeSummary =
+      options?.cause !== undefined
+        ? ` (cause: ${options.cause instanceof Error ? options.cause.message : String(options.cause)})`
+        : '';
     super(
-      `Required runtime variable "${key}" is unresolved: no active runtime revision, static value, or default is available.`,
+      `Required runtime variable "${key}" is unresolved: no active runtime revision, static value, or default is available.${causeSummary}`,
+    );
+
+    if (options && 'cause' in options) {
+      // Standard ES2022 error chaining. CnosError's base constructor takes only a message, so the
+      // cause is attached here rather than forwarded through `super(message, { cause })`.
+      (this as { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+/**
+ * The var runtime is (or became) closed. Thrown when `start()` is called on a closed runtime, or
+ * when `close()` races an in-flight startup: the abort surfaces to the startup caller as this
+ * error rather than a spurious success. Mirrors the Go SDK's `ErrVarClosed`.
+ */
+export class CnosVarClosedError extends CnosError {
+  constructor(readonly scope?: string) {
+    super(
+      scope
+        ? `The var runtime was closed while a pull for scope "${scope}" was in flight.`
+        : 'The var runtime is closed.',
     );
   }
 }

@@ -1,4 +1,9 @@
-import { CnosVarNoHeadError, CnosVarNotModifiedError, CnosVarRequiredError } from '../errors.js';
+import {
+  CnosVarClosedError,
+  CnosVarNoHeadError,
+  CnosVarNotModifiedError,
+  CnosVarRequiredError,
+} from '../errors.js';
 import type { ConfigSpecRule } from '../types/spec.js';
 import type {
   DocumentSchemaDefinition,
@@ -61,6 +66,13 @@ export class VarManager {
    * walked the sets it cleans — which leaked every one of them.
    */
   private startAttempt: Promise<void> | undefined;
+  /**
+   * The {@link AbortController} for the in-flight startup attempt. `close()` aborts it FIRST, so
+   * the prefetch pull's network wait is cancelled promptly rather than blocking `close()` until
+   * the transport's own timeout. The startup attempt then observes the closed runtime and rejects
+   * with {@link CnosVarClosedError}. Mirrors Go's ctx-derived prefetch cancellation.
+   */
+  private startAbort: AbortController | undefined;
 
   constructor(options: VarManagerOptions) {
     this.varSources = options.varSources;
@@ -261,6 +273,7 @@ export class VarManager {
     group: string,
     scope: VarScope,
     scopeString: string,
+    signal?: AbortSignal,
   ): Promise<'ingested' | 'rejected' | 'no-head' | 'not-modified' | 'superseded'> {
     const provider = this.provider(sourceId);
     const knownRevision = this.appliedRevision(scopeString);
@@ -273,7 +286,7 @@ export class VarManager {
     const epoch = this.store.scopeEpoch(scopeString);
 
     try {
-      const batch = await provider.pull(scope, knownRevision);
+      const batch = await provider.pull(scope, knownRevision, signal ? { signal } : undefined);
 
       if (this.closed || this.store.scopeEpoch(scopeString) !== epoch) {
         return 'superseded';
@@ -300,6 +313,15 @@ export class VarManager {
         this.applyNoHead(scopeString, group);
         this.store.recordRefresh(scopeString, group);
         return 'no-head';
+      }
+
+      // An aborted pull is NOT a transport failure — it is `close()` cancelling an in-flight
+      // startup. Surface it as the closed-kind typed error so the startup caller learns the
+      // runtime was closed (never a spurious "transport down"), and so it is not recorded as a
+      // scope error. Mirrors Go, where the cancelled fetch ctx makes `StartVars` return
+      // `ErrVarClosed`.
+      if (signal?.aborted || this.closed) {
+        throw new CnosVarClosedError(scopeString);
       }
 
       this.store.recordError(scopeString, group, error);
@@ -364,11 +386,11 @@ export class VarManager {
   }
 
   /** Fetch all prefetch groups (parallel). Required-group failure rejects; optional warns + falls back. */
-  async prefetch(): Promise<void> {
-    await Promise.all(this.prefetchGroups().map((group) => this.prefetchGroup(group)));
+  async prefetch(signal?: AbortSignal): Promise<void> {
+    await Promise.all(this.prefetchGroups().map((group) => this.prefetchGroup(group, signal)));
   }
 
-  private async prefetchGroup(group: string): Promise<void> {
+  private async prefetchGroup(group: string, signal?: AbortSignal): Promise<void> {
     const definition = this.vars[group];
 
     if (!definition) {
@@ -379,8 +401,15 @@ export class VarManager {
     let failure: unknown;
 
     try {
-      await this.fetchScope(definition.source, group, { group }, group);
+      await this.fetchScope(definition.source, group, { group }, group, signal);
     } catch (error) {
+      // `close()` cancelled this startup mid-prefetch. Closed beats every other classification —
+      // the attempt is being torn down, so propagate it as-is (never re-map it to a required or
+      // transport failure) and let `runStart` roll back and reject with the closed error.
+      if (error instanceof CnosVarClosedError) {
+        throw error;
+      }
+
       // A missing transport module is a deployment gap: warned, and non-fatal ONLY while every
       // required key of the group still resolves through the static/default tiers. Returning
       // here skipped the required check below, so Node reported a ready runtime where Go
@@ -399,8 +428,16 @@ export class VarManager {
     // runtime value — a prefetch mandatory key that resolves from no tier must fail ready(),
     // exactly as the Go SDK does (`ErrVarRequired`). Checking only the catch path is what let
     // Node report a ready runtime while Go correctly refused to start.
+    //
+    // The failure ALWAYS surfaces as `CnosVarRequiredError` (the rule), never the raw transport
+    // error — but when a transport failure caused the unresolvability it is preserved as the
+    // `cause` so the caller gets both the configuration meaning and the actionable underlying
+    // error. Mirrors Go's `errors.Join(ErrVarRequired, <transport error>)`.
     if (required && !this.requiredKeysResolvable(group)) {
-      throw failure ?? new CnosVarRequiredError(this.unresolvedRequiredKey(group) ?? group);
+      const key = this.unresolvedRequiredKey(group) ?? group;
+      throw failure !== undefined
+        ? new CnosVarRequiredError(key, { cause: failure })
+        : new CnosVarRequiredError(key);
     }
 
     if (failure !== undefined) {
@@ -495,14 +532,17 @@ export class VarManager {
       // A closed runtime can never become ready. Reporting success here would hand the caller a
       // runtime with no pollers, no subscriptions and no providers, silently serving only the
       // static/default tiers. Mirrors the Go SDK's `ErrVarClosed`.
-      throw new Error('[cnos:var] start() was called on a closed var runtime.');
+      throw new CnosVarClosedError();
     }
 
     const timersBefore = new Set(this.timers);
     const subscriptionsBefore = new Set(this.subscriptions);
     const providersBefore = new Set(this.providers.keys());
 
-    const attempt = this.runStart(timersBefore, subscriptionsBefore, providersBefore);
+    const controller = new AbortController();
+    this.startAbort = controller;
+
+    const attempt = this.runStart(timersBefore, subscriptionsBefore, providersBefore, controller.signal);
     this.startAttempt = attempt;
 
     try {
@@ -511,6 +551,9 @@ export class VarManager {
       if (this.startAttempt === attempt) {
         this.startAttempt = undefined;
       }
+      if (this.startAbort === controller) {
+        this.startAbort = undefined;
+      }
     }
   }
 
@@ -518,9 +561,10 @@ export class VarManager {
     timersBefore: Set<ReturnType<typeof setTimeout>>,
     subscriptionsBefore: Set<() => void>,
     providersBefore: Set<string>,
+    signal: AbortSignal,
   ): Promise<void> {
     try {
-      await this.prefetch();
+      await this.prefetch(signal);
       // `close()` can have run while prefetch was in flight. Creating pollers, subscriptions or
       // providers now would create them behind close()'s back, and nothing would ever release
       // them. Re-checked after every await and before ANY long-lived resource is created.
@@ -536,7 +580,7 @@ export class VarManager {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Error('[cnos:var] the var runtime was closed while startup was in flight.');
+      throw new CnosVarClosedError();
     }
   }
 
@@ -750,35 +794,79 @@ export class VarManager {
     }
   }
 
+  /**
+   * Explicit caller-driven refresh of EVERY configured group with a source — prefetch AND
+   * ondemand alike. `refreshVars()` is a caller request, so unlike the automatic lifecycle
+   * (where prefetch/ondemand governs whether CNOS fetches on its own) its scope is every group.
+   *
+   * FAILURE CONTRACT (canonical, mirrors Go's `RefreshVars`): every group is attempted to
+   * completion — no short-circuit — and if ANY failed the returned promise REJECTS with an
+   * aggregate of the per-group failures; it resolves only when every group succeeded. A
+   * `not-modified` and a `no-head` are SUCCESSFUL outcomes (a `no-head` applies the normal
+   * deactivation path), never failures.
+   *
+   * The rejection KIND mirrors Go: when a group carrying a REQUIRED key failed, the rejection is
+   * `CnosVarRequiredError` (required-kind), carrying the full aggregate as its `cause`; otherwise
+   * it is an `AggregateError` (other-kind). Background pollers stay best-effort (warn, never
+   * propagate) — this contract is ONLY for the explicit API.
+   */
   async refreshVars(): Promise<void> {
-    const tasks: Array<Promise<unknown>> = [];
+    const failures: Array<{ group: string; error: unknown; required: boolean }> = [];
+    const tasks: Array<Promise<void>> = [];
 
-    for (const group of this.prefetchGroups()) {
-      const definition = this.vars[group];
-
+    for (const [group, definition] of Object.entries(this.vars)) {
       if (!definition) {
         continue;
       }
 
       tasks.push(
-        this.fetchScope(definition.source, group, { group }, group).catch((error: unknown) => {
-          this.warn(
-            `[cnos:var] refreshVars: group "${group}" failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }),
+        this.fetchScope(definition.source, group, { group }, group).then(
+          () => undefined,
+          (error: unknown) => {
+            failures.push({ group, error, required: this.groupIsRequired(group) });
+            this.warn(
+              `[cnos:var] refreshVars: group "${group}" failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        ),
       );
     }
 
     await Promise.all(tasks);
+
+    if (failures.length === 0) {
+      return;
+    }
+
+    const causes = failures.map((failure) => failure.error);
+    const aggregate = new AggregateError(
+      causes,
+      `refreshVars: ${failures.length} var group(s) failed to refresh (${failures.map((f) => `"${f.group}"`).join(', ')}).`,
+    );
+
+    const requiredFailure = failures.find((failure) => failure.required);
+
+    if (requiredFailure) {
+      // A required-group failure surfaces as required-kind (as Go prefers requiredErr), with the
+      // whole aggregate preserved as the cause so no per-group failure is lost.
+      const key = this.unresolvedRequiredKey(requiredFailure.group) ?? requiredFailure.group;
+      throw new CnosVarRequiredError(key, { cause: aggregate });
+    }
+
+    throw aggregate;
   }
 
   async close(): Promise<void> {
     this.closed = true;
 
-    // Coordinate with an in-flight start(). It re-checks `closed` after every await and rolls
-    // back whatever it created, so once it has settled the sets below are complete. Without
-    // this wait, a prefetch that finished AFTER close() had already walked them created
-    // providers, pollers and subscriptions that nothing ever released.
+    // Abort the in-flight prefetch FIRST so its network wait is cancelled promptly, THEN wait for
+    // the startup attempt to stop. Without the abort, close() would block until the in-flight
+    // pull settled on its own (up to the transport's own timeout, e.g. 30s for http) — the abort
+    // is what makes close() return promptly. The aborted attempt re-checks `closed` and rolls
+    // back whatever it created (see runStart/rollbackStart), so once it has settled the sets
+    // below are complete. Mirrors Go's ctx-derived prefetch cancellation.
+    this.startAbort?.abort(new CnosVarClosedError());
+
     const attempt = this.startAttempt;
 
     if (attempt) {

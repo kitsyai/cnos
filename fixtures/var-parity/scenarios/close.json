@@ -77,7 +77,7 @@
   {
     "name": "close-during-an-in-flight-start",
     "axis": "close",
-    "why": "round-3 blocker 2: the attempt must not outlive close(), and a start that observes a closed runtime must FAIL",
+    "why": "ADR Open decision 9 (RESOLVED): close() ABORTS the in-flight prefetch and returns PROMPTLY (bounded here while the pull is still gated, only possible with a real abort — the TS provider contract gained an AbortSignal); the startup caller observes a closed-kind error",
     "projection": {
       "values": { "policy.mode": "static-value" },
       "varSources": { "svc": { "transport": "fake" } },
@@ -100,13 +100,9 @@
       { "action": "closeAsync" },
       {
         "action": "expect",
-        "status": "divergent",
-        "note": "DIVERGENCE-4: whether close() can CANCEL an in-flight prefetch. Go derives the prefetch ctx from the runtime ctx, so close() aborts the pull and returns promptly. The Node provider contract (`pull(scope, knownRevision): Promise<...>`) carries no cancellation signal at all, and VarManager.close() awaits the start attempt BEFORE closing providers, so close() blocks until the in-flight pull settles on its own. Both satisfy the ADR clause 'close() does not return until the attempt has stopped'; the ADR's parenthetical ('Node's providers are closed and the attempt re-checked') describes an intent the shipped code does not implement, and honoring it needs a provider-contract change.",
-        "adr": "docs/cnos-runtime-vars.md - 'Startup / close lifecycle (canonical, both SDKs)'",
-        "observed": {
-          "node": { "closeSettledWithinMs": 400, "settled": false },
-          "go": { "closeSettledWithinMs": 400, "settled": true }
-        }
+        "closeSettledWithinMs": 400,
+        "settled": true,
+        "note": "close() settles within 400ms WHILE the pull is still gated (releasePull has not run yet) — only a real abort of the in-flight prefetch makes this possible, in both SDKs."
       },
       { "action": "releasePull", "scope": "policy" },
       { "action": "awaitClose" },

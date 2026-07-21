@@ -29,6 +29,11 @@ const (
 	FreshnessFresh   Freshness = "fresh"
 	FreshnessStale   Freshness = "stale"
 	FreshnessExpired Freshness = "expired"
+	// FreshnessNone is a STATUS-ONLY freshness: the key resolves from no tier at all (paired with
+	// VarSourceNone). Runtime/static/default snapshots never carry it — a resolved value is always
+	// fresh/stale/expired. Canonical per the ADR's freshness table `none` row; the Node SDK reports
+	// the same sentinel for a nowhere-resolving key's varStatus().freshness.
+	FreshnessNone Freshness = "none"
 )
 
 // LastKnownGood records the generation/revision of the retained good snapshot

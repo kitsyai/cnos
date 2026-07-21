@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  CnosVarClosedError,
   CnosVarNoHeadError,
   CnosVarNotModifiedError,
   CnosVarRequiredError,
@@ -13,6 +14,7 @@ import {
   type NormalizedVarSourceDefinition,
   type ResolvedVarSnapshot,
   type VarGroupDefinition,
+  type VarPullOptions,
   type VarPushEvent,
   type VarScope,
   type VarSnapshotBatch,
@@ -75,6 +77,7 @@ interface Step {
   // expect payloads
   startOutcome?: string;
   startErrorKind?: string;
+  startErrorHasCause?: boolean;
   refreshOutcome?: string;
   refreshErrorKind?: string;
   closeOutcome?: string;
@@ -199,14 +202,42 @@ class FakeSource {
       transport: 'ws',
       create() {
         return {
-          async pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch> {
+          async pull(scope: VarScope, knownRevision?: string, options?: VarPullOptions): Promise<VarSnapshotBatch> {
             const key = scope.group ?? scope.key ?? '';
             self.pulls.set(key, self.pullCount(key) + 1);
 
             const gate = self.gates.get(key);
 
             if (gate) {
-              await gate.promise;
+              // Honor an abort (close() racing an in-flight startup): the SDK owns the signal and
+              // fires it from close(), so a gated pull must reject promptly rather than hang until
+              // releasePull. This is what lets the Node close() return without waiting the pull
+              // out — the mixed abort/gate race the whole DECISION-4 scenario turns on.
+              const signal = options?.signal;
+
+              if (signal?.aborted) {
+                throw new DOMException('The var pull was aborted.', 'AbortError');
+              }
+
+              await new Promise<void>((resolve, reject) => {
+                let settled = false;
+                const finish = (fn: () => void): void => {
+                  if (!settled) {
+                    settled = true;
+                    fn();
+                  }
+                };
+
+                void gate.promise.then(() => finish(resolve));
+
+                if (signal) {
+                  signal.addEventListener(
+                    'abort',
+                    () => finish(() => reject(new DOMException('The var pull was aborted.', 'AbortError'))),
+                    { once: true },
+                  );
+                }
+              });
             }
 
             const response = self.responses.get(key) ?? { kind: 'no-head' as const };
@@ -252,7 +283,7 @@ class FakeSource {
 
 // --- runner state -----------------------------------------------------------
 
-type Outcome = { outcome: 'ok' | 'error'; kind?: string };
+type Outcome = { outcome: 'ok' | 'error'; kind?: string; error?: unknown };
 
 interface Fire {
   source: string;
@@ -291,6 +322,10 @@ function delay(ms: number): Promise<void> {
 function errorKind(error: unknown): string {
   if (error instanceof CnosVarRequiredError) {
     return 'required';
+  }
+
+  if (error instanceof CnosVarClosedError) {
+    return 'closed';
   }
 
   const message = error instanceof Error ? error.message : String(error);
@@ -534,7 +569,7 @@ class NodeParityRunner {
         this.startOutcome = { outcome: 'ok' };
       },
       (error: unknown) => {
-        this.startOutcome = { outcome: 'error', kind: errorKind(error) };
+        this.startOutcome = { outcome: 'error', kind: errorKind(error), error };
       },
     );
     // Let the attempt reach its first await so `awaitPullIssued` can observe the prefetch.
@@ -681,6 +716,13 @@ class NodeParityRunner {
 
     if (step.startErrorKind !== undefined) {
       expect(this.startOutcome?.kind, 'startErrorKind').toBe(step.startErrorKind);
+    }
+
+    if (step.startErrorHasCause !== undefined) {
+      // DECISION 1: the required/unavailable startup error preserves the underlying
+      // transport/authentication failure as its standard `cause`.
+      const hasCause = (this.startOutcome?.error as { cause?: unknown } | undefined)?.cause !== undefined;
+      expect(hasCause, 'startErrorHasCause').toBe(step.startErrorHasCause);
     }
 
     if (step.refreshOutcome !== undefined) {

@@ -68,7 +68,7 @@
   {
     "name": "status-for-a-key-that-resolves-from-no-tier-at-all",
     "axis": "status",
-    "why": "the ADR names this state `none`; it is the residual Node/Go status divergence",
+    "why": "ADR Open decision 8 (RESOLVED): a key resolving from NO tier reports source `none` AND freshness `none` in both SDKs (Go's Freshness enum gained the `none` member)",
     "projection": {
       "values": {},
       "varSources": { "svc": { "transport": "fake" } },
@@ -80,18 +80,8 @@
       { "action": "start" },
       {
         "action": "expect",
-        "status": { "key": "var.policy.mode", "source": "none", "appliedGeneration": 0, "revision": false },
-        "note": "ADR, deactivation section: varStatus() reports `source: 'static' | 'default'`, or `'none'` when the key resolves nowhere. Go used to report `default` here; fixed in this suite's commit."
-      },
-      {
-        "action": "expect",
-        "status": "divergent",
-        "note": "DIVERGENCE-3: the `freshness` reported for a key that resolves from NO tier. Node reports the sentinel `none`; Go's Freshness enum has no such member and reports `fresh`. The ADR's freshness table only covers runtime snapshots and says nothing about a key with no value at all, so neither side is provably wrong. Widening the Go enum is a public API change; narrowing Node's would drop information.",
-        "adr": "docs/cnos-runtime-vars.md - 'Freshness transitions (canonical)' (runtime snapshots only) and 'Observability'",
-        "observed": {
-          "node": { "status": { "key": "var.policy.mode", "freshness": "none" } },
-          "go": { "status": { "key": "var.policy.mode", "freshness": "fresh" } }
-        }
+        "status": { "key": "var.policy.mode", "source": "none", "freshness": "none", "appliedGeneration": 0, "revision": false },
+        "note": "ADR, deactivation section + freshness table `none` row: varStatus() reports `source: 'static' | 'default'`, or `'none'`/`'none'` when the key resolves nowhere. Go used to report source `default` then `none`/`fresh`; now `none`/`none` in both SDKs."
       }
     ]
   },

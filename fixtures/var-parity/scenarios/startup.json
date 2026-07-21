@@ -114,7 +114,7 @@
   {
     "name": "prefetch-required-transport-error-no-fallback-fails-start",
     "axis": "startup",
-    "why": "a thrown transport error with nothing to fall back to must fail startup in BOTH SDKs; the error KIND is a known divergence",
+    "why": "ADR Open decision 6 (RESOLVED): a required prefetch key with an unreachable source fails startup with the required/unavailable typed error (CnosVarRequiredError / ErrVarRequired), preserving the transport error as the CAUSE — both SDKs, same KIND, cause reachable",
     "projection": {
       "values": {},
       "varSources": { "svc": { "transport": "fake" } },
@@ -124,17 +124,7 @@
     "source": { "policy": { "kind": "error", "message": "boom" } },
     "steps": [
       { "action": "start" },
-      { "action": "expect", "startOutcome": "error" },
-      {
-        "action": "expect",
-        "status": "divergent",
-        "note": "DIVERGENCE-1: on a transport failure Node rethrows the raw transport error (kind `other`) while Go wraps it as ErrVarRequired (kind `required`). The ADR requires only that startup FAIL; it does not name the error type, so neither side is provably wrong.",
-        "adr": "docs/cnos-runtime-vars.md - 'Required-key enforcement on prefetch' (fails ready()/StartVars; no error type specified)",
-        "observed": {
-          "node": { "startErrorKind": "other" },
-          "go": { "startErrorKind": "required" }
-        }
-      }
+      { "action": "expect", "startOutcome": "error", "startErrorKind": "required", "startErrorHasCause": true }
     ]
   },
   {

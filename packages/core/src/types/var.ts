@@ -237,12 +237,25 @@ export interface VarSourceProviderContext {
   onSubscriptionConnected?(scopes: string[], info: { reconnect: boolean }): void;
 }
 
+/** Options for a single {@link VarSourceProvider.pull}. */
+export interface VarPullOptions {
+  /**
+   * Abort signal for the pull. The SDK owns one `AbortController` per startup attempt and aborts
+   * it from `close()`, so a `close()` racing an in-flight prefetch cancels the network wait
+   * promptly instead of blocking until the transport's own timeout. A provider that honors it
+   * MUST reject with an abort-shaped error (e.g. an `AbortError`) once signalled; the SDK then
+   * surfaces the aborted startup to its caller as `CnosVarClosedError`. Providers may ignore it
+   * (the pull then simply runs to completion), but the built-in providers all honor it.
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * The provider contract every transport module implements. TYPES ONLY in W1 —
  * concrete providers arrive with the runtime SDK (W3).
  */
 export interface VarSourceProvider {
-  pull(scope: VarScope, knownRevision?: string): Promise<VarSnapshotBatch>;
+  pull(scope: VarScope, knownRevision?: string, options?: VarPullOptions): Promise<VarSnapshotBatch>;
   /**
    * Open a live push stream for `scopes`. The provider owns reconnect/backoff and must never
    * throw out of the stream. It reports EVERY authoritative outcome through `onEvent` —

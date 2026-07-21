@@ -60,13 +60,30 @@ Outcomes:
 
 - **1 fix**: Go's `varStatus()` reported `source: "default"` for a key that resolves from NO tier;
   the ADR names that state `none` (as Node always did). Fixed (`VarSourceNone`).
-- **4 divergences the ADR does not settle** — recorded in the spec with BOTH observed behaviors,
-  reported without failing the build, and escalated as ADR "Open decisions" 6-9: startup error
-  KIND on a transport failure; `refreshVars()` failure reporting (and its group scope);
-  `varStatus().freshness` for a nowhere-resolving key; and that Node's `close()` cannot cancel an
-  in-flight prefetch (the TS provider contract has no cancellation signal).
-- **Non-vacuity proven** by reverting one behavior per SDK (Go scope-replacement → merge; Node's
-  round-3 blocker-3 early return) and confirming exactly the corresponding scenario fails.
+- **4 divergences the ADR did not settle** — originally recorded in the spec with BOTH observed
+  behaviors and escalated as ADR "Open decisions" 6-9. **All four are now RESOLVED and canonical**
+  (architect ruling, this pass); each divergent expectation flipped to a single canonical
+  assertion exercised identically by both runners:
+  1. **Startup transport failure → required-kind error WITH cause.** Fails with
+     `CnosVarRequiredError` / `ErrVarRequired` carrying the transport error as the cause (Node
+     `error.cause`; Go a second `%w`). (Was: Node rethrew raw → kind `other`.)
+  2. **`refreshVars()` attempts EVERY group (prefetch AND ondemand), never short-circuits, and
+     rejects with an aggregate when any failed** (required-kind preferred). (Was: Node warned +
+     resolved, prefetch-only.)
+  3. **Nowhere-resolving `varStatus()` reports `none`/`none`** — Go's `Freshness` gained
+     `FreshnessNone`. (Was: Go `fresh`.)
+  4. **`close()` aborts an in-flight prefetch** — the TS `VarSourceProvider.pull` gained an
+     `AbortSignal` option; Node `close()` now returns promptly and the startup caller gets
+     `CnosVarClosedError`. (Was: no cancellation signal; Node blocked on the pull's own timeout.)
+- **W9 reconnect qualification (architect ruling).** The initial current-head/`no_head` event that
+  every accepted `Subscribe` emits is THE canonical convergence guarantee; the client-side resync
+  pull is defensive redundancy, not independently mandatory — so the weaker Node isolation of that
+  pull flagged under W9 is **acceptable**. The client pull and its tests are retained; no
+  production test-only option was added. See the ADR rpc + reconnect-resync sections.
+- **Non-vacuity**: originally proven by reverting one behavior per SDK (Go scope-replacement →
+  merge; Node's round-3 blocker-3 early return). For this pass, the DECISION-4 abort wiring is
+  revert-verified (removing it makes the Node close scenario fail), and DECISION-2's aggregate is
+  revert-verified (reverting Node to warn+resolve makes the attempts-every-group scenario fail).
 
 ## Architecture in one screen
 

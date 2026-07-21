@@ -618,23 +618,30 @@ func (variables *varRuntime) refreshVar(ctx context.Context, fullKey string) err
 	// fail-fast LAZILY at read/Require time. The Node SDK mirrors both halves of this rule.
 	if err := variables.fetchGroup(ctx, group); err != nil {
 		if rule, ok := variables.rules[fullKey]; ok && rule.Required {
-			return fmt.Errorf("%w: %s: %v", ErrVarRequired, fullKey, err)
+			// Two `%w` verbs preserve the transport error in the unwrap chain (previously `%v`
+			// stringified it away), so errors.Is/As can reach the underlying cause.
+			return fmt.Errorf("%w: %s: %w", ErrVarRequired, fullKey, err)
 		}
 		return err
 	}
 	return nil
 }
 
-// refreshVars refreshes every group with a source, honoring ttl. A failure on a
-// group containing a required key is returned; optional-only failures are
-// reported too but never mask required failures.
+// refreshVars is an EXPLICIT caller request, so it attempts EVERY configured group with a source
+// — prefetch AND ondemand alike (prefetch/ondemand governs the automatic lifecycle, not the scope
+// of an explicit refresh). It never short-circuits: every group is attempted to completion, and if
+// any failed an AGGREGATE error is returned (required-group failures preferred over optional ones,
+// each wrapping its transport cause); nil only when every group succeeded. A `not-modified` and a
+// `no-head` are SUCCESSFUL outcomes (a `no-head` applies the normal deactivation path), never
+// failures. Background pollers remain best-effort; this contract is for the explicit API only.
+// Mirrors the Node SDK's refreshVars() failure contract.
 func (variables *varRuntime) refreshVars(ctx context.Context) error {
 	var requiredErr error
 	var optionalErr error
 	for group := range variables.groups {
 		if err := variables.fetchGroup(ctx, group); err != nil {
 			if variables.groupHasRequired(group) {
-				requiredErr = joinErrors(requiredErr, fmt.Errorf("%w: group %q: %v", ErrVarRequired, group, err))
+				requiredErr = joinErrors(requiredErr, fmt.Errorf("%w: group %q: %w", ErrVarRequired, group, err))
 			} else {
 				optionalErr = joinErrors(optionalErr, err)
 			}
@@ -792,12 +799,22 @@ func (variables *varRuntime) runStart(ctx context.Context) error {
 		}
 	}()
 
+	// Capture each group's prefetch error so the required-key gate below can preserve the
+	// underlying transport/authentication failure as the CAUSE of ErrVarRequired — the caller
+	// then gets both the configuration meaning (this key is required and unresolved) and the
+	// actionable underlying failure. Mirrors the Node SDK's `new CnosVarRequiredError(key, { cause })`.
 	var wg sync.WaitGroup
+	var fetchMu sync.Mutex
+	fetchErrs := map[string]error{}
 	for _, group := range prefetch {
 		wg.Add(1)
 		go func(g string) {
 			defer wg.Done()
-			_ = variables.fetchGroup(fetchCtx, g)
+			if err := variables.fetchGroup(fetchCtx, g); err != nil {
+				fetchMu.Lock()
+				fetchErrs[g] = err
+				fetchMu.Unlock()
+			}
 		}(group)
 	}
 	wg.Wait()
@@ -828,6 +845,11 @@ func (variables *varRuntime) runStart(ctx context.Context) error {
 		if _, ok, err := variables.resolveNoTrigger(fullKey); err != nil {
 			return err
 		} else if !ok {
+			// Two `%w` verbs (Go 1.20+) wrap BOTH the required sentinel and the transport cause, so
+			// errors.Is(err, ErrVarRequired) AND errors.Is/As against the transport error both work.
+			if cause := fetchErrs[groupFromVarKey(fullKey)]; cause != nil {
+				return fmt.Errorf("%w: %s: %w", ErrVarRequired, fullKey, cause)
+			}
 			return fmt.Errorf("%w: %s", ErrVarRequired, fullKey)
 		}
 	}
@@ -1088,10 +1110,10 @@ func (variables *varRuntime) statusDoc() map[string]VarStatusEntry {
 	result := map[string]VarStatusEntry{}
 	for fullKey := range keys {
 		group := groupFromVarKey(fullKey)
-		// `none` until a tier claims the key: a key that resolves from NO tier must not be
-		// reported as served by the `default` tier it has no default in. Matches the Node
-		// SDK's `source: 'none'` and the ADR's definition of the field.
-		entry := VarStatusEntry{Source: VarSourceNone, Freshness: FreshnessFresh}
+		// `none`/`none` until a tier claims the key: a key that resolves from NO tier must not be
+		// reported as served by (or as fresh as) the `default` tier it has no default in. Matches
+		// the Node SDK's `source: 'none', freshness: 'none'` and the ADR's definition of the field.
+		entry := VarStatusEntry{Source: VarSourceNone, Freshness: FreshnessNone}
 		if snap, ok := variables.snapshot(fullKey); ok {
 			entry.Source = snap.Source
 			entry.Freshness = snap.Freshness

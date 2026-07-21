@@ -150,14 +150,89 @@
       { "action": "expect", "status": { "key": "var.policy.mode", "source": "runtime", "lastError": true } },
       {
         "action": "expect",
-        "status": "divergent",
-        "note": "DIVERGENCE-2: refreshVars() on a failing OPTIONAL group resolves in Node (every failure is warned and swallowed) but returns the error in Go. The ADR only says refreshVars 'mirrors refreshSecrets()' and never states whether a partial failure is observable to the caller.",
-        "adr": "docs/cnos-runtime-vars.md - 'Runtime SDK surfaces' (await cnos.refreshVars(); no failure contract)",
-        "observed": {
-          "node": { "refreshOutcome": "ok" },
-          "go": { "refreshOutcome": "error" }
-        }
+        "refreshOutcome": "error",
+        "note": "ADR Open decision 7 (RESOLVED): refreshVars() is an explicit caller request; a failing group makes it REJECT after all groups were attempted (last-known-good is still retained above). Canonical in both SDKs."
       }
+    ]
+  },
+  {
+    "name": "refresh-vars-attempts-every-group-and-aggregates-failure",
+    "axis": "deactivation",
+    "why": "ADR Open decision 7 (RESOLVED): refreshVars() attempts EVERY group (no short-circuit) and REJECTS with an aggregate when any failed — asserted via the healthy group's pull count that it was refreshed despite the sibling failing",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": {
+        "policy": { "source": "svc", "mode": "prefetch" },
+        "billing": { "source": "svc", "mode": "prefetch" }
+      },
+      "schema": {
+        "var.policy.mode": { "type": "string" },
+        "var.billing.mode": { "type": "string" }
+      }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:r1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      },
+      "billing": { "kind": "error", "message": "billing boom" }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "awaitPullIssued", "scope": "policy", "count": 1, "timeoutMs": 3000 },
+      { "action": "awaitPullIssued", "scope": "billing", "count": 1, "timeoutMs": 3000 },
+      { "action": "refreshVars" },
+      { "action": "expect", "refreshOutcome": "error" },
+      { "action": "awaitPullIssued", "scope": "policy", "count": 2, "timeoutMs": 3000 },
+      { "action": "awaitPullIssued", "scope": "billing", "count": 2, "timeoutMs": 3000 },
+      { "action": "read", "key": "var.policy.mode" },
+      { "action": "expect", "read": { "found": true, "value": "live", "source": "runtime" } }
+    ]
+  },
+  {
+    "name": "refresh-vars-all-groups-healthy-resolves",
+    "axis": "deactivation",
+    "why": "ADR Open decision 7 (RESOLVED): refreshVars() resolves only when every group succeeded",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": {
+        "policy": { "source": "svc", "mode": "prefetch" },
+        "billing": { "source": "svc", "mode": "prefetch" }
+      },
+      "schema": {
+        "var.policy.mode": { "type": "string" },
+        "var.billing.mode": { "type": "string" }
+      }
+    },
+    "source": {
+      "policy": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:p1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "policy.mode": "live" }
+      },
+      "billing": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:b1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "billing.mode": "on" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "expect", "startOutcome": "ok" },
+      { "action": "refreshVars" },
+      { "action": "expect", "refreshOutcome": "ok" },
+      { "action": "read", "key": "var.billing.mode" },
+      { "action": "expect", "read": { "found": true, "value": "on", "source": "runtime" } }
     ]
   },
   {
