@@ -110,6 +110,36 @@ fixed by raising `WithMaxSubscribeFailures` in those tests, preserving the canon
 Then: full `pnpm -r typecheck`/`test` green, both Go modules `build`/`vet`/`test` green
 (uncached), **`RACE CHECK: PASS`**.
 
+## Round 5 — findings and fixes (architect-conducted, final targeted round)
+
+Round 5 targeted the round-4 self-synchronization/authorization surface, per the architect's
+merge decision. Two findings, both fixed by the architect; the coordinator ran full verification
+and revert-verified both behaviors.
+
+1. **[High] Child-only initial sync exposed fallback blips.** The server always included the
+   requested parent scope, so a subscription to `agentic` with only `agentic.child` active
+   emitted `no_head("agentic")` then `head("agentic.child")` — the first event cascade-cleared
+   the child and fired fallback watchers, the second restored it: a transient wrong value and
+   duplicate transitions on EVERY reconnect with unchanged authoritative state. (A round-4 test
+   pinned this sequence as expected — the ninth "test that asserted the wrong thing.") Fix: a
+   **never-authored** parent with active descendants gets no synthetic `no_head`; an **explicit
+   parent tombstone** (`generation > 0`) remains authoritative and cascading. Relatedly, the
+   defensive reconnect pull now clears only the EXACT queried scope in both SDKs
+   (`removeExactScope`), so a group-level no-head can never erase live child scopes.
+2. **[Medium] Subscribe teardown guard lost in round-4 integration.** The `torn` check after the
+   asynchronous authorization was dropped, so authorization succeeding after cleanup proceeded
+   through flush/initialization on a torn stream. Fix: `torn` re-checked after every
+   authorization await; a cancelled stream stops authorizing remaining scopes.
+
+Coordinator verification: `pnpm -r typecheck`/`test` green, both Go modules `build`/`vet`/`test`
+green uncached, **`RACE CHECK: PASS`**. Revert-verified: cascading the defensive cleanup fails
+`TestVarNarrowerScopeSurvivesABroaderCommit` (Go); removing the parent-suppression fails both new
+Node tests, including the full-manager no-fallback-watcher-event sequence.
+
+Open item recorded by the architect for a future decision (not blocking): **descendant
+authorization semantics** — whether authorizing a group intentionally grants every matching
+child scope. Today it does (prefix matching); this is undocumented as a deliberate choice.
+
 ## Round 4 — where to aim (architect-directed)
 
 The parity suite now mechanically pins 44 lifecycle scenarios, so re-finding what it covers is
