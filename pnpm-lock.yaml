@@ -149,11 +149,10 @@ importers:
         version: 5.9.3
 
   packages/var-http:
-    dependencies:
+    devDependencies:
       '@kitsy/cnos-core':
         specifier: workspace:*
         version: link:../core
-    devDependencies:
       '@kitsy/cnos-var-server':
         specifier: workspace:*
         version: link:../var-server
@@ -169,19 +168,19 @@ importers:
       '@grpc/proto-loader':
         specifier: ^0.7.10
         version: 0.7.15
-      '@kitsy/cnos-core':
-        specifier: workspace:*
-        version: link:../core
       '@kitsy/cnos-var-server':
         specifier: workspace:*
         version: link:../var-server
     devDependencies:
+      '@kitsy/cnos-core':
+        specifier: workspace:*
+        version: link:../core
       '@kitsy/cnos-var-testkit':
         specifier: workspace:*
         version: link:../var-testkit
 
   packages/var-server:
-    dependencies:
+    devDependencies:
       '@kitsy/cnos-core':
         specifier: workspace:*
         version: link:../core

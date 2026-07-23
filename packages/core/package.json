@@ -1,5 +1,6 @@
 {
   "name": "@kitsy/cnos-core",
+  "private": true,
   "version": "1.17.0",
   "description": "Core orchestration contracts and runtime primitives for CNOS.",
   "type": "module",
@@ -32,9 +33,6 @@
     "orchestration",
     "plugin-system"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts",
     "clean": "rimraf dist",

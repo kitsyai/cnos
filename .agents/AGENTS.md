@@ -16,7 +16,7 @@ CNOS is not a dotenv wrapper. It is a portable, plugin-based configuration syste
 
 | Package | Published as | What it does |
 |---------|--------------|--------------|
-| `packages/core/` | `@kitsy/cnos-core` | Core contracts, manifest/profile/workspace resolution, derivation, validation, projection, secret handling |
+| `packages/core/` | Private workspace package | Core contracts, manifest/profile/workspace resolution, derivation, validation, projection, secret handling; bundled into public Node packages, never published directly |
 | `packages/cnos/` | `@kitsy/cnos` | Batteries-included runtime package, singleton runtime, browser runtime, build helpers, plugin re-exports |
 | `packages/cli/` | `@kitsy/cnos-cli` | CLI commands, help surfaces, formatting, repo workflows |
 | `packages/docs/` | `@kitsy/cnos-docs` | Published docs content for the web docs site and other docs consumers |

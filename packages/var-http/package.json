@@ -20,18 +20,17 @@
     "access": "public"
   },
   "license": "MIT",
-  "dependencies": {
-    "@kitsy/cnos-core": "workspace:*"
-  },
   "devDependencies": {
+    "@kitsy/cnos-core": "workspace:*",
     "@kitsy/cnos-var-server": "workspace:*",
     "@kitsy/cnos-var-testkit": "workspace:*"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "build": "rimraf dist && tsup --config tsup.config.ts",
     "clean": "rimraf dist",
-    "dev": "tsup src/index.ts --watch --format esm,cjs --dts",
+    "dev": "tsup --config tsup.config.ts --watch",
     "lint": "eslint src test",
+    "prepack": "pnpm build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

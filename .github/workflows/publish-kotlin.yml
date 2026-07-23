@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'release/kotlin/v[0-9]+.[0-9]+.[0-9]+'
 
 concurrency:
   group: publish-kotlin-${{ github.ref }}
@@ -50,7 +51,8 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          TAG="${GITHUB_REF_NAME##*/}"
+          VERSION="${TAG#v}"
           mvn clean deploy -P release \
             -Drevision="${VERSION}" \
             -Dgpg.passphrase="${GPG_PASSPHRASE}" \

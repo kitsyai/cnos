@@ -17,6 +17,7 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'release/php/v[0-9]+.[0-9]+.[0-9]+'
 
 concurrency:
   group: publish-php-${{ github.ref }}

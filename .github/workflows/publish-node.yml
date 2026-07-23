@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'release/node/v[0-9]+.[0-9]+.[0-9]+'
 
 concurrency:
   group: publish-node-${{ github.ref }}
@@ -26,6 +27,26 @@ jobs:
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Build and pack public packages
+        run: pnpm publish:check
+
+      # Runtime variable packages publish before their dependents.
+      # @kitsy/cnos-core is private and bundled into each package.
+      - name: Publish @kitsy/cnos-var-server
+        run: pnpm --filter @kitsy/cnos-var-server publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-var-http
+        run: pnpm --filter @kitsy/cnos-var-http publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @kitsy/cnos-var-rpc
+        run: pnpm --filter @kitsy/cnos-var-rpc publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Core packages — must publish before dependents
       - name: Publish @kitsy/cnos

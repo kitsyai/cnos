@@ -6,7 +6,9 @@ The repo is split by responsibility. This matters when you decide where code bel
 
 ### `packages/core`
 
-The core engine and contracts live here:
+The core engine and contracts live here. `@kitsy/cnos-core` is a private workspace
+package and is never published directly; public Node packages bundle the core code and
+declarations they expose.
 
 - manifest loading and normalization
 - workspace and profile resolution
