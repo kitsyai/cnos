@@ -42,10 +42,14 @@ function executable(name) {
 }
 
 function run(command, args, options = {}) {
+  const useWindowsShell =
+    process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(command);
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     encoding: 'utf8',
+    shell: useWindowsShell,
     stdio: options.capture ? 'pipe' : 'inherit',
+    windowsHide: true,
   });
   if (result.error) {
     fail(`Could not run ${command}: ${result.error.message}`);
