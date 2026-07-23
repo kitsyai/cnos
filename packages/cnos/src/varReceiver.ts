@@ -14,6 +14,7 @@ import { getSingletonRuntime } from './runtime/state.js';
  */
 interface VarRuntimeHooks {
   __ingestVar?: (sourceId: string, scope: string, batch: VarSnapshotBatch) => IngestResult | void;
+  __ingestVarNoHead?: (sourceId: string, scope: string) => void;
   __varSource?: (sourceId: string) => NormalizedVarSourceDefinition | undefined;
   __resolveVarSecret?: (ref: string) => Promise<string>;
 }
@@ -270,6 +271,13 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
     }
 
     const secret = await runtime.__resolveVarSecret(source.verify);
+
+    if (secret.length === 0) {
+      onError(new Error(`Var source "${sourceId}" resolved an empty \`verify\` secret; rejecting the push.`));
+      unauthorized();
+      return;
+    }
+
     const signature = req.headers[signatureHeader];
     let verified = false;
 
@@ -295,6 +303,7 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
       generation?: unknown;
       schemaId?: unknown;
       effectiveAt?: unknown;
+      noHead?: unknown;
       values?: unknown;
     };
 
@@ -303,6 +312,31 @@ export function varReceiver(sourceId: string, options: VarReceiverOptions = {}):
     } catch {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'Invalid JSON body.', code: 'bad-request' }));
+      return;
+    }
+
+    if (payload.noHead !== undefined && typeof payload.noHead !== 'boolean') {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Push payload `noHead` must be a boolean.', code: 'bad-request' }));
+      return;
+    }
+
+    if (payload.noHead === true) {
+      if (payload.values !== undefined) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'A `noHead` push must not carry `values`.', code: 'bad-request' }));
+        return;
+      }
+
+      if (!runtime.__ingestVarNoHead) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'CNOS var runtime cannot apply deactivation pushes.', code: 'not-ready' }));
+        return;
+      }
+
+      runtime.__ingestVarNoHead(sourceId, scope);
+      res.writeHead(204);
+      res.end();
       return;
     }
 

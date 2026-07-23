@@ -369,6 +369,10 @@ export function createRuntime(
         varManager.ingest(sourceId, scope, batch as never),
       enumerable: false,
     });
+    Object.defineProperty(runtime, '__ingestVarNoHead', {
+      value: (sourceId: string, scope: string) => varManager.ingestNoHead(sourceId, scope),
+      enumerable: false,
+    });
     Object.defineProperty(runtime, '__varSource', {
       value: (sourceId: string) => manifest.varSources?.[sourceId],
       enumerable: false,

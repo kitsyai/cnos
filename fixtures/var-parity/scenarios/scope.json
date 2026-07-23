@@ -113,5 +113,34 @@
       { "action": "expect", "watch": { "id": "w1", "fires": [] } },
       { "action": "expect", "status": { "key": "var.policy.enabled", "source": "runtime", "appliedGeneration": 1, "lastRejected": true } }
     ]
+  },
+  {
+    "name": "key-scoped-push-survives-a-later-broad-replacement",
+    "axis": "scope",
+    "why": "round-4: rpc push ingest must preserve the committed key scope instead of collapsing it to the group",
+    "projection": {
+      "values": {},
+      "varSources": { "svc": { "transport": "fake" } },
+      "vars": { "g": { "source": "svc", "mode": "prefetch" } },
+      "schema": { "var.g.a.x": { "type": "string" }, "var.g.b": { "type": "string" } }
+    },
+    "source": {
+      "g": {
+        "kind": "head",
+        "generation": 1,
+        "revision": "sha256:broad-1",
+        "effectiveAt": "2026-07-20T00:00:00Z",
+        "values": { "g.a.x": "broad", "g.b": "b1" }
+      }
+    },
+    "steps": [
+      { "action": "start" },
+      { "action": "push", "scope": "g.a", "event": { "kind": "batch", "generation": 1, "revision": "sha256:narrow-1", "effectiveAt": "2026-07-20T00:01:00Z", "values": { "g.a.x": "narrow" } } },
+      { "action": "push", "scope": "g", "event": { "kind": "batch", "generation": 2, "revision": "sha256:broad-2", "effectiveAt": "2026-07-20T00:02:00Z", "values": { "g.b": "b2" } } },
+      { "action": "read", "key": "var.g.a.x" },
+      { "action": "expect", "read": { "found": true, "value": "narrow", "source": "runtime" } },
+      { "action": "read", "key": "var.g.b" },
+      { "action": "expect", "read": { "found": true, "value": "b2", "source": "runtime" } }
+    ]
   }
 ]

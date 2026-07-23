@@ -141,8 +141,8 @@ type Provider struct {
 // New builds a provider for one var source definition.
 func New(def cnos.VarSourceDef, providerCtx cnos.VarProviderContext, configure ...Option) (*Provider, error) {
 	settings := options{
-		backoffBase:    500 * time.Millisecond,
-		backoffCeiling: 30 * time.Second,
+		backoffBase:    time.Second,
+		backoffCeiling: time.Minute,
 		maxFailures:    MaxConsecutiveSubscribeFailures,
 	}
 	for _, apply := range configure {
@@ -428,7 +428,8 @@ func (provider *Provider) nextBackoff(attempt int) time.Duration {
 	if next <= 0 {
 		next = time.Millisecond
 	}
-	return next + time.Duration(rand.Int63n(int64(next)/4+1))
+	floor := next / 2
+	return floor + time.Duration(rand.Int63n(int64(next-floor)+1))
 }
 
 // Close cancels every active subscription stream and closes the channel. Idempotent.

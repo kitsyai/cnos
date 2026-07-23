@@ -455,8 +455,11 @@ func TestSubscribeReconnectsAfterServerRestart(t *testing.T) {
 	target := listener.Addr().String()
 	server := serveOn(t, service, listener)
 
-	// Short backoff keeps the reconnect assertion quick without weakening it.
-	provider := newProvider(t, target, nil, "", WithBackoff(50*time.Millisecond, 200*time.Millisecond))
+	// Short backoff keeps the reconnect assertion quick without weakening it. The failure cap
+	// is raised because the equal-jitter band (delay in [next/2, next]) retries roughly twice
+	// as fast as the old additive jitter — a test outage must not exhaust the cap and go
+	// terminal before the server is back.
+	provider := newProvider(t, target, nil, "", WithBackoff(50*time.Millisecond, 200*time.Millisecond), WithMaxSubscribeFailures(1000))
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

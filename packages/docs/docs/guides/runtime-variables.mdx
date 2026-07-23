@@ -118,7 +118,8 @@ This overlay only applies to `var.*` reads — `value.*` reads are never affecte
 
 Deactivating the runtime head (`cnos var deactivate`) falls back to tier ② or ③ with **no
 deployment and no restart**. When a source answers "no active head" — an http
-`404 {code:"no-head"}`, an rpc `no_head` pull, or an rpc `no_head` **push** — CNOS atomically
+`404 {code:"no-head"}`, an rpc `no_head` pull/push, or an authenticated receiver
+`{ "noHead": true }` push — CNOS atomically
 removes the runtime tier for that scope and everything nested beneath it, and subsequent reads
 resolve from `value.*` / the schema `default` again.
 
@@ -393,13 +394,14 @@ app.post('/cnos/vars/push/:scope', varReceiver('ops'));
 ```
 
 The receiver expects the target scope (a var key or group) as the **last path segment** of
-the request URL, and a JSON body `{ revision?, generation?, schemaId?, effectiveAt?, values }`.
+the request URL. Send `{ revision?, generation?, schemaId?, effectiveAt?, values }` to replace
+that scope, or `{ noHead: true }` to deactivate it. A no-head payload must not carry `values`.
 When `revision`/`generation` are omitted, both are derived deterministically (`revision =
 sha256:` of the canonical JSON of `values`; `generation = Date.now()`), identical to the Go
 receiver.
 
-Verification **always** runs, and **fails closed**. A source that declares no `verify` secret
-cannot accept pushes at all — every request to its receiver is `401`. Mounting a receiver is a
+Verification **always** runs, and **fails closed**. A source that declares no `verify` secret or
+resolves it to an empty value cannot accept pushes at all — every request to its receiver is `401`. Mounting a receiver is a
 deliberate act, so an omitted `verify` is a misconfiguration, never an invitation.
 
 Scheme selection is **presence-based**, identically in both SDKs:

@@ -33,6 +33,7 @@ export interface SingletonVarSupport {
   varSnapshot(key: string): ResolvedVarSnapshot;
   varSource(sourceId: string): NormalizedVarSourceDefinition | undefined;
   ingest(sourceId: string, scope: string, batch: VarSnapshotBatch): IngestResult;
+  ingestNoHead(sourceId: string, scope: string): void;
   resolveSecret(ref: string): Promise<string>;
   start(): Promise<void>;
 }
@@ -96,6 +97,7 @@ export function createSingletonVarSupport(options: SingletonVarSupportOptions): 
     varSnapshot,
     varSource: (sourceId) => options.varSources[sourceId],
     ingest: (sourceId, scope, batch) => manager.ingest(sourceId, scope, batch),
+    ingestNoHead: (sourceId, scope) => manager.ingestNoHead(sourceId, scope),
     resolveSecret: options.resolveSecret,
     // Transactional: a failed attempt rolls back the timers/subscriptions it created, so the
     // retry the round-1 latch fix permits cannot duplicate them.

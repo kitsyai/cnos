@@ -882,8 +882,8 @@ func (variables *varRuntime) isClosed() bool {
 	return variables.closed
 }
 
-// startPollers spawns one poll loop per PULL-ONLY source that declares a pollInterval, covering
-// that source's prefetch groups.
+// startPollers spawns one poll loop per prefetch group on a PULL-ONLY source that declares a
+// pollInterval. Groups back off independently, so a failing scope never throttles a healthy one.
 //
 // CANONICAL RULE (identical in the Node SDK): polling is keyed off the provider's declared
 // CAPABILITIES, never the transport name — poll only when the provider does NOT implement
@@ -896,7 +896,6 @@ func (variables *varRuntime) startPollers() {
 		return
 	}
 
-	bySource := map[string][]string{}
 	for group, def := range variables.groups {
 		if def.Mode != "prefetch" {
 			continue
@@ -908,16 +907,13 @@ func (variables *varRuntime) startPollers() {
 		if variables.sourceCanSubscribe(def.Source, source) {
 			continue
 		}
-		bySource[def.Source] = append(bySource[def.Source], group)
-	}
-	for sourceName, groups := range bySource {
-		interval := parseVarDuration(variables.sources[sourceName].PollInterval)
-		go variables.pollLoop(groups, interval)
+		interval := parseVarDuration(source.PollInterval)
+		go variables.pollLoop(group, interval)
 	}
 }
 
-func (variables *varRuntime) pollLoop(groups []string, interval time.Duration) {
-	backoff := time.Duration(0)
+func (variables *varRuntime) pollLoop(group string, interval time.Duration) {
+	attempt := 0
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
 	for {
@@ -925,17 +921,11 @@ func (variables *varRuntime) pollLoop(groups []string, interval time.Duration) {
 		case <-variables.ctx.Done():
 			return
 		case <-timer.C:
-			failed := false
-			for _, group := range groups {
-				if err := variables.fetchGroup(variables.ctx, group); err != nil {
-					failed = true
-				}
-			}
-			if failed {
-				backoff = nextBackoff(backoff)
-				timer.Reset(backoff)
+			if err := variables.fetchGroup(variables.ctx, group); err != nil {
+				attempt++
+				timer.Reset(nextBackoff(attempt))
 			} else {
-				backoff = 0
+				attempt = 0
 				timer.Reset(interval)
 			}
 		}
@@ -943,18 +933,18 @@ func (variables *varRuntime) pollLoop(groups []string, interval time.Duration) {
 }
 
 // nextBackoff returns a capped exponential backoff with jitter.
-func nextBackoff(current time.Duration) time.Duration {
-	const base = 500 * time.Millisecond
-	const ceiling = 30 * time.Second
-	next := current * 2
-	if next < base {
-		next = base
+func nextBackoff(attempt int) time.Duration {
+	const base = time.Second
+	const ceiling = time.Minute
+	next := base
+	for i := 0; i < attempt && next < ceiling; i++ {
+		next *= 2
 	}
 	if next > ceiling {
 		next = ceiling
 	}
-	jitter := time.Duration(rand.Int63n(int64(next)/4 + 1))
-	return next + jitter
+	floor := next / 2
+	return floor + time.Duration(rand.Int63n(int64(next-floor)+1))
 }
 
 // close stops all pollers/goroutines and releases watchers. Idempotent.

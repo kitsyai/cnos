@@ -327,6 +327,15 @@ func TestVarInvalidBatchCommitsNothing(t *testing.T) {
 	}
 }
 
+func TestVarPollBackoffNeverExceedsTheCeiling(t *testing.T) {
+	t.Parallel()
+	for attempt := 1; attempt < 100; attempt++ {
+		if delay := nextBackoff(attempt); delay > time.Minute {
+			t.Fatalf("attempt %d exceeded the one-minute ceiling: %v", attempt, delay)
+		}
+	}
+}
+
 // --- receiver adversarial input --------------------------------------------
 
 func TestVarReceiverRejectsNonPost(t *testing.T) {
@@ -355,6 +364,27 @@ func TestVarReceiverRejectsMalformedBodies(t *testing.T) {
 		if status := pushSigned(t, base+"/cnos/vars/user", body); status != http.StatusBadRequest {
 			t.Fatalf("body %q: expected 400, got %d", body, status)
 		}
+	}
+}
+
+func TestVarReceiverNoHeadPushDeactivatesScope(t *testing.T) {
+	t.Parallel()
+	runtime, base := pushRuntime(t, map[string]VarGroupDef{"user": {Mode: "ondemand"}}, nil, true)
+
+	if status := pushSigned(t, base+"/cnos/vars/user", `{"values":{"user.plan":"pro"}}`); status != http.StatusNoContent {
+		t.Fatalf("activation push: got %d", status)
+	}
+	if value, _, _ := runtime.Var("user.plan"); value != "pro" {
+		t.Fatalf("expected runtime value before deactivation, got %v", value)
+	}
+	if status := pushSigned(t, base+"/cnos/vars/user", `{"noHead":true}`); status != http.StatusNoContent {
+		t.Fatalf("no-head push: got %d", status)
+	}
+	if value, ok, _ := runtime.Var("user.plan"); ok {
+		t.Fatalf("no-head push must remove the runtime tier, got %v", value)
+	}
+	if status := pushSigned(t, base+"/cnos/vars/user", `{"noHead":true,"values":null}`); status != http.StatusBadRequest {
+		t.Fatalf("conflicting no-head push: got %d", status)
 	}
 }
 

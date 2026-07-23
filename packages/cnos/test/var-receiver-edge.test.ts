@@ -394,7 +394,50 @@ describe('receiver adversarial input', () => {
 // Signature / auth edge cases
 // ---------------------------------------------------------------------------
 
+describe('receiver no-head push', () => {
+  it('deactivates the addressed scope and restores its fallback tier', async () => {
+    const runtime = await runtimeFor();
+    const handler = varReceiver('svc');
+    const activate = await invoke(handler, {
+      method: 'POST',
+      url: '/cnos/vars/push/flags',
+      headers: { authorization: `Bearer ${SECRET}` },
+      body: { values: { 'flags.enabled': true } },
+    });
+    expect(activate.statusCode).toBe(204);
+    expect(runtime.read('var.flags.enabled')).toBe(true);
+
+    const deactivate = await invoke(handler, {
+      method: 'POST',
+      url: '/cnos/vars/push/flags',
+      headers: { authorization: `Bearer ${SECRET}` },
+      body: { noHead: true },
+    });
+    expect(deactivate.statusCode).toBe(204);
+    expect(runtime.read('var.flags.enabled')).toBe(false);
+    await runtime.close?.();
+  });
+});
+
 describe('receiver signature verification', () => {
+  it('SEC: rejects an HMAC computed with an empty resolved verify secret', async () => {
+    const root = await fixture(MANIFEST);
+    const runtime = await createCnos({ root, plugins: [loader([{ key: 'secret.ops.verify', value: '' }])] });
+    const handler = varReceiver('svc', { onError: () => undefined });
+    const raw = JSON.stringify({ values: { 'flags.enabled': true } });
+    const signature = `sha256=${createHmac('sha256', '').update(raw).digest('hex')}`;
+    const res = await invoke(handler, {
+      method: 'POST',
+      url: '/cnos/vars/push/flags',
+      headers: { 'x-cnos-signature': signature },
+      raw,
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(runtime.read('var.flags.enabled')).toBe(false);
+    await runtime.close?.();
+  });
+
   it('401s a signature missing the required `sha256=` prefix, and one with the wrong algorithm label', async () => {
     const runtime = await runtimeFor();
     const handler = varReceiver('svc');

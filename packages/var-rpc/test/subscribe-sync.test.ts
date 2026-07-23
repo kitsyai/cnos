@@ -179,6 +179,30 @@ describe('a commit landing in the authorize window', () => {
 
     stop?.();
   }, 30_000);
+
+  it('authorizes every requested scope and rejects the whole stream when one is denied', async () => {
+    const checked: string[] = [];
+    const { server } = await harness((ctx) => {
+      checked.push(ctx.scope ?? '');
+      return ctx.scope !== 'restricted';
+    });
+    const failures: { terminal: boolean }[] = [];
+    const provider = track(
+      createRpcVarProvider(
+        { transport: 'rpc', url: server.target, auth: {} },
+        { resolveSecret: async () => '' },
+        { onError: (_error, info) => failures.push({ terminal: info.terminal }) },
+      ),
+    );
+    const events: VarPushEvent[] = [];
+    const stop = provider.subscribe?.([{ group: 'allowed' }, { group: 'restricted' }], (event) => events.push(event));
+
+    expect(await until(() => failures.length > 0)).toBe(true);
+    expect(checked).toEqual(['allowed', 'restricted']);
+    expect(failures[0]?.terminal).toBe(true);
+    expect(events).toEqual([]);
+    stop?.();
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -229,6 +253,23 @@ describe('an accepted Subscribe emits the current state first', () => {
 
     expect(await until(() => events.length > 0)).toBe(true);
     expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic' });
+    stop?.();
+  }, 30_000);
+
+  it('a group subscribe reconstructs active child scopes after its parent no_head', async () => {
+    const { engine, server } = await harness();
+    await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'child-head' }, 0);
+    const provider = providerFor(server.target);
+    const events: VarPushEvent[] = [];
+    const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => events.push(event));
+
+    expect(await until(() => events.length >= 2)).toBe(true);
+    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic' });
+    expect(events[1]?.kind).toBe('batch');
+    expect(events[1]?.scope).toBe('agentic.lanes.vinci');
+    expect(events[1]?.batch?.values).toEqual({
+      'agentic.lanes.vinci': { enabled: true, model_target_ref: 'child-head' },
+    });
     stop?.();
   }, 30_000);
 });

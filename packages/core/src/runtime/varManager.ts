@@ -364,6 +364,13 @@ export class VarManager {
     return result;
   }
 
+  /** Receiver / push deactivation path. A no-head is authoritative and removes nested scopes. */
+  ingestNoHead(_sourceId: string, scope: string): void {
+    const group = scope.split('.')[0] ?? scope;
+    this.applyNoHead(scope, group);
+    this.store.recordRefresh(scope, group);
+  }
+
   // ---- Lifecycle ---------------------------------------------------------
 
   private prefetchGroups(): string[] {
@@ -695,8 +702,7 @@ export class VarManager {
         return;
       }
 
-      this.applyNoHead(scope, scope.split('.')[0] ?? scope);
-      this.store.recordRefresh(scope, scope.split('.')[0] ?? scope);
+      this.ingestNoHead('', scope);
       return;
     }
 
@@ -706,19 +712,19 @@ export class VarManager {
       return;
     }
 
-    const firstKey = event.scope ?? Object.keys(batch.values)[0];
+    const scope = event.scope ?? Object.keys(batch.values)[0]?.split('.')[0];
 
-    if (!firstKey) {
+    if (!scope) {
       return;
     }
 
-    const group = firstKey.split('.')[0] ?? '';
+    const group = scope.split('.')[0] ?? '';
 
     if (!group) {
       return;
     }
 
-    this.ingest(group, group, batch);
+    this.ingest(group, scope, batch);
   }
 
   private schedulePoll(group: string, sourceId: string, interval: number, delay: number, attempt: number): void {

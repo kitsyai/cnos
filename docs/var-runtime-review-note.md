@@ -87,6 +87,29 @@ Outcomes:
   revert-verified (removing it makes the Node close scenario fail), and DECISION-2's aggregate is
   revert-verified (reverting Node to warn+resolve makes the attempts-every-group scenario fail).
 
+## Round 4 — findings and fixes (architect-conducted)
+
+Round 4 was reviewed AND fixed by the architect directly (static review; the coordinator ran the
+full verification afterward). Six findings, all in the surfaces the round-4 aiming section named:
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | blocker | Node receiver accepted HMAC auth with an EMPTY resolved verify secret — anyone can compute a valid signature over an empty key. (Bearer branch and Go already rejected empty.) | Empty resolved verification secret → `401` before either scheme runs. |
+| 2 | blocker | Multi-scope rpc Subscribe authorized only `scopes[0]` but delivered every requested scope — subscribe `["allowed","restricted"]`, pass on `allowed`, receive both. | Every unique scope authorized before anything is emitted; any denial rejects the whole stream. |
+| 3 | high | BOTH SDKs collapsed rpc key-scoped batches to their group — a commit for `agentic.lanes.vinci` replaced scope `agentic`, dropping sibling runtime keys and defeating narrower-scope survival. (The receiver twin of this was fixed in round 3; the rpc ingest path had the same bug.) | `event.scope`/`batch.Scope` preserved as the committed scope; group derived only for config lookup. |
+| 4 | high | Subscribe initial-sync read only `store.head(group)` while live delivery prefix-matches — a child-only activation yielded a bare group `no_head` that could clear valid child state, and child mutations during an outage were absent from the reconnect snapshot, contradicting the canonical initial-event convergence guarantee. | Initial sync enumerates every known matching scope (parent-first), emitting exact head/no-head per scope. |
+| 5 | medium | Pre-authorization commit buffering was unbounded — a stalled authorize backend plus active commits consumed unbounded memory per connection. | Buffer capped at 1,024 events. |
+| 6 | medium | Poll cadence observably diverged: Node per-group, Go per-source (one failing group backed off healthy siblings); Go's 30s "ceiling" was applied before positive jitter (real delays to 37.5s). | Canonical: per-GROUP scheduling, equal-jitter (`[next/2, next]`), ceiling as a hard cap after jitter, both SDKs. |
+| — | ruling | The round-4 note asked for receiver-driven no-head deactivation but the receiver wire had no representation for it. | New receiver contract: `{ "noHead": true }` body deactivates the URL scope through the standard no-head path, both SDKs. |
+
+Coordinator verification after the architect's pass: fixed three integration slips (an undefined
+`torn` guard in the unary Pull handler → `call.cancelled`; a missing `strings` import in
+`var_provider.go`; four Go reconnect tests whose outage windows were tuned to the old additive
+jitter — equal jitter retries ~2× faster, so the bounded failure cap went terminal mid-outage;
+fixed by raising `WithMaxSubscribeFailures` in those tests, preserving the canonical cadence).
+Then: full `pnpm -r typecheck`/`test` green, both Go modules `build`/`vet`/`test` green
+(uncached), **`RACE CHECK: PASS`**.
+
 ## Round 4 — where to aim (architect-directed)
 
 The parity suite now mechanically pins 44 lifecycle scenarios, so re-finding what it covers is

@@ -1111,6 +1111,10 @@ function attachBootstrappedProjection(
         varSupport.ingest(sourceId, scope, batch),
       enumerable: false,
     });
+    Object.defineProperty(runtime, '__ingestVarNoHead', {
+      value: (sourceId: string, scope: string) => varSupport.ingestNoHead(sourceId, scope),
+      enumerable: false,
+    });
     Object.defineProperty(runtime, '__varSource', {
       value: (sourceId: string) => varSupport.varSource(sourceId),
       enumerable: false,

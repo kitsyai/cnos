@@ -39,6 +39,7 @@ function bearerFromMetadata(metadata: grpc.Metadata): string | undefined {
 }
 
 const EMPTY_VALUES = Buffer.alloc(0);
+const MAX_PENDING_SUBSCRIBE_EVENTS = 1024;
 
 /** Canonical head batch — the SAME `{generation, revision, schemaId?, effectiveAt, values}` the http route serves. */
 function headMessage(head: ScopeHead): WireSnapshotBatch {
@@ -131,6 +132,10 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
           ...(token !== undefined ? { token } : {}),
         });
 
+        if (call.cancelled) {
+          return;
+        }
+
         if (!permitted) {
           callback({ code: grpc.status.UNAUTHENTICATED, details: 'Not authorized for this var scope.' });
           return;
@@ -169,12 +174,13 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
      *    have been issued just before that commit). Commits arriving while authorization is
      *    still resolving are BUFFERED, then flushed in commit order once it succeeds. A failed
      *    authorization discards the buffer and terminates the stream exactly as before.
-     * 2. An accepted Subscribe emits the CURRENT STATE as its first event(s): each subscribed
-     *    scope's head batch, or a `no_head` batch when it has none. A reconnecting client
-     *    therefore converges from the stream ALONE — including the deactivation case, which
-     *    has no other path to convergence because a subscribe-capable source runs no poller.
+     * 2. An accepted Subscribe emits the CURRENT STATE as its first event(s): each requested
+     *    scope plus every known matching descendant, parent first. This reconstructs independently
+     *    authored key heads and deactivations, so reconnect converges from the stream ALONE.
      *
-     * The initial state is deduplicated against the flushed buffer by revision, so a client
+     * Every requested scope is authorized before any buffered event is written. The pending
+     * buffer is bounded to prevent a stalled authorizer from creating unbounded memory growth.
+     * Initial state is deduplicated against the flushed buffer by revision, so a client
      * never observes the same revision twice in a row. Everything from the flush through
      * `authorized = true` runs in one synchronous block, and `engine.emitCommit` is itself
      * synchronous, so no commit can interleave between the buffer flush and the live path.
@@ -199,6 +205,14 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
           return;
         }
 
+        if (msg.no_head) {
+          for (const scope of lastEmitted.keys()) {
+            if (scope.startsWith(`${msg.scope}.`)) {
+              lastEmitted.delete(scope);
+            }
+          }
+        }
+
         lastEmitted.set(msg.scope, identity(msg));
 
         try {
@@ -220,6 +234,16 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
         if (!authorized) {
           // Authorization is still resolving: hold the commit rather than writing to a stream
           // that may yet be refused, and rather than dropping it.
+          if (buffered.length >= MAX_PENDING_SUBSCRIBE_EVENTS) {
+            cleanup();
+            endWithStatus(
+              call,
+              grpc.status.RESOURCE_EXHAUSTED,
+              `Subscribe authorization exceeded the ${MAX_PENDING_SUBSCRIBE_EVENTS}-event pending buffer.`,
+            );
+            return;
+          }
+
           buffered.push(msg);
           return;
         }
@@ -238,11 +262,22 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
       call.on('error', cleanup);
 
       void (async () => {
-        const permitted = await authorize({
-          kind: 'read',
-          ...(scopes[0] ? { scope: scopes[0] } : {}),
-          ...(token !== undefined ? { token } : {}),
-        });
+        const authorizationScopes: Array<string | undefined> =
+          scopes.length > 0 ? Array.from(new Set(scopes)) : [undefined];
+        let permitted = true;
+
+        for (const scope of authorizationScopes) {
+          if (
+            !(await authorize({
+              kind: 'read',
+              ...(scope ? { scope } : {}),
+              ...(token !== undefined ? { token } : {}),
+            }))
+          ) {
+            permitted = false;
+            break;
+          }
+        }
 
         if (!permitted) {
           // Buffered commits belong to an identity the server just refused: discard them
@@ -255,10 +290,6 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
           return;
         }
 
-        if (torn) {
-          return;
-        }
-
         // --- one synchronous block: flush, initial state, go live ---
 
         for (const msg of buffered) {
@@ -267,7 +298,25 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
 
         buffered.length = 0;
 
-        for (const scope of scopes) {
+        const initialScopes = new Set<string>();
+        const knownScopes = store.scopes();
+
+        for (const requested of scopes) {
+          initialScopes.add(requested);
+
+          for (const known of knownScopes) {
+            if (scopeMatches(requested, known)) {
+              initialScopes.add(known);
+            }
+          }
+        }
+
+        const orderedInitialScopes = Array.from(initialScopes).sort((left, right) => {
+          const depth = left.split('.').length - right.split('.').length;
+          return depth !== 0 ? depth : left.localeCompare(right);
+        });
+
+        for (const scope of orderedInitialScopes) {
           const head = store.head(scope);
           const msg = head ? headMessage(head) : noHeadMessage(scope);
 

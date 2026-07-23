@@ -20,6 +20,7 @@ type receiverBody struct {
 	Generation  int64          `json:"generation"`
 	SchemaId    string         `json:"schemaId"`
 	EffectiveAt string         `json:"effectiveAt"`
+	NoHead      bool           `json:"noHead"`
 	Values      map[string]any `json:"values"`
 }
 
@@ -87,8 +88,26 @@ func (variables *varRuntime) receiver(sourceName string, configure ...VarReceive
 			return
 		}
 
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+			http.Error(writer, "bad payload", http.StatusBadRequest)
+			return
+		}
 		var payload receiverBody
-		if err := json.Unmarshal(body, &payload); err != nil || payload.Values == nil {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			http.Error(writer, "bad payload", http.StatusBadRequest)
+			return
+		}
+		if payload.NoHead {
+			if _, hasValues := fields["values"]; hasValues {
+				http.Error(writer, "no-head payload must not carry values", http.StatusBadRequest)
+				return
+			}
+			variables.applyNoHead(scope)
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if payload.Values == nil {
 			http.Error(writer, "bad payload", http.StatusBadRequest)
 			return
 		}

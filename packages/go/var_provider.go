@@ -404,22 +404,20 @@ func (variables *varRuntime) ingestSubscribed(batch VarBatchResult) {
 		return
 	}
 
-	group := batch.Scope
-	if group == "" {
+	scope := batch.Scope
+	if scope == "" {
 		for key := range batch.Values {
-			group = key
+			scope = groupFromVarKey(key)
 			break
 		}
 	}
-	if index := strings.Index(group, "."); index >= 0 {
-		group = group[:index]
-	}
+	group := groupFromVarKey(scope)
 	if group == "" {
 		return
 	}
 
 	_ = variables.ingest(varBatch{
-		scope:       group,
+		scope:       scope,
 		group:       group,
 		generation:  batch.Generation,
 		revision:    batch.Revision,

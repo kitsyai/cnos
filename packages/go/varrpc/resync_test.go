@@ -87,7 +87,7 @@ func TestSubscribeReconnectResyncsAMissedActivation(t *testing.T) {
 	var connects int64
 
 	provider := newResyncProvider(t, target, func(batch cnos.VarBatchResult) { received <- batch },
-		&connects, &mu, WithBackoff(50*time.Millisecond, 200*time.Millisecond))
+		&connects, &mu, WithBackoff(50*time.Millisecond, 200*time.Millisecond), WithMaxSubscribeFailures(1000))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -154,7 +154,7 @@ func TestSubscribeReconnectResyncsAMissedDeactivation(t *testing.T) {
 	var connects int64
 
 	provider := newResyncProvider(t, target, func(batch cnos.VarBatchResult) { received <- batch },
-		&connects, &mu, WithBackoff(50*time.Millisecond, 200*time.Millisecond))
+		&connects, &mu, WithBackoff(50*time.Millisecond, 200*time.Millisecond), WithMaxSubscribeFailures(1000))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -238,7 +238,7 @@ func TestRpcReconnectResyncRestoresStaticTierEndToEnd(t *testing.T) {
 	runtime, err := cnos.LoadProjection(payload, cnos.Options{
 		SecretHome:         t.TempDir(),
 		Environment:        map[string]string{},
-		VarSourceProviders: []cnos.VarSourceProviderFactory{Factory(WithBackoff(50*time.Millisecond, 200*time.Millisecond))},
+		VarSourceProviders: []cnos.VarSourceProviderFactory{Factory(WithBackoff(50*time.Millisecond, 200*time.Millisecond), WithMaxSubscribeFailures(1000))},
 	})
 	if err != nil {
 		t.Fatalf("load projection: %v", err)
