@@ -12,6 +12,7 @@ import type {
   ScopeHead,
   ScopeStatus,
   StoredRevision,
+  SubtreeDeactivationEvent,
   VarEvent,
   VarStore,
 } from './types.js';
@@ -42,6 +43,13 @@ export abstract class BaseVarStore implements VarStore {
     // them), so a lock-free reader observes either the whole pre-mutation subtree or the whole
     // post-mutation one, never a mixture.
     applyEventToStates(this.states, event);
+  }
+
+  async appendSubtreeDeactivation(event: SubtreeDeactivationEvent): Promise<void> {
+    // `append` persists the one event before synchronously folding every affected scope. Keeping
+    // this as an explicit VarStore operation makes the atomic subtree capability mandatory for
+    // non-BaseVarStore implementations as well.
+    await this.append(event);
   }
 
   head(scope: string): ScopeHead | undefined {

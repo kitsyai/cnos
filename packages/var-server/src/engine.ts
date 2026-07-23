@@ -7,7 +7,14 @@ import {
 
 import { CnosVarConflictError, CnosVarNotFoundError, CnosVarValidationError } from './errors.js';
 import { revisionHash } from './hash.js';
-import type { MutationRecord, ScopeHead, ScopeStatus, VarEvent, VarStore } from './types.js';
+import type {
+  MutationRecord,
+  ScopeHead,
+  ScopeStatus,
+  SubtreeDeactivationEvent,
+  VarEvent,
+  VarStore,
+} from './types.js';
 
 export interface VarEngineOptions {
   /** Document schemas keyed by schemaId (e.g. `agentic-lanes/v1`), used to validate revisions. */
@@ -398,7 +405,13 @@ export class VarEngine {
       });
 
       await this.beforeAppend(deactivatedEvent);
-      await this.store.append(deactivatedEvent);
+      if (cascade.length > 0) {
+        await this.store.appendSubtreeDeactivation(
+          deactivatedEvent as SubtreeDeactivationEvent,
+        );
+      } else {
+        await this.store.append(deactivatedEvent);
+      }
 
       // One LIVE cascading commit event for the parent: subscribers cascade-clear the subtree as
       // of this moment (the live wire no_head carries cascade=true). Each cleared descendant scope

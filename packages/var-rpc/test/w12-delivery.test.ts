@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  CnosVarNoHeadError,
   VarManager,
   type DocumentSchemaDefinition,
   type NormalizedVarSourceDefinition,
   type ResolvedVarSnapshot,
+  type VarPushEvent,
+  type VarSourceProviderContext,
 } from '@kitsy/cnos-core';
 import { createVarEngine, memoryStore, type VarEngine } from '@kitsy/cnos-var-server';
 
@@ -41,6 +44,14 @@ async function until(predicate: () => boolean, timeoutMs = 12_000): Promise<bool
     await delay(10);
   }
   return predicate();
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 const servers: RunningVarRpcServer[] = [];
@@ -177,7 +188,7 @@ describe('W12 reconnect reconstructs without a transient fallback watcher event'
     h.manager.watch(CHILD_KEY, (next) => observed.push({ source: next.source, value: next.value }));
 
     // Force a reconnect. On reconnect the server reconstructs: an EXACT no_head for the tombstoned
-    // parent 'agentic' (cascade=false) followed by the still-active child head. The exact no_head
+    // parent 'agentic' (exact_scope=true) followed by the still-active child head. The exact no_head
     // must NOT clear the child.
     await h.down();
     await h.restart();
@@ -194,24 +205,108 @@ describe('W12 reconnect reconstructs without a transient fallback watcher event'
 });
 
 describe('W12 pull resync racing stream delivery', () => {
-  it('#8 converges regardless of completion order (child active under a tombstoned parent)', async () => {
-    // Both the reconnect resync pull AND the stream initial-sync run on reconnect; either may land
-    // first. The final state must be the active child in both orders.
-    for (let iteration = 0; iteration < 3; iteration += 1) {
-      const h = await harness(async (engine) => {
-        await engine.deactivate({ scope: G, expectedGeneration: 0 });
-        await activate(engine, K, docK, 0);
+  it.each(['stream-first', 'pull-first'] as const)(
+    '#8 deterministically converges with %s completion',
+    async (order) => {
+      let pullCalls = 0;
+      let push: ((event: VarPushEvent) => void) | undefined;
+      let providerContext: VarSourceProviderContext | undefined;
+      const pullEntered = deferred();
+      const releasePull = deferred();
+      const pullReturned = deferred();
+      const nextDoc = { enabled: true, model_target_ref: `k-${order}` };
+
+      const manager = new VarManager({
+        varSources: { ops: { transport: 'rpc', url: 'in-process', auth: {} } },
+        vars: { agentic: { source: 'ops', mode: 'prefetch' } },
+        documents,
+        schema: {
+          'var.agentic.mode': { type: 'string' },
+          'var.agentic.lanes.vinci': { document: 'agentic-lanes/v1' },
+        },
+        providerModules: [{
+          transport: 'rpc',
+          create: (_definition, context) => {
+            providerContext = context;
+            return {
+              pull: async (scope) => {
+                pullCalls += 1;
+                const scopeString = scope.key ?? scope.group ?? G;
+                if (pullCalls === 1) {
+                  throw new CnosVarNoHeadError(scopeString);
+                }
+                pullEntered.resolve();
+                await releasePull.promise;
+                pullReturned.resolve();
+                throw new CnosVarNoHeadError(scopeString);
+              },
+              subscribe: (_scopes, onEvent) => {
+                push = onEvent;
+                return () => undefined;
+              },
+              close: async () => undefined,
+            };
+          },
+        }],
+        resolveSecret: async () => '',
+        warn: () => undefined,
       });
-      await h.manager.start();
-      expect(await until(() => JSON.stringify(readChild(h.manager)) === JSON.stringify(docK))).toBe(true);
+      manager.setOverlayReader((key) => fallbackSnapshot(key)?.value);
+      manager.setFallbackSnapshotReader(fallbackSnapshot);
 
-      await h.down();
-      await h.restart();
+      await manager.start();
+      expect(push).toBeTypeOf('function');
+      expect(providerContext?.onSubscriptionConnected).toBeTypeOf('function');
 
-      // Whichever of stream-initial-sync / resync-pull completes first, the child converges active.
-      expect(await until(() => JSON.stringify(readChild(h.manager)) === JSON.stringify(docK))).toBe(true);
-      expect(childSource(h.manager)).toBe('runtime');
-      await h.manager.close();
-    }
-  }, 60_000);
+      push?.({
+        kind: 'batch',
+        scope: K,
+        batch: {
+          generation: 1,
+          revision: 'sha256:before-reconnect',
+          effectiveAt: '2026-07-20T00:00:00.000Z',
+          values: { [K]: docK },
+        },
+      });
+      expect(await until(() => JSON.stringify(readChild(manager)) === JSON.stringify(docK))).toBe(true);
+
+      const observed: unknown[] = [];
+      manager.watch(CHILD_KEY, (next) => observed.push(next.value));
+
+      providerContext?.onSubscriptionConnected?.([G], { reconnect: true });
+      await pullEntered.promise;
+
+      const deliverChild = (): void => {
+        push?.({
+          kind: 'batch',
+          scope: K,
+          batch: {
+            generation: 2,
+            revision: `sha256:${order}`,
+            effectiveAt: '2026-07-20T00:00:01.000Z',
+            values: { [K]: nextDoc },
+          },
+        });
+      };
+
+      if (order === 'stream-first') {
+        deliverChild();
+        expect(readChild(manager)).toEqual(nextDoc);
+        releasePull.resolve();
+        await pullReturned.promise;
+        await delay(0);
+      } else {
+        releasePull.resolve();
+        await pullReturned.promise;
+        await delay(0);
+        deliverChild();
+      }
+
+      expect(pullCalls).toBe(2);
+      expect(readChild(manager)).toEqual(nextDoc);
+      expect(childSource(manager)).toBe('runtime');
+      expect(observed).not.toContainEqual(staticChild);
+      await manager.close();
+    },
+  );
 });

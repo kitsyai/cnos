@@ -214,7 +214,7 @@ func TestW12ReconnectNeverExposesFallbackForActiveChildUnderTombstone(t *testing
 	w12WaitChild(t, runtime, w12DocK)
 
 	// Watch the child, then force a reconnect. The reconstruction sends an EXACT no_head for the
-	// tombstoned parent (cascade=false) followed by the still-active child head; the exact no_head
+	// tombstoned parent (ExactScope=true) followed by the still-active child head; the exact no_head
 	// must NOT clear the child, so the watcher must NEVER see a fallback transition.
 	fires := make(chan cnos.Snapshot, 16)
 	unwatch := runtime.Watch("var.agentic.lanes.vinci", func(next, _ cnos.Snapshot) { fires <- next })

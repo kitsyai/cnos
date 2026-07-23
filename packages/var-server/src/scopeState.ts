@@ -166,7 +166,9 @@ export function applyEventToStates(states: Map<string, ScopeState>, event: VarEv
       generation: descState.generation + 1,
       previousGeneration: descState.generation,
       ...(descState.activeRevision !== undefined ? { previousRevision: descState.activeRevision } : {}),
-      reason: `cascade:${event.scope}`,
+      ...(event.actor !== undefined ? { actor: event.actor } : {}),
+      ...(event.reason !== undefined ? { reason: event.reason } : {}),
+      cascadeParent: event.scope,
     };
     states.set(descendant, applyEvent(descState, synthesized));
   }

@@ -46,11 +46,10 @@ message SnapshotBatch {
   bytes values_json = 6;       // canonical JSON object keyed by full stripped var key (reconciled convention)
   bool not_modified = 7;       // true => known_revision still current; values_json empty
   bool no_head = 8;            // true => no active runtime head for scope (client falls back to overlay tiers)
-  // W12 hierarchical tombstones. Meaningful only when no_head=true. true => CASCADING
-  // deactivation: the client drops scope AND every scope nested beneath it. false (proto3
-  // default, omitted on the wire) => EXACT-scope no_head used while reconstructing an
-  // already-enumerated snapshot (initial sync / reconnect), so a reconstruction never
-  // transiently clears a descendant it is about to restore. Live commit deactivations set
-  // cascade=true; initial-sync/reconnect no_heads set cascade=false.
-  bool cascade = 9;
+  // W12 hierarchical tombstones. Meaningful only when no_head=true. true => EXACT-scope
+  // no_head used while reconstructing an already-enumerated snapshot (initial sync /
+  // reconnect). false (proto3 default, including payloads from pre-W12 producers) =>
+  // CASCADING deactivation: drop scope and every nested scope. Safe polarity is deliberate:
+  // omission must retain the legacy cascading behavior.
+  bool exact_scope = 9;
 }

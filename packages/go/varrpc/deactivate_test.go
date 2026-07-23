@@ -15,7 +15,7 @@ import (
 
 // deactivate performs a SUBTREE (hierarchical) deactivation mirroring the TypeScript engine
 // (W12): it tombstones the parent AND every currently-active descendant scope atomically, then
-// pushes a LIVE cascading no_head (Cascade=true) for the parent — plus one for each cleared
+// pushes a LIVE cascading no_head (ExactScope=false) for the parent — plus one for each cleared
 // descendant, so a subscriber to a descendant scope directly is also notified. A later child
 // activation revives that child without parent reactivation; reactivating the parent does not
 // resurrect these tombstoned children (their heads are actually gone here, not merely masked).
@@ -32,12 +32,12 @@ func (server *testServer) deactivate(scope string) {
 
 	delete(server.heads, scope)
 	server.generations[scope]++
-	server.pushLocked(&SnapshotBatch{Scope: scope, NoHead: true, Cascade: true})
+	server.pushLocked(&SnapshotBatch{Scope: scope, NoHead: true})
 
 	for _, descendant := range descendants {
 		delete(server.heads, descendant)
 		server.generations[descendant]++
-		server.pushLocked(&SnapshotBatch{Scope: descendant, NoHead: true, Cascade: true})
+		server.pushLocked(&SnapshotBatch{Scope: descendant, NoHead: true})
 	}
 }
 

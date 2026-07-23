@@ -211,14 +211,12 @@ export interface VarPushEvent {
   /** Present only when `kind === 'batch'`. */
   batch?: VarSnapshotBatch;
   /**
-   * W12 hierarchical tombstones. Meaningful only when `kind === 'no-head'`. `true` (the default
-   * when a transport does not distinguish) — an authoritative CASCADING deactivation: drop the
-   * scope AND every scope nested beneath it. `false` — an EXACT-scope no-head from a
-   * reconstruction (a subscribe stream's initial-sync / reconnect event, where the server has
-   * already enumerated per-scope state): drop ONLY the exact scope, so a reconstruction never
-   * transiently clears a descendant it is about to restore.
+   * W12 hierarchical tombstones. Meaningful only when `kind === 'no-head'`. `true` means an
+   * EXACT-scope no-head from a reconstruction: drop only the exact scope. `false` or omitted
+   * preserves the legacy and zero-value-safe behavior: an authoritative CASCADING deactivation
+   * drops the scope and every nested scope.
    */
-  cascade?: boolean;
+  exactScope?: boolean;
 }
 
 /** Context handed to a provider factory — resolves `secret.*` auth refs to material. */

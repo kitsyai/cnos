@@ -148,7 +148,7 @@ func scopeMatches(subscribed []string, committed string) bool {
 //   - a NEVER-AUTHORED parent (generation 0) with active children gets NO synthetic no_head —
 //     emitting one would cascade-delete the children client-side and then restore them;
 //   - an EXPLICIT parent tombstone (generation > 0) DOES get a no_head, but its descendants are
-//     STILL enumerated, and every reconstruction no_head is EXACT-scope (Cascade=false), so the
+//     STILL enumerated, and every reconstruction no_head is EXACT-scope (ExactScope=true), so the
 //     tombstone never masks a later child: the tombstone is sent first, then the surviving child
 //     head, with no transient cascade in between.
 func (server *testServer) enumerateInitialLocked(requested []string) []*SnapshotBatch {
@@ -196,8 +196,8 @@ func (server *testServer) enumerateInitialLocked(requested []string) []*Snapshot
 		if head := server.heads[scope]; head != nil {
 			result = append(result, head)
 		} else {
-			// EXACT-scope reconstruction no_head: Cascade stays false (proto3 default).
-			result = append(result, &SnapshotBatch{Scope: scope, NoHead: true})
+			// EXACT-scope reconstruction no_head opts in explicitly.
+			result = append(result, &SnapshotBatch{Scope: scope, NoHead: true, ExactScope: true})
 		}
 	}
 	return result

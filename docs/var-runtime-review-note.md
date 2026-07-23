@@ -157,29 +157,28 @@ and is reconstructed exact-scope.
 
 **Two contract changes, both deliberate and additive:**
 
-1. **Wire** — `cnos.var.v1.SnapshotBatch` gained `bool cascade = 9`, meaningful only when
-   `no_head = true`. `cascade=true` = a live cascading commit (drop the subtree); `cascade=false`
-   (proto3 default, omitted on the wire) = an exact-scope no_head (drop only that scope). Existing
-   no-head blobs are byte-unchanged; a new fixture
-   `fixtures/var-cross-sdk/rpc/snapshot-batch-no-head-cascade.bin` pins the `cascade=true` shape.
-   The SDK push event carries it through (`VarPushEvent.cascade?` / `VarBatchResult.Cascade`).
-2. **Storage** — `VarEvent` (`packages/var-server`) gained optional `cascade?: string[]` on
-   `deactivated` events: the descendant scopes cleared alongside the parent.
-
+1. **Wire** — `cnos.var.v1.SnapshotBatch` gained `bool exact_scope = 9`, meaningful only when
+   `no_head = true`. `exact_scope=true` is reconstruction-only exact removal; false/omitted is
+   cascading. This safe polarity preserves pre-W12 payload and Go zero-value behavior. Fixture
+   `fixtures/var-cross-sdk/rpc/snapshot-batch-no-head-exact.bin` pins the explicit exact shape.
+   SDK push events use `VarPushEvent.exactScope?` / `VarBatchResult.ExactScope`.
+2. **Storage** — `VarEvent` retains optional `cascade?: string[]` on `deactivated` events, and
+   `VarStore` now requires atomic `appendSubtreeDeactivation(event)` so custom stores cannot
+   silently apply only the parent.
 **Atomicity + serialization.** `VarEngine.deactivate` enumerates the descendants active at commit
 time and clears the parent plus all of them in ONE appended log event (the `cascade` list on the
 `deactivated` event) — a single JSONL line, so the subtree mutation is crash-atomic on the
 `fileStore` (a torn multi-line write can never leave the parent inactive while a child stays
 active). On fold/replay each listed descendant gets its own next monotonic generation and a
-synthesized `deactivated` event with `reason: "cascade:<parent>"`. Every mutation
+synthesized `deactivated` event carrying `cascadeParent`, actor, and reason. Every mutation
 (create/activate/deactivate/rollback) now runs under a SINGLE engine-wide mutation lock (replacing
 the former per-scope locks), so a subtree deactivation's enumerate→build→append is atomic against
 every activation: a racing child activation linearizes either fully before the deactivation
 (enumerated and cleared) or fully after it (queued behind the lock, commits fresh, survives) —
 never interleaved. Reads stay lock-free.
 
-**Delivery.** Live control-plane commits push `cascade=true`; initial-sync and reconnect
-RECONSTRUCTION no-heads use `cascade=false` (exact-scope), so a reconstruction never transiently
+**Delivery.** Live commits use the false/omitted cascading default; initial-sync and reconnect
+RECONSTRUCTION no-heads use `exact_scope=true`, so a reconstruction never transiently
 clears a descendant it is about to restore — the crux guarantee: no transient fallback watcher
 event when the final reconstructed state contains an active child. http-pull `404` no-heads and the
 http receiver `{noHead:true}` cannot enumerate descendants and so cascade client-side.

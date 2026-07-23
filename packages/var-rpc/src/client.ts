@@ -304,10 +304,9 @@ export function createRpcVarProvider(
 
               if (scope) {
                 try {
-                  // W12: honor the cascade flag. A LIVE commit deactivation cascades (drop the
-                  // subtree); an initial-sync/reconnect reconstruction no_head is exact-scope, so
-                  // it never transiently clears a descendant it is about to restore.
-                  onEvent({ kind: 'no-head', scope, cascade: msg.cascade === true });
+                  // W12 safe polarity: omitted/false is the legacy cascading deactivation;
+                  // reconstruction opts into exact-scope removal explicitly.
+                  onEvent({ kind: 'no-head', scope, exactScope: msg.exact_scope === true });
                 } catch {
                   /* a downstream ingest error never tears down the subscription */
                 }

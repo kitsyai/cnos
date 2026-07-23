@@ -120,6 +120,40 @@ func TestVarNarrowerScopeSurvivesABroaderCommit(t *testing.T) {
 	}
 }
 
+func TestVarSubscribedNoHeadZeroValueCascades(t *testing.T) {
+	t.Parallel()
+	projection := baseVarProjection()
+	projection.Values["value.g.a.x"] = "static-a"
+	projection.Values["value.g.b"] = "static-b"
+	projection.Vars = map[string]VarGroupDef{"g": {Mode: "ondemand"}}
+	projection.Schema = map[string]VarKeyRule{
+		"var.g.a.x": {Type: "string"},
+		"var.g.b":   {Type: "string"},
+	}
+	runtime := loadVarRuntime(t, projection, nil)
+	defer runtime.Close()
+
+	_ = runtime.vars.ingest(varBatch{
+		scope: "g", group: "g", generation: 1, revision: "sha256:parent",
+		values: map[string]any{"g.b": "runtime-b"},
+	}, "test")
+	_ = runtime.vars.ingest(varBatch{
+		scope: "g.a", group: "g", generation: 1, revision: "sha256:child",
+		values: map[string]any{"g.a.x": "runtime-a"},
+	}, "test")
+
+	// Existing custom providers construct this zero-value shape. It must remain cascading;
+	// reconstruction is the only path that opts into ExactScope=true.
+	runtime.vars.ingestSubscribed(VarBatchResult{Status: VarPullNoHead, Scope: "g"})
+
+	if value, _, _ := runtime.Var("g.a.x"); value != "static-a" {
+		t.Fatalf("zero-value no-head retained a descendant runtime value: %v", value)
+	}
+	if value, _, _ := runtime.Var("g.b"); value != "static-b" {
+		t.Fatalf("zero-value no-head retained a parent runtime value: %v", value)
+	}
+}
+
 // --- WARNING 5: mixed pull/push ordering ---------------------------------------------------
 
 // gatedProvider holds Pull open until released, so a push can be interleaved with a pull that

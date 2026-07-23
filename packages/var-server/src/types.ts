@@ -51,7 +51,15 @@ export interface VarEvent {
    * descendant's own history (`reason: "cascade:<parent>"`).
    */
   cascade?: string[];
+  /** Parent scope that caused this synthesized descendant tombstone, when applicable. */
+  cascadeParent?: string;
 }
+
+/** A durable, atomic subtree-deactivation append required of every pluggable store. */
+export type SubtreeDeactivationEvent = VarEvent & {
+  kind: 'deactivated';
+  cascade: string[];
+};
 
 /** A content-addressed, immutable revision document that was successfully created. */
 export interface StoredRevision {
@@ -108,6 +116,12 @@ export interface VarStore {
   readonly persistent: boolean;
   /** Append one event to the log and fold it into in-memory state atomically. */
   append(event: VarEvent): Promise<void>;
+  /**
+   * Append and fold one parent deactivation plus every listed descendant atomically. This
+   * separate required operation makes W12 capability compile-visible: a custom store cannot
+   * silently accept the parent event while ignoring its subtree.
+   */
+  appendSubtreeDeactivation(event: SubtreeDeactivationEvent): Promise<void>;
   /** Current active head for a scope, or undefined when no head is active. */
   head(scope: string): ScopeHead | undefined;
   /** Current status snapshot for a scope. */

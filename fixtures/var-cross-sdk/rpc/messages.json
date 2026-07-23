@@ -61,13 +61,13 @@
     }
   },
   {
-    "file": "snapshot-batch-no-head-cascade.bin",
+    "file": "snapshot-batch-no-head-exact.bin",
     "message": "SnapshotBatch",
     "hex": "0a076167656e74696340014801",
     "value": {
       "scope": "agentic",
       "no_head": true,
-      "cascade": true
+      "exact_scope": true
     }
   },
   {

@@ -96,12 +96,9 @@ export interface WireSnapshotBatch {
   not_modified: boolean;
   no_head: boolean;
   /**
-   * W12 hierarchical tombstones. Meaningful only when `no_head` is true. `true` — an
-   * authoritative CASCADING deactivation: the client drops the scope AND every scope nested
-   * beneath it. `false` (proto3 default, omitted on the wire) — an EXACT-scope no_head used
-   * while reconstructing an already-enumerated snapshot (initial sync / reconnect): the client
-   * drops ONLY the exact scope, so a reconstruction never transiently clears a descendant it is
-   * about to restore.
+   * W12 hierarchical tombstones. Meaningful only when `no_head` is true. `true` means
+   * reconstruction-only EXACT removal. `false` or absent on the wire means CASCADING removal,
+   * preserving legacy payload and language zero-value behavior.
    */
-  cascade: boolean;
+  exact_scope: boolean;
 }

@@ -261,8 +261,8 @@ describe('an accepted Subscribe emits the current state first', () => {
     const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => events.push(event));
 
     expect(await until(() => events.length > 0)).toBe(true);
-    // Initial-sync reconstruction no_head is EXACT-scope (cascade=false), never cascading (W12).
-    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic', cascade: false });
+    // Initial-sync reconstruction opts into exact-scope removal explicitly (W12).
+    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic', exactScope: true });
     stop?.();
   }, 30_000);
 
@@ -273,7 +273,7 @@ describe('an accepted Subscribe emits the current state first', () => {
     const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => events.push(event));
 
     expect(await until(() => events.length > 0)).toBe(true);
-    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic', cascade: false });
+    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic', exactScope: true });
     stop?.();
   }, 30_000);
 

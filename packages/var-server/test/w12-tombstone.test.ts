@@ -67,7 +67,12 @@ describe('W12 canonical histories (control plane)', () => {
   it('#1 child activation BEFORE parent deactivation is cleared (activate(g.key); deactivate(g))', async () => {
     const engine = createVarEngine(memoryStore(), { documents });
     await activate(engine, K, docK, 0);
-    await engine.deactivate({ scope: G, expectedGeneration: 0 });
+    await engine.deactivate({
+      scope: G,
+      expectedGeneration: 0,
+      actor: 'operator@example.test',
+      reason: 'retire subtree',
+    });
 
     // Both inactive.
     expect(engine.head(G)).toBeUndefined();
@@ -83,7 +88,9 @@ describe('W12 canonical histories (control plane)', () => {
     // …and the child's own history faithfully records the cascade deactivation.
     const childDeacts = engine.history(K).filter((event) => event.kind === 'deactivated');
     expect(childDeacts).toHaveLength(1);
-    expect(childDeacts[0]?.reason).toBe(`cascade:${G}`);
+    expect(childDeacts[0]?.cascadeParent).toBe(G);
+    expect(childDeacts[0]?.actor).toBe('operator@example.test');
+    expect(childDeacts[0]?.reason).toBe('retire subtree');
   });
 
   it('#2 child activation AFTER parent deactivation survives (deactivate(g); activate(g.key))', async () => {

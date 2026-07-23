@@ -119,6 +119,8 @@ describe('rpc cross-toolchain wire fixtures', () => {
     expect(explicit.generation).toBe(canonical.generation);
     expect(explicit.revision).toBe(canonical.revision);
     expect(explicit.not_modified).toBe(canonical.not_modified);
+    expect(explicit.exact_scope).toBe(false);
+    expect(canonical.exact_scope).toBe(false);
   });
 
   it('a no_head blob carries the SCOPE it deactivates (load-bearing since round 2)', () => {
@@ -131,6 +133,9 @@ describe('rpc cross-toolchain wire fixtures', () => {
 
       expect(decoded.no_head).toBe(true);
       expect(decoded.scope).toBe('agentic');
+      // Field 9 is absent in these legacy-shaped blobs. Its false zero value MUST retain the
+      // original cascading meaning; only exact_scope=true opts into reconstruction-only removal.
+      expect(decoded.exact_scope).toBe(false);
       // ...and it is emphatically NOT an ingestable batch: no values ride along.
       expect(Buffer.from((decoded.values_json ?? Buffer.alloc(0)) as Buffer)).toHaveLength(0);
     }

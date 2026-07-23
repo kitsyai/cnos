@@ -64,6 +64,11 @@ Persistence is a property of the store you choose, not a server mode:
 | `memoryStore()` | ephemeral, empty on restart | embedded/latched authorities; the default. On authority restart, consumers safely fall back to the static/default overlay tiers — ephemeral mode degrades cleanly by design. |
 | `fileStore(path)` | append-only JSONL log book | durable head + full audit; restart recovery; replay/time-travel. |
 
+Custom stores implement both `append(event)` and `appendSubtreeDeactivation(event)`. The subtree
+operation must persist and fold the parent plus every listed descendant atomically; it cannot be
+reduced to a parent-only append.
+
+
 ```ts
 import { memoryStore, fileStore } from '@kitsy/cnos-var-server';
 

@@ -41,6 +41,7 @@ byte-identical to the Node encoder (`@grpc/proto-loader` over the canonical
 | `snapshot-batch.bin` | `SnapshotBatch` | full head batch; `values_json` is the canonical `values` JSON |
 | `snapshot-batch-not-modified.bin` | `SnapshotBatch` | `not_modified` (≙ http 304) |
 | `snapshot-batch-no-head.bin` | `SnapshotBatch` | `no_head` (≙ http 404 no-head). The `scope` field is **load-bearing**: a `no_head` is a DEACTIVATION both SDKs turn into a runtime-tier removal for that scope, so both wire tests assert it is present and that no values ride along |
+| `snapshot-batch-no-head-exact.bin` | `SnapshotBatch` | reconstruction-only `no_head` with `exact_scope=true`; omitted/false remains cascading for legacy and zero-value safety |
 | `snapshot-batch-explicit-defaults.bin` | `SnapshotBatch` | decode-only: the shape the TS server actually emits (every field set, so protobuf.js also writes the default-valued ones). Both sides must decode it to the same logical message as the canonical blob. |
 
 All blobs except the last use canonical proto3 encoding (fields equal to their default are

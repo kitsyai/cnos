@@ -25,6 +25,10 @@ thin wrapper over the same library.
 | `memoryStore()` | ephemeral, empty on restart | embedded/latched authorities; overlay degrades cleanly to static/default |
 | `fileStore(path)` | append-only JSONL log book | durable head + full audit; restart recovery; replay/time-travel |
 
+Custom stores implement both `append(event)` and `appendSubtreeDeactivation(event)`. The subtree
+operation must persist and fold the parent plus every listed descendant atomically; treating it as
+a parent-only append violates hierarchical deactivation.
+
 Reads (`store.head` / `status` / `revision`) are synchronous and lock-free: they observe a
 single immutable per-scope state snapshot, so a concurrent append is never partially
 visible. `append` persists first, then swaps the snapshot in one synchronous assignment.

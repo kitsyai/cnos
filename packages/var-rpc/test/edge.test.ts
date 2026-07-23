@@ -216,9 +216,9 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     // A subscribe is SELF-SYNCHRONIZING: the first event is the current state. This scope has
     // no head yet, so it is a `no-head`.
     expect(await until(() => events.length === 1)).toBe(true);
-    // Initial-sync reconstruction no_head is EXACT-scope (cascade=false): the server has already
+    // Initial-sync reconstruction no_head is EXACT-scope (exactScope=true): the server has already
     // enumerated per-scope state, so it never transiently clears a descendant (W12).
-    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic', cascade: false });
+    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic', exactScope: true });
 
     await activate(engine, 'agentic', { 'agentic.lanes.vinci': { enabled: true, model_target_ref: 'r' } }, 0);
     expect(await until(() => events.length === 2)).toBe(true);
@@ -231,8 +231,8 @@ describe('Subscribe scope matching (the scopeMatches prefix rule)', () => {
     // pull — the consumer served the deactivated revision indefinitely. The deactivation must
     // reach the SDK, carrying the scope it applies to.
     expect(await until(() => events.length === 3)).toBe(true);
-    // A LIVE commit deactivation cascades (cascade=true): it clears the subtree as of that moment.
-    expect(events[2]).toEqual({ kind: 'no-head', scope: 'agentic', cascade: true });
+    // A LIVE commit uses the zero-value-safe cascading mode (exactScope=false).
+    expect(events[2]).toEqual({ kind: 'no-head', scope: 'agentic', exactScope: false });
     stop?.();
   }, 20_000);
 });
