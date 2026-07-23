@@ -203,6 +203,26 @@ describe('a commit landing in the authorize window', () => {
     expect(events).toEqual([]);
     stop?.();
   }, 30_000);
+
+  it('stops authorizing remaining scopes when the stream is cancelled mid-authorization', async () => {
+    const gate = gatedAuthorize(true);
+    const { server } = await harness(gate.authorize);
+    const provider = track(
+      createRpcVarProvider(
+        { transport: 'rpc', url: server.target, auth: {} },
+        { resolveSecret: async () => '' },
+      ),
+    );
+    const stop = provider.subscribe?.([{ group: 'first' }, { group: 'second' }], () => undefined);
+
+    expect(await until(() => gate.entered() === 1)).toBe(true);
+    stop?.();
+    await delay(100);
+    gate.release();
+    await delay(300);
+
+    expect(gate.entered()).toBe(1);
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -256,20 +276,21 @@ describe('an accepted Subscribe emits the current state first', () => {
     stop?.();
   }, 30_000);
 
-  it('a group subscribe reconstructs active child scopes after its parent no_head', async () => {
+  it('a group subscribe reconstructs active child scopes without a synthetic parent no_head', async () => {
     const { engine, server } = await harness();
     await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'child-head' }, 0);
     const provider = providerFor(server.target);
     const events: VarPushEvent[] = [];
     const stop = provider.subscribe?.([{ group: 'agentic' }], (event) => events.push(event));
 
-    expect(await until(() => events.length >= 2)).toBe(true);
-    expect(events[0]).toEqual({ kind: 'no-head', scope: 'agentic' });
-    expect(events[1]?.kind).toBe('batch');
-    expect(events[1]?.scope).toBe('agentic.lanes.vinci');
-    expect(events[1]?.batch?.values).toEqual({
+    expect(await until(() => events.length >= 1)).toBe(true);
+    expect(events[0]?.kind).toBe('batch');
+    expect(events[0]?.scope).toBe('agentic.lanes.vinci');
+    expect(events[0]?.batch?.values).toEqual({
       'agentic.lanes.vinci': { enabled: true, model_target_ref: 'child-head' },
     });
+    await delay(300);
+    expect(events).toHaveLength(1);
     stop?.();
   }, 30_000);
 });
@@ -285,7 +306,7 @@ const staticDocument = { enabled: false, model_target_ref: 'static-tier' };
  * context, so the client-side reconnect resync pull of `d50f34a` never fires. Whatever
  * convergence these tests observe therefore came from the subscription stream alone.
  */
-async function streamOnlyHarness(): Promise<{
+async function streamOnlyHarness(neutralizeResync = true): Promise<{
   engine: VarEngine;
   manager: VarManager;
   resyncPulls: () => number;
@@ -318,6 +339,10 @@ async function streamOnlyHarness(): Promise<{
       {
         transport: 'rpc',
         create: (def, ctx) => {
+          if (!neutralizeResync) {
+            return track(createRpcVarProvider(def, ctx));
+          }
+
           // Strip the resync seam: count invocations so the test can PROVE it was neutralized
           // rather than merely assuming so.
           const { onSubscriptionConnected: _stripped, ...rest } = ctx as VarSourceProviderContext & {
@@ -423,6 +448,40 @@ describe('reconnect converges from the STREAM ALONE (resync pull neutralized)', 
     expect(observed).toEqual([{ source: 'static', value: staticDocument }]);
     expect(resyncPulls()).toBeGreaterThan(0);
 
+    await manager.close();
+  }, 40_000);
+
+  it('a child-only reconnect with defensive resync never exposes a fallback watcher event', async () => {
+    const { engine, manager, down, restart } = await streamOnlyHarness(false);
+
+    await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'before' }, 0);
+    await manager.start();
+    expect(
+      await until(
+        () =>
+          (manager.readRuntimeVar('var.agentic.lanes.vinci') as { model_target_ref?: string } | undefined)
+            ?.model_target_ref === 'before',
+      ),
+    ).toBe(true);
+
+    const observed: Array<{ source: string; value: unknown }> = [];
+    manager.watch('var.agentic.lanes.vinci', (next) => observed.push({ source: next.source, value: next.value }));
+
+    await down();
+    await activate(engine, 'agentic.lanes.vinci', { enabled: true, model_target_ref: 'after' }, 1);
+    await restart();
+
+    expect(
+      await until(
+        () =>
+          (manager.readRuntimeVar('var.agentic.lanes.vinci') as { model_target_ref?: string } | undefined)
+            ?.model_target_ref === 'after',
+        15_000,
+      ),
+    ).toBe(true);
+    expect(observed).toEqual([
+      { source: 'runtime', value: { enabled: true, model_target_ref: 'after' } },
+    ]);
     await manager.close();
   }, 40_000);
 

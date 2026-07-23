@@ -124,12 +124,22 @@ func (store *varStore) commit(scope, group string, updates map[string]*varRecord
 // TRANSPORT FAILURE IS NOT A NO-HEAD and must never reach here — an unreachable remote keeps
 // last-known-good. Returns nil when nothing was applied (idempotent no-op).
 func (store *varStore) removeScope(scope string) []string {
+	return store.removeScopeMode(scope, true)
+}
+
+// removeExactScope drops only the named scope. Reconnect's defensive exact-scope pull uses this
+// so a synthetic group no-head cannot erase independently active child scopes.
+func (store *varStore) removeExactScope(scope string) []string {
+	return store.removeScopeMode(scope, false)
+}
+
+func (store *varStore) removeScopeMode(scope string, cascade bool) []string {
 	for {
 		old := store.state.Load()
 		removed := make([]string, 0)
 		next := make(map[string]*varScopeEntry, len(old.scopes))
 		for key, entry := range old.scopes {
-			if key == scope || strings.HasPrefix(key, scope+".") {
+			if key == scope || (cascade && strings.HasPrefix(key, scope+".")) {
 				for recordKey := range entry.records {
 					removed = append(removed, recordKey)
 				}

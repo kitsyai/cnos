@@ -229,7 +229,7 @@ func (variables *varRuntime) resyncSubscribedScopes(scopes []string, reconnect b
 		// Routed through the NORMAL pull path: ingest, not-modified, and no-head → scope
 		// removal all behave exactly as they do for a poller. A failure is not fatal — the
 		// stream is live and the next commit converges.
-		go func(target string) { _ = variables.fetchGroup(variables.ctx, target) }(scope)
+		go func(target string) { _ = variables.fetchGroupExactNoHead(variables.ctx, target) }(scope)
 	}
 }
 

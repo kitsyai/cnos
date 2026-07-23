@@ -505,6 +505,16 @@ func (variables *varRuntime) applyNoHead(scope string) {
 // A pulled no-head is dropped when an authoritative event landed for the scope while the pull
 // was in flight — otherwise a delayed 404 could clear a newer pushed activation.
 func (variables *varRuntime) applyNoHeadGated(scope string, expect *uint64) bool {
+	return variables.applyNoHeadGatedMode(scope, expect, true)
+}
+
+// applyExactNoHeadGated is reserved for the defensive reconnect pull. Authoritative
+// push/receiver/poll deactivation remains cascading.
+func (variables *varRuntime) applyExactNoHeadGated(scope string, expect *uint64) bool {
+	return variables.applyNoHeadGatedMode(scope, expect, false)
+}
+
+func (variables *varRuntime) applyNoHeadGatedMode(scope string, expect *uint64, cascade bool) bool {
 	now := time.Now()
 	group := groupFromVarKey("var." + scope)
 
@@ -523,7 +533,7 @@ func (variables *varRuntime) applyNoHeadGated(scope string, expect *uint64) bool
 	prev := map[string]Snapshot{}
 	prevFound := map[string]bool{}
 	for _, key := range variables.store.keys() {
-		if key == "var."+scope || strings.HasPrefix(key, "var."+scope+".") {
+		if key == "var."+scope || (cascade && strings.HasPrefix(key, "var."+scope+".")) {
 			affected[key] = struct{}{}
 			snap, ok := variables.snapshot(key)
 			prev[key] = snap
@@ -531,7 +541,12 @@ func (variables *varRuntime) applyNoHeadGated(scope string, expect *uint64) bool
 		}
 	}
 
-	removed := variables.store.removeScope(scope)
+	var removed []string
+	if cascade {
+		removed = variables.store.removeScope(scope)
+	} else {
+		removed = variables.store.removeExactScope(scope)
+	}
 
 	// Refresh metadata is updated for EVERY valid no-head, removal or not. Returning early on
 	// an empty store left Go reporting a stale transport error after the authority had
@@ -657,6 +672,16 @@ func (variables *varRuntime) refreshVars(ctx context.Context) error {
 // applied runtime head for the scope so overlay tiers ②/③ serve again; a transport error leaves
 // last-known-good untouched.
 func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error {
+	return variables.fetchGroupMode(ctx, group, true)
+}
+
+// fetchGroupExactNoHead is the defensive reconnect pull. The subscription stream remains
+// authoritative for descendant state.
+func (variables *varRuntime) fetchGroupExactNoHead(ctx context.Context, group string) error {
+	return variables.fetchGroupMode(ctx, group, false)
+}
+
+func (variables *varRuntime) fetchGroupMode(ctx context.Context, group string, cascadeNoHead bool) error {
 	def, ok := variables.groups[group]
 	if !ok {
 		return fmt.Errorf("cnos: unknown var group %q", group)
@@ -691,7 +716,11 @@ func (variables *varRuntime) fetchGroup(ctx context.Context, group string) error
 		return nil
 	case pullNoHead:
 		// A definitive "no active head": clear the runtime tier so overlay tiers ②/③ serve.
-		variables.applyNoHeadGated(group, &epoch)
+		if cascadeNoHead {
+			variables.applyNoHeadGated(group, &epoch)
+		} else {
+			variables.applyExactNoHeadGated(group, &epoch)
+		}
 		return nil
 	}
 	return nil

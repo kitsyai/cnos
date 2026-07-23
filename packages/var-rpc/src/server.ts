@@ -174,9 +174,10 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
      *    have been issued just before that commit). Commits arriving while authorization is
      *    still resolving are BUFFERED, then flushed in commit order once it succeeds. A failed
      *    authorization discards the buffer and terminates the stream exactly as before.
-     * 2. An accepted Subscribe emits the CURRENT STATE as its first event(s): each requested
-     *    scope plus every known matching descendant, parent first. This reconstructs independently
-     *    authored key heads and deactivations, so reconnect converges from the stream ALONE.
+     * 2. An accepted Subscribe emits the CURRENT STATE as its first event(s): an authored exact
+     *    head/tombstone plus every known matching descendant, parent first. A never-authored
+     *    parent no-head is suppressed when active descendants exist, avoiding a false cascading
+     *    fallback before those child heads are restored.
      *
      * Every requested scope is authorized before any buffered event is written. The pending
      * buffer is bounded to prevent a stalled authorizer from creating unbounded memory growth.
@@ -267,16 +268,24 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
         let permitted = true;
 
         for (const scope of authorizationScopes) {
-          if (
-            !(await authorize({
-              kind: 'read',
-              ...(scope ? { scope } : {}),
-              ...(token !== undefined ? { token } : {}),
-            }))
-          ) {
+          const allowed = await authorize({
+            kind: 'read',
+            ...(scope ? { scope } : {}),
+            ...(token !== undefined ? { token } : {}),
+          });
+
+          if (torn) {
+            return;
+          }
+
+          if (!allowed) {
             permitted = false;
             break;
           }
+        }
+
+        if (torn) {
+          return;
         }
 
         if (!permitted) {
@@ -302,12 +311,26 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
         const knownScopes = store.scopes();
 
         for (const requested of scopes) {
-          initialScopes.add(requested);
+          const matching = knownScopes.filter((known) => scopeMatches(requested, known));
+          const activeDescendants = matching.filter(
+            (known) => known !== requested && store.head(known) !== undefined,
+          );
+          const requestedHead = store.head(requested);
+          const requestedStatus = store.status(requested);
 
-          for (const known of knownScopes) {
-            if (scopeMatches(requested, known)) {
-              initialScopes.add(known);
-            }
+          // A never-authored parent with active children is not a deactivation. A synthetic
+          // parent no-head would cascade-delete those children before their heads restored them.
+          // An explicit parent tombstone (generation > 0) remains authoritative and cascading.
+          if (requestedHead || requestedStatus.generation > 0 || activeDescendants.length === 0) {
+            initialScopes.add(requested);
+          }
+
+          if (!requestedHead && requestedStatus.generation > 0) {
+            continue;
+          }
+
+          for (const known of matching) {
+            initialScopes.add(known);
           }
         }
 

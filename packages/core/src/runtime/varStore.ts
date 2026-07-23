@@ -360,13 +360,13 @@ export class LiveVarStore {
    * they receive the new static/default snapshot. Idempotent: removing a scope that holds no
    * runtime head is a silent no-op that fires nobody.
    */
-  removeScope(scope: string, group: string): boolean {
+  removeScope(scope: string, group: string, cascade = true): boolean {
     if (this.closed) {
       return false;
     }
 
     const doomed = Array.from(this.scopes.keys()).filter(
-      (candidate) => candidate === scope || candidate.startsWith(`${scope}.`),
+      (candidate) => candidate === scope || (cascade && candidate.startsWith(`${scope}.`)),
     );
 
     // Bump BEFORE the idempotence check: a `no-head` is an authoritative answer even when it

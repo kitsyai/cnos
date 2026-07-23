@@ -234,7 +234,9 @@ export class VarManager {
       // Routed through the NORMAL pull path: ingest, `not-modified`, and `no-head` → scope
       // removal all behave exactly as they do for a poller. A failure is not fatal — the
       // stream is live and the next commit converges.
-      void this.fetchScope(sourceId, group, scope, scopeString).catch(() => undefined);
+      // Defensive reconnect pulls clean up only the exact queried head. The canonical stream may
+      // concurrently reconstruct active child scopes, which a cascading pull must never erase.
+      void this.fetchScope(sourceId, group, scope, scopeString, undefined, true).catch(() => undefined);
     }
   }
 
@@ -274,6 +276,7 @@ export class VarManager {
     scope: VarScope,
     scopeString: string,
     signal?: AbortSignal,
+    exactNoHead = false,
   ): Promise<'ingested' | 'rejected' | 'no-head' | 'not-modified' | 'superseded'> {
     const provider = this.provider(sourceId);
     const knownRevision = this.appliedRevision(scopeString);
@@ -310,7 +313,7 @@ export class VarManager {
         // runtime tier so the overlay restores ② static / ③ default without a redeploy
         // (acceptance #15). Contrast with the transport failure below, which is NOT an answer
         // and must retain last-known-good.
-        this.applyNoHead(scopeString, group);
+        this.applyNoHead(scopeString, group, !exactNoHead);
         this.store.recordRefresh(scopeString, group);
         return 'no-head';
       }
@@ -335,8 +338,8 @@ export class VarManager {
    * no-op that wakes no watcher. Shared by the pull path and the push (`no_head`) path, in
    * every transport, so a deactivation converges the same way regardless of how it arrived.
    */
-  private applyNoHead(scopeString: string, group: string): void {
-    if (this.store.removeScope(scopeString, group)) {
+  private applyNoHead(scopeString: string, group: string, cascade = true): void {
+    if (this.store.removeScope(scopeString, group, cascade)) {
       this.warn(
         `[cnos:var] scope "${scopeString}" has no active runtime head (deactivated); ` +
           'cleared the runtime tier and restored the static/default tiers.',

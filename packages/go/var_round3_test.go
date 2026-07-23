@@ -111,6 +111,13 @@ func TestVarNarrowerScopeSurvivesABroaderCommit(t *testing.T) {
 	if value, _, _ := runtime.Var("g.b"); value != "b2" {
 		t.Fatalf("g.b should be replaced, got %v", value)
 	}
+
+	// Reconnect's defensive group pull is exact-scope cleanup. It must not erase a child that
+	// the canonical subscription stream reconstructed independently.
+	runtime.vars.applyExactNoHeadGated("g", nil)
+	if value, _, _ := runtime.Var("g.a.x"); value != "narrow" {
+		t.Fatalf("exact group no-head must preserve the narrower scope, got %v", value)
+	}
 }
 
 // --- WARNING 5: mixed pull/push ordering ---------------------------------------------------
