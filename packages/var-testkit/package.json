@@ -1,7 +1,7 @@
 {
   "name": "@kitsy/cnos-var-testkit",
   "private": true,
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "Test doubles and ephemeral-server helpers for CNOS var (var.*) SDK and control-plane tests.",
   "type": "module",
   "main": "./dist/index.cjs",

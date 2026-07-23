@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-var-http",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "HTTP transport module for CNOS runtime variables (var.*): pull-based VarSourceProvider with ETag/If-None-Match and secret-ref bearer auth.",
   "type": "module",
   "main": "./dist/index.cjs",

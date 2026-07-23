@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-var-server",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "Embeddable CNOS var (var.*) control-plane server: revisions, generations, atomic activation, audit log, and pluggable stores.",
   "type": "module",
   "main": "./dist/index.cjs",

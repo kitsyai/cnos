@@ -1,6 +1,6 @@
 {
   "name": "@kitsy/cnos-var-rpc",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "gRPC (rpc) transport module for CNOS runtime variables (var.*): Pull + Subscribe VarSourceProvider client and an embeddable VarService server.",
   "type": "module",
   "main": "./dist/index.cjs",

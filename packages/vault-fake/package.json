@@ -1,7 +1,7 @@
 {
   "name": "@kitsy/cnos-vault-fake",
   "private": true,
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "Fake remote CNOS vault provider used as a reference implementation for provider conformance.",
   "type": "module",
   "main": "./dist/index.cjs",
