@@ -37,10 +37,6 @@ function step(message) {
   console.log(`\n>> ${message}`);
 }
 
-function executable(name) {
-  return process.platform === 'win32' ? `${name}.cmd` : name;
-}
-
 function run(command, args, options = {}) {
   const useWindowsShell =
     process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(command);
@@ -217,8 +213,8 @@ function ensureClean(message) {
 }
 
 function runChecks(ecosystem) {
-  const node = executable('node');
-  const pnpm = executable('pnpm');
+  const node = process.execPath;
+  const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
   if (ecosystem === 'node') {
     run(pnpm, ['-r', 'typecheck']);
     run(pnpm, ['-r', 'test']);
