@@ -47,6 +47,11 @@ type VarBatchResult struct {
 	SchemaId    string
 	EffectiveAt string
 	Values      map[string]any
+	// Cascade is meaningful only for a VarPullNoHead result. true => an authoritative CASCADING
+	// deactivation (drop the scope AND every scope nested beneath it); false => an EXACT-scope
+	// no-head from a subscribe-stream reconstruction (drop only the exact scope), so a
+	// reconstruction never transiently clears a descendant it is about to restore (W12).
+	Cascade bool
 }
 
 // VarProviderContext hands a provider the runtime facilities it needs. ResolveSecret
@@ -395,7 +400,15 @@ func scopeStrings(scopes []VarScope) []string {
 func (variables *varRuntime) ingestSubscribed(batch VarBatchResult) {
 	if batch.Status == VarPullNoHead {
 		if batch.Scope != "" {
-			variables.applyNoHead(batch.Scope)
+			// W12: a subscribe stream distinguishes a live cascading deactivation (Cascade=true,
+			// drop the subtree) from an exact-scope reconstruction no_head (Cascade=false, drop
+			// only the queried scope) so a reconstruction never erases an independently active
+			// child it is about to restore.
+			if batch.Cascade {
+				variables.applyNoHead(batch.Scope)
+			} else {
+				variables.applyExactNoHead(batch.Scope)
+			}
 		}
 		return
 	}

@@ -501,6 +501,14 @@ func (variables *varRuntime) applyNoHead(scope string) {
 	variables.applyNoHeadGated(scope, nil)
 }
 
+// applyExactNoHead clears ONLY the exact scope (never <scope>.*). The subscribe stream uses it
+// for reconstruction (initial-sync / reconnect) no_heads, which the server has already enumerated
+// per scope, so applying a cascade would transiently clear a descendant the reconstruction is
+// about to restore (W12). Ungated: a pushed event always applies.
+func (variables *varRuntime) applyExactNoHead(scope string) {
+	variables.applyNoHeadGatedMode(scope, nil, false)
+}
+
 // applyNoHeadGated is applyNoHead with the mixed pull/push ordering gate (see ingestGated).
 // A pulled no-head is dropped when an authoritative event landed for the scope while the pull
 // was in flight — otherwise a delayed 404 could clear a newer pushed activation.

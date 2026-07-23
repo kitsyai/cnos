@@ -200,7 +200,10 @@ func (source *paritySource) push(scope string, event parityResponse) error {
 		return fmt.Errorf("push to scope %q: no subscription is open (only PREFETCH groups subscribe in both SDKs)", scope)
 	}
 
-	result := VarBatchResult{Status: VarPullNoHead, Scope: scope}
+	// A pushed no-head is an authoritative CASCADING deactivation (the pre-W12 default, and what
+	// the Node parity fake's `{kind:'no-head', scope}` maps to — an unset cascade means cascade).
+	// The exact-scope reconstruction path is exercised by the rpc integration suites, not here.
+	result := VarBatchResult{Status: VarPullNoHead, Scope: scope, Cascade: true}
 	if event.Kind == "batch" {
 		result = VarBatchResult{
 			Status:      VarPullOK,

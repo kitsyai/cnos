@@ -32,6 +32,7 @@ type fixtureValue struct {
 	ValuesJSONUTF8 string   `json:"values_json_utf8"`
 	NotModified    bool     `json:"not_modified"`
 	NoHead         bool     `json:"no_head"`
+	Cascade        bool     `json:"cascade"`
 }
 
 type fixtureEntry struct {
@@ -132,6 +133,7 @@ func TestWireFixturesMatchNodeEncoder(t *testing.T) {
 					ValuesJSON:  []byte(entry.Value.ValuesJSONUTF8),
 					NotModified: entry.Value.NotModified,
 					NoHead:      entry.Value.NoHead,
+					Cascade:     entry.Value.Cascade,
 				}
 
 				if !entry.DecodeOnly {
@@ -151,7 +153,8 @@ func TestWireFixturesMatchNodeEncoder(t *testing.T) {
 					decoded.EffectiveAt != message.EffectiveAt ||
 					string(decoded.ValuesJSON) != string(message.ValuesJSON) ||
 					decoded.NotModified != message.NotModified ||
-					decoded.NoHead != message.NoHead {
+					decoded.NoHead != message.NoHead ||
+					decoded.Cascade != message.Cascade {
 					t.Errorf("decode mismatch:\n got %+v\nwant %+v", decoded, message)
 				}
 

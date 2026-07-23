@@ -35,6 +35,22 @@ export interface VarEvent {
   rejectionReason?: string;
   /** Client-supplied idempotency key that produced this event, if any. */
   idempotencyKey?: string;
+  /**
+   * SUBTREE (HIERARCHICAL) DEACTIVATION — present only on a `deactivated` event, and only when
+   * the parent deactivation cleared descendant scopes. Lists the descendant scopes that were
+   * ACTIVE when the parent deactivation committed and were therefore tombstoned alongside
+   * `scope`, in one atomic, durable mutation (W12).
+   *
+   * A parent tombstone clears every currently-active descendant; it is NOT a persistent
+   * ancestor mask. A later child activation revives that child without parent reactivation, and
+   * parent reactivation does NOT resurrect these tombstoned children. Carrying the whole subtree
+   * on ONE appended log line is what makes the mutation crash-atomic on the fileStore event log
+   * (a torn multi-line write could leave the parent inactive but a child still active). The fold
+   * deactivates the parent and each listed descendant in a single step, allocating each its own
+   * next monotonic generation and recording a synthesized `deactivated` event in that
+   * descendant's own history (`reason: "cascade:<parent>"`).
+   */
+  cascade?: string[];
 }
 
 /** A content-addressed, immutable revision document that was successfully created. */

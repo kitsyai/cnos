@@ -123,6 +123,10 @@ deployment and no restart**. When a source answers "no active head" — an http
 removes the runtime tier for that scope and everything nested beneath it, and subsequent reads
 resolve from `value.*` / the schema `default` again.
 
+- Deactivating a **parent** scope withdraws the whole active subtree at once — every descendant
+  scope active at that moment falls back too. It is not a standing mask, though: a child activated
+  **later** is served normally, with no need to reactivate the parent first (and reactivating the
+  parent does not by itself bring back a child the deactivation withdrew).
 - `watch()` callbacks fire, receiving the snapshot the key now resolves to (`source: "static"`
   or `"default"`).
 - `varStatus()` reports that fallback tier, `appliedGeneration: 0`, and no `revision` — a

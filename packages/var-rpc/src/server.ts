@@ -52,6 +52,7 @@ function headMessage(head: ScopeHead): WireSnapshotBatch {
     values_json: Buffer.from(JSON.stringify(head.values), 'utf8'),
     not_modified: false,
     no_head: false,
+    cascade: false,
   };
 }
 
@@ -65,10 +66,18 @@ function notModifiedMessage(scope: string, head: ScopeHead): WireSnapshotBatch {
     values_json: EMPTY_VALUES,
     not_modified: true,
     no_head: false,
+    cascade: false,
   };
 }
 
-function noHeadMessage(scope: string): WireSnapshotBatch {
+/**
+ * A `no_head` deactivation for `scope`. `cascade` distinguishes the two W12 operations: a LIVE
+ * commit deactivation cascades (the client drops the whole subtree as of that moment), while a
+ * RECONSTRUCTION no_head (initial sync / reconnect, where the server has already enumerated
+ * per-scope state) is exact-scope so it never transiently clears a descendant it is about to
+ * restore. Defaults to cascade for the pull path (an authoritative pulled deactivation).
+ */
+function noHeadMessage(scope: string, cascade = true): WireSnapshotBatch {
   return {
     scope,
     generation: '0',
@@ -78,6 +87,7 @@ function noHeadMessage(scope: string): WireSnapshotBatch {
     values_json: EMPTY_VALUES,
     not_modified: false,
     no_head: true,
+    cascade,
   };
 }
 
@@ -206,7 +216,10 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
           return;
         }
 
-        if (msg.no_head) {
+        // Only a CASCADING no_head clears the descendants' dedup bookkeeping — an exact-scope
+        // reconstruction no_head leaves nested scopes untouched, so a surviving child head that
+        // follows is still deduped against what was already emitted.
+        if (msg.no_head && msg.cascade) {
           for (const scope of lastEmitted.keys()) {
             if (scope.startsWith(`${msg.scope}.`)) {
               lastEmitted.delete(scope);
@@ -318,15 +331,15 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
           const requestedHead = store.head(requested);
           const requestedStatus = store.status(requested);
 
-          // A never-authored parent with active children is not a deactivation. A synthetic
-          // parent no-head would cascade-delete those children before their heads restored them.
-          // An explicit parent tombstone (generation > 0) remains authoritative and cascading.
+          // A never-authored parent (generation 0) with active children is not a deactivation: it
+          // gets NO synthetic no_head. An EXPLICIT parent tombstone (generation > 0) DOES get one,
+          // but — unlike the old code — its descendants are STILL enumerated below, and every
+          // reconstruction no_head is EXACT-scope (cascade=false). That is the W12 crux: an
+          // explicit tombstone no longer masks a later child; the tombstone is reconstructed first
+          // and the surviving/newer child head is delivered after it, without a transient cascade
+          // ever clearing a child the reconstruction is about to restore.
           if (requestedHead || requestedStatus.generation > 0 || activeDescendants.length === 0) {
             initialScopes.add(requested);
-          }
-
-          if (!requestedHead && requestedStatus.generation > 0) {
-            continue;
           }
 
           for (const known of matching) {
@@ -334,6 +347,9 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
           }
         }
 
+        // Tombstone-first, then surviving/newer child heads: order by depth so a parent no_head is
+        // written before any descendant head. Since every reconstruction no_head is exact-scope,
+        // this ordering never clears a descendant — it only guarantees the documented sequence.
         const orderedInitialScopes = Array.from(initialScopes).sort((left, right) => {
           const depth = left.split('.').length - right.split('.').length;
           return depth !== 0 ? depth : left.localeCompare(right);
@@ -341,7 +357,9 @@ export function attachVarRpc(server: grpc.Server, store: VarStore, options: VarR
 
         for (const scope of orderedInitialScopes) {
           const head = store.head(scope);
-          const msg = head ? headMessage(head) : noHeadMessage(scope);
+          // EXACT-scope no_head (cascade=false) for reconstruction: the server has already
+          // enumerated per-scope state, so each no_head applies to its own scope only.
+          const msg = head ? headMessage(head) : noHeadMessage(scope, false);
 
           // `store.head` is read AFTER the buffer, so it already reflects every flushed
           // commit; re-sending an identical revision would only be noise on the wire.

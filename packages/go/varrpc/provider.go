@@ -213,7 +213,7 @@ func toResult(fallbackScope string, batch *SnapshotBatch) (cnos.VarBatchResult, 
 		return cnos.VarBatchResult{Status: cnos.VarPullNotModified, Scope: scope}, nil
 	}
 	if batch.NoHead {
-		return cnos.VarBatchResult{Status: cnos.VarPullNoHead, Scope: scope}, nil
+		return cnos.VarBatchResult{Status: cnos.VarPullNoHead, Scope: scope, Cascade: batch.Cascade}, nil
 	}
 
 	values := map[string]any{}

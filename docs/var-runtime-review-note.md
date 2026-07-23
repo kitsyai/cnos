@@ -140,6 +140,54 @@ Open item recorded by the architect for a future decision (not blocking): **desc
 authorization semantics** — whether authorizing a group intentionally grants every matching
 child scope. Today it does (prefix matching); this is undocumented as a deliberate choice.
 
+## W12 — hierarchical tombstone semantics (architect-conducted)
+
+**RULING.** A parent tombstone (deactivating a parent var scope) clears every descendant scope
+ACTIVE when the parent deactivation is committed. It is NOT a persistent ancestor mask. A later
+child activation revives that child without parent reactivation; reactivating the parent does not
+resurrect previously tombstoned children; a key-scoped tombstone affects only that key's own
+subtree. Canonical histories: `activate(g.key); deactivate(g)` ⇒ both inactive;
+`deactivate(g); activate(g.key)` ⇒ `g` inactive, `g.key` **ACTIVE**; `deactivate(g); activate(g)`
+after children were tombstoned ⇒ those children **REMAIN inactive**.
+
+This **replaces the round-5 persistent-mask behavior**, in which an explicit parent tombstone stood
+as a cascading ancestor mask that suppressed later children. The tombstone is now a one-time subtree
+mutation over the descendants active at commit time; each cleared scope carries its own tombstone
+and is reconstructed exact-scope.
+
+**Two contract changes, both deliberate and additive:**
+
+1. **Wire** — `cnos.var.v1.SnapshotBatch` gained `bool cascade = 9`, meaningful only when
+   `no_head = true`. `cascade=true` = a live cascading commit (drop the subtree); `cascade=false`
+   (proto3 default, omitted on the wire) = an exact-scope no_head (drop only that scope). Existing
+   no-head blobs are byte-unchanged; a new fixture
+   `fixtures/var-cross-sdk/rpc/snapshot-batch-no-head-cascade.bin` pins the `cascade=true` shape.
+   The SDK push event carries it through (`VarPushEvent.cascade?` / `VarBatchResult.Cascade`).
+2. **Storage** — `VarEvent` (`packages/var-server`) gained optional `cascade?: string[]` on
+   `deactivated` events: the descendant scopes cleared alongside the parent.
+
+**Atomicity + serialization.** `VarEngine.deactivate` enumerates the descendants active at commit
+time and clears the parent plus all of them in ONE appended log event (the `cascade` list on the
+`deactivated` event) — a single JSONL line, so the subtree mutation is crash-atomic on the
+`fileStore` (a torn multi-line write can never leave the parent inactive while a child stays
+active). On fold/replay each listed descendant gets its own next monotonic generation and a
+synthesized `deactivated` event with `reason: "cascade:<parent>"`. Every mutation
+(create/activate/deactivate/rollback) now runs under a SINGLE engine-wide mutation lock (replacing
+the former per-scope locks), so a subtree deactivation's enumerate→build→append is atomic against
+every activation: a racing child activation linearizes either fully before the deactivation
+(enumerated and cleared) or fully after it (queued behind the lock, commits fresh, survives) —
+never interleaved. Reads stay lock-free.
+
+**Delivery.** Live control-plane commits push `cascade=true`; initial-sync and reconnect
+RECONSTRUCTION no-heads use `cascade=false` (exact-scope), so a reconstruction never transiently
+clears a descendant it is about to restore — the crux guarantee: no transient fallback watcher
+event when the final reconstructed state contains an active child. http-pull `404` no-heads and the
+http receiver `{noHead:true}` cannot enumerate descendants and so cascade client-side.
+
+**Verification: both revert-verifications passed** — removing the engine's cascade enumeration fails
+the parent-clears-active-child scenario, and collapsing reconstruction no-heads back to cascading
+fails the no-transient-fallback-watcher scenario.
+
 ## Round 4 — where to aim (architect-directed)
 
 The parity suite now mechanically pins 44 lifecycle scenarios, so re-finding what it covers is

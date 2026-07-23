@@ -441,6 +441,73 @@ is what makes acceptance #15 true end to end without a redeploy.
   key left unresolvable stays fail-fast *lazily* (at read/`require` time). Prefetch startup is the
   exception — see below.
 
+### Hierarchical tombstone semantics (W12) — canonical, both SDKs
+
+RULING (resolves W12). A **parent tombstone** — deactivating a parent var scope — clears every
+descendant scope that is ACTIVE when the parent deactivation is committed. It is NOT a persistent
+ancestor mask. A later child activation revives that child WITHOUT requiring parent reactivation;
+reactivating the parent does NOT resurrect previously tombstoned children; and a key-scoped
+tombstone affects only that key's own subtree — never its parent or siblings.
+
+Canonical histories (`g` a group scope like `agentic`, `g.key` a nested scope like
+`agentic.lanes.vinci`):
+
+| History | Result |
+|---|---|
+| `activate(g.key); deactivate(g)` | `g` AND `g.key` inactive — the parent tombstone cleared the active child. |
+| `deactivate(g); activate(g.key)` | `g` inactive, `g.key` **ACTIVE** — the child was not active at commit time, so nothing masks its later revival. |
+| `deactivate(g); activate(g)` (children already tombstoned) | previously tombstoned children **REMAIN inactive** — reactivating the parent activates only the parent scope. |
+| a key-scoped tombstone | affects only that key's own subtree, never a parent or sibling. |
+
+This supersedes the round-5 "persistent ancestor mask" framing: a tombstone is not a standing rule
+that suppresses future children; it is a one-time subtree mutation applied to the descendants
+active at commit time, and each cleared scope carries its own tombstone thereafter.
+
+**Control-plane atomicity + serialization (`packages/var-server`).** `VarEngine.deactivate`
+performs an ATOMIC, DURABLE subtree mutation. It enumerates the descendant scopes active at commit
+time and clears the parent plus all of them in ONE appended log event — `VarEvent.cascade: string[]`
+on the `deactivated` event, a single JSONL line, so the subtree mutation is crash-atomic on the
+`fileStore` (a torn multi-line write can never leave the parent inactive while a child stays
+active). On fold/replay this one event tombstones the parent and each listed descendant; each
+descendant gets its own next monotonic generation and a synthesized `deactivated` event in its OWN
+history with `reason: "cascade:<parent>"`. The engine runs EVERY mutation
+(create/activate/deactivate/rollback) under a SINGLE engine-wide mutation lock (replacing the
+former per-scope locks), so a subtree deactivation's "enumerate active descendants → build event →
+append" is atomic against every activation: a racing child activation linearizes either fully
+BEFORE the deactivation (enumerated and cleared) or fully AFTER it (queued behind the lock, commits
+fresh, survives) — never interleaved. Reads stay lock-free. Parent reactivation activates only the
+parent scope; descendant tombstones stand. History/audit records which scopes each operation
+cleared (the parent event's `cascade` list, plus each descendant's own synthesized event).
+
+**Wire distinction — cascading commit vs exact-scope reconstruction (rpc).** Two operations are now
+explicit on the wire and in the SDK push event:
+
+- **Cascading deactivation** — the LIVE control-plane commit. Clears the scope AND every scope
+  nested beneath it, as of that moment.
+- **Exact-scope `no_head`** — used while RECONSTRUCTING an already-enumerated snapshot (a subscribe
+  stream's initial sync, a reconnect resync). Applies to its exact scope ONLY, so a reconstruction
+  never transiently clears a descendant it is about to restore.
+
+**Wire contract change (deliberate, additive).** `cnos.var.v1.SnapshotBatch` gains `bool cascade = 9`,
+meaningful only when `no_head = true`. `cascade = true` → cascading deactivation (drop the subtree);
+`cascade = false` (proto3 default, omitted on the wire) → exact-scope `no_head` (drop only that
+scope). Live commit deactivations set `cascade = true`; initial-sync / reconnect reconstruction
+no-heads set `cascade = false`. Because proto3 omits `false`, existing `no_head` blobs are
+byte-unchanged; `fixtures/var-cross-sdk/rpc/snapshot-batch-no-head-cascade.bin` pins the
+`cascade=true` shape. The SDK push event carries the flag through (`VarPushEvent.cascade?: boolean`
+(Node) / `VarBatchResult.Cascade bool` (Go)): a subscribe-stream `no_head` with `cascade=false`
+clears only the exact scope; `cascade=true` — and every http-pull `404` no-head and http receiver
+`{noHead:true}`, neither of which can enumerate descendants — clears the whole subtree client-side.
+
+**Storage contract change (deliberate, additive).** `VarEvent` (`packages/var-server`) gains
+optional `cascade?: string[]` on `deactivated` events — the descendant scopes cleared alongside the
+parent.
+
+**The crux guarantee.** NO transient fallback watcher event when the final reconstructed state
+contains an active child. A reconstruction (initial sync / reconnect / defensive resync) must not
+apply a cascading parent no-head that momentarily clears a child it is about to restore — which is
+exactly why reconstruction no-heads are exact-scope.
+
 ### Required-key enforcement on prefetch (canonical, both SDKs)
 
 A **required** key in a `prefetch` group must resolve from *some* tier by the end of startup, or

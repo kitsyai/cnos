@@ -140,13 +140,44 @@ export function applyEvent(state: ScopeState, event: VarEvent): ScopeState {
   }
 }
 
+/**
+ * Fold one event into a states map, mutating it in place. A plain event touches only its own
+ * scope. A cascading (subtree) `deactivated` event (W12) additionally tombstones every scope in
+ * `event.cascade`, each as a synthesized per-descendant `deactivated` event allocated its own
+ * next generation and recorded in that descendant's own history. The whole subtree therefore
+ * folds from a SINGLE durable log line (crash-atomic), and the same routine drives both the live
+ * `append` path and log replay/hydration, so a replayed subtree deactivation reconstructs
+ * byte-for-byte what the live one produced.
+ */
+export function applyEventToStates(states: Map<string, ScopeState>, event: VarEvent): void {
+  const current = states.get(event.scope) ?? initialScopeState(event.scope);
+  states.set(event.scope, applyEvent(current, event));
+
+  if (event.kind !== 'deactivated' || !event.cascade || event.cascade.length === 0) {
+    return;
+  }
+
+  for (const descendant of event.cascade) {
+    const descState = states.get(descendant) ?? initialScopeState(descendant);
+    const synthesized: VarEvent = {
+      kind: 'deactivated',
+      scope: descendant,
+      timestamp: event.timestamp,
+      generation: descState.generation + 1,
+      previousGeneration: descState.generation,
+      ...(descState.activeRevision !== undefined ? { previousRevision: descState.activeRevision } : {}),
+      reason: `cascade:${event.scope}`,
+    };
+    states.set(descendant, applyEvent(descState, synthesized));
+  }
+}
+
 /** Fold a full event log into scope states keyed by scope. */
 export function foldEvents(events: Iterable<VarEvent>): Map<string, ScopeState> {
   const states = new Map<string, ScopeState>();
 
   for (const event of events) {
-    const current = states.get(event.scope) ?? initialScopeState(event.scope);
-    states.set(event.scope, applyEvent(current, event));
+    applyEventToStates(states, event);
   }
 
   return states;

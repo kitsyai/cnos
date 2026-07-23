@@ -367,10 +367,16 @@ export class VarManager {
     return result;
   }
 
-  /** Receiver / push deactivation path. A no-head is authoritative and removes nested scopes. */
-  ingestNoHead(_sourceId: string, scope: string): void {
+  /**
+   * Receiver / push deactivation path. A no-head is authoritative. `cascade` defaults to true —
+   * an http-shaped receiver deactivation (`{noHead:true}`) and an http pull 404 cannot enumerate
+   * descendants, so the CLIENT drops the whole subtree. A subscribe stream can enumerate per
+   * scope (W12), so its reconstruction no_heads pass `cascade: false` to clear only the exact
+   * scope; its live commit no_heads pass `cascade: true`.
+   */
+  ingestNoHead(_sourceId: string, scope: string, cascade = true): void {
     const group = scope.split('.')[0] ?? scope;
-    this.applyNoHead(scope, group);
+    this.applyNoHead(scope, group, cascade);
     this.store.recordRefresh(scope, group);
   }
 
@@ -705,7 +711,11 @@ export class VarManager {
         return;
       }
 
-      this.ingestNoHead('', scope);
+      // W12: a subscribe stream distinguishes a live cascading deactivation (`cascade !== false`)
+      // from an exact-scope reconstruction no_head (`cascade === false`). An exact no_head clears
+      // only the queried scope, so a reconstruction never erases an independently active child it
+      // is about to restore.
+      this.ingestNoHead('', scope, event.cascade !== false);
       return;
     }
 

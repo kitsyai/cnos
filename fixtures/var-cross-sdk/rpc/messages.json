@@ -61,6 +61,16 @@
     }
   },
   {
+    "file": "snapshot-batch-no-head-cascade.bin",
+    "message": "SnapshotBatch",
+    "hex": "0a076167656e74696340014801",
+    "value": {
+      "scope": "agentic",
+      "no_head": true,
+      "cascade": true
+    }
+  },
+  {
     "file": "snapshot-batch-explicit-defaults.bin",
     "message": "SnapshotBatch",
     "decodeOnly": true,

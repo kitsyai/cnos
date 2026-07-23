@@ -14,6 +14,14 @@ export interface VarEngineOptions {
   documents?: Record<string, DocumentSchemaDefinition>;
   /** Clock override for deterministic tests; returns an ISO timestamp. */
   clock?: () => string;
+  /**
+   * TEST SEAM (W12 subtree-deactivation race tests). Awaited inside the engine mutation lock,
+   * immediately before an `activated`/`deactivated` event is appended — the exact point at which
+   * the store state is about to change. A test can block here to prove that a mutation submitted
+   * while another is mid-flight cannot interleave (it is queued behind the lock). Never used in
+   * production.
+   */
+  onBeforeAppend?: (event: VarEvent) => void | Promise<void>;
 }
 
 /** Common actor/reason/idempotency metadata carried by every mutation. */
@@ -93,8 +101,21 @@ export type CommitListener = (event: { scope: string; kind: 'activated' | 'deact
 export class VarEngine {
   private readonly documents: Record<string, DocumentSchemaDefinition>;
   private readonly clock: () => string;
-  /** Per-scope serialization: read-generation → build-event → append happens under one lock. */
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly onBeforeAppend: ((event: VarEvent) => void | Promise<void>) | undefined;
+  /**
+   * SINGLE ENGINE-WIDE MUTATION SERIALIZATION (W12). Every mutation — create, activate,
+   * deactivate, rollback — runs to completion under this one chained lock, so a subtree
+   * deactivation's `enumerate active descendants → build event → append` is atomic with respect
+   * to EVERY other mutation. A child activation therefore linearizes either fully BEFORE the
+   * deactivation (it is in the store when the descendants are enumerated, so it is cleared) or
+   * fully AFTER it (it is queued behind the lock and commits fresh, so it survives) — never
+   * interleaved. This replaces the previous per-scope locks: a subtree touches many scopes, so a
+   * per-scope lock could not serialize it against an activation on a different descendant scope.
+   * A single global lock is the deadlock-free way to get that (control-plane mutation rates are
+   * low; reads stay lock-free and are unaffected). No cross-scope ordering is ever inferred from
+   * timestamps or unrelated per-scope revisions.
+   */
+  private mutationChain: Promise<unknown> = Promise.resolve();
   /** Commit-path listeners: fire after every accepted activation/deactivation (incl. rollback). */
   private readonly commitListeners = new Set<CommitListener>();
 
@@ -104,22 +125,23 @@ export class VarEngine {
   ) {
     this.documents = options.documents ?? {};
     this.clock = options.clock ?? (() => new Date().toISOString());
+    this.onBeforeAppend = options.onBeforeAppend;
   }
 
   private now(): string {
     return this.clock();
   }
 
-  private async withScopeLock<T>(scope: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(scope) ?? Promise.resolve();
+  private async withMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.mutationChain;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    this.locks.set(
-      scope,
-      previous.then(() => gate),
-    );
+    // Reserve this mutation's slot SYNCHRONOUSLY at call time, so submission order is the
+    // linearization order: `deactivate(g)` called before `activate(g.key)` is guaranteed to
+    // acquire the lock first.
+    this.mutationChain = previous.then(() => gate);
 
     await previous.catch(() => undefined);
 
@@ -127,6 +149,13 @@ export class VarEngine {
       return await fn();
     } finally {
       release();
+    }
+  }
+
+  /** Awaited immediately before an activate/deactivate append (test seam; no-op in production). */
+  private async beforeAppend(event: VarEvent): Promise<void> {
+    if (this.onBeforeAppend) {
+      await this.onBeforeAppend(event);
     }
   }
 
@@ -204,7 +233,7 @@ export class VarEngine {
    * leaving the last-known-good head untouched.
    */
   async createRevision(input: CreateRevisionInput): Promise<CreateRevisionResult> {
-    return this.withScopeLock(input.scope, async () => {
+    return this.withMutationLock(async () => {
       if (input.idempotencyKey) {
         const replayed = this.store.idempotent(input.idempotencyKey);
 
@@ -265,7 +294,7 @@ export class VarEngine {
 
   /** Atomically point the scope head at a revision, allocating the next monotonic generation. */
   async activate(input: ActivateInput): Promise<ActivationResult> {
-    return this.withScopeLock(input.scope, async () => {
+    return this.withMutationLock(async () => {
       if (input.idempotencyKey) {
         const replayed = this.store.idempotent(input.idempotencyKey);
 
@@ -293,8 +322,7 @@ export class VarEngine {
       const generation = previous.generation + 1;
       const effectiveAt = this.now();
 
-      await this.store.append(
-        this.event('activated', {
+      const activatedEvent = this.event('activated', {
           scope: input.scope,
           revision: input.revision,
           generation,
@@ -306,17 +334,35 @@ export class VarEngine {
           ...(input.reason !== undefined ? { reason: input.reason } : {}),
           timestamp: effectiveAt,
           ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
-        }),
-      );
+        });
+
+      await this.beforeAppend(activatedEvent);
+      await this.store.append(activatedEvent);
 
       this.emitCommit(input.scope, 'activated');
       return { scope: input.scope, generation, revision: input.revision, effectiveAt };
     });
   }
 
-  /** Remove the runtime head so consumers fall back to static `value.*` / defaults. */
+  /**
+   * SUBTREE (HIERARCHICAL) DEACTIVATION (W12). Remove the runtime head for `scope` AND every
+   * currently-active descendant scope, so consumers fall back to static `value.*` / defaults
+   * across the whole subtree. This is NOT a persistent ancestor mask: it clears the descendants
+   * ACTIVE AT COMMIT TIME and nothing else. A child activated LATER revives without parent
+   * reactivation (histories: `deactivate(g); activate(g.key)` ⇒ g.key ACTIVE), and reactivating
+   * the parent does NOT resurrect these tombstoned children (`deactivate(g); activate(g)` leaves
+   * them inactive). A key-scoped deactivation affects only that key's own subtree — never its
+   * parent or siblings.
+   *
+   * Atomicity + durability: the whole subtree is one appended event carrying the descendant scope
+   * list, so it folds into every affected scope in a single, crash-atomic step (a torn multi-line
+   * write can never leave the parent inactive while a child stays active). Serialization: this
+   * runs under the engine mutation lock, so the `enumerate → build → append` is atomic against
+   * every activation — a child activation is either enumerated-and-cleared (linearized before) or
+   * queued-and-survives (linearized after), never interleaved.
+   */
   async deactivate(input: DeactivateInput): Promise<DeactivationResult> {
-    return this.withScopeLock(input.scope, async () => {
+    return this.withMutationLock(async () => {
       if (input.idempotencyKey) {
         const replayed = this.store.idempotent(input.idempotencyKey);
 
@@ -330,19 +376,39 @@ export class VarEngine {
       const previous = this.store.status(input.scope);
       const generation = previous.generation + 1;
 
-      await this.store.append(
-        this.event('deactivated', {
-          scope: input.scope,
-          generation,
-          previousGeneration: previous.generation,
-          ...(previous.revision !== undefined ? { previousRevision: previous.revision } : {}),
-          ...(input.actor !== undefined ? { actor: input.actor } : {}),
-          ...(input.reason !== undefined ? { reason: input.reason } : {}),
-          ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
-        }),
-      );
+      // Enumerate the descendant scopes ACTIVE right now (a committed scope strictly nested under
+      // `scope` whose head is present). Under the mutation lock this snapshot cannot change before
+      // the append, so exactly these descendants are the ones "active when the deactivation is
+      // committed". Sorted for a deterministic, faithful audit record.
+      const prefix = `${input.scope}.`;
+      const cascade = this.store
+        .scopes()
+        .filter((candidate) => candidate.startsWith(prefix) && this.store.head(candidate) !== undefined)
+        .sort();
 
+      const deactivatedEvent = this.event('deactivated', {
+        scope: input.scope,
+        generation,
+        previousGeneration: previous.generation,
+        ...(previous.revision !== undefined ? { previousRevision: previous.revision } : {}),
+        ...(input.actor !== undefined ? { actor: input.actor } : {}),
+        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        ...(cascade.length > 0 ? { cascade } : {}),
+        ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+      });
+
+      await this.beforeAppend(deactivatedEvent);
+      await this.store.append(deactivatedEvent);
+
+      // One LIVE cascading commit event for the parent: subscribers cascade-clear the subtree as
+      // of this moment (the live wire no_head carries cascade=true). Each cleared descendant scope
+      // ALSO fires its own commit event, so a client subscribed to a descendant scope directly is
+      // notified even though it does not match the parent scope string.
       this.emitCommit(input.scope, 'deactivated');
+      for (const descendant of cascade) {
+        this.emitCommit(descendant, 'deactivated');
+      }
+
       return { scope: input.scope, generation, active: false };
     });
   }

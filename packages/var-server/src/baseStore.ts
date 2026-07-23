@@ -1,9 +1,8 @@
 import { CnosVarStoreError } from './errors.js';
 import {
-  applyEvent,
+  applyEventToStates,
   foldEvents,
   headOf,
-  initialScopeState,
   replayToGeneration,
   statusOf,
   type ScopeState,
@@ -37,8 +36,12 @@ export abstract class BaseVarStore implements VarStore {
 
   async append(event: VarEvent): Promise<void> {
     await this.persist(event);
-    const current = this.states.get(event.scope) ?? initialScopeState(event.scope);
-    this.states.set(event.scope, applyEvent(current, event));
+    // A cascading (subtree) `deactivated` event folds into MULTIPLE scope states — the parent and
+    // every descendant it cleared — but persists as ONE durable line, so the whole subtree
+    // mutation is crash-atomic. The multiple `set` calls run synchronously (no await between
+    // them), so a lock-free reader observes either the whole pre-mutation subtree or the whole
+    // post-mutation one, never a mixture.
+    applyEventToStates(this.states, event);
   }
 
   head(scope: string): ScopeHead | undefined {

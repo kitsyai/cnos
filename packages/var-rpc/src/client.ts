@@ -304,7 +304,10 @@ export function createRpcVarProvider(
 
               if (scope) {
                 try {
-                  onEvent({ kind: 'no-head', scope });
+                  // W12: honor the cascade flag. A LIVE commit deactivation cascades (drop the
+                  // subtree); an initial-sync/reconnect reconstruction no_head is exact-scope, so
+                  // it never transiently clears a descendant it is about to restore.
+                  onEvent({ kind: 'no-head', scope, cascade: msg.cascade === true });
                 } catch {
                   /* a downstream ingest error never tears down the subscription */
                 }

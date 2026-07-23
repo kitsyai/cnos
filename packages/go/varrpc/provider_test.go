@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +25,11 @@ type testServer struct {
 	mu          sync.Mutex
 	heads       map[string]*SnapshotBatch
 	subscribers map[int]chan *SnapshotBatch
+	// generations tracks the last mutation generation per scope (0 == never authored). It is what
+	// lets the initial-sync distinguish a NEVER-AUTHORED parent (no synthetic no_head) from an
+	// EXPLICIT tombstone (generation > 0, a real deactivation) — the W12 authored-state-vs-absence
+	// distinction, mirroring the TypeScript engine's ScopeStatus.generation.
+	generations map[string]int64
 	nextSub     int
 	// requiredToken, when set, makes the server reject calls without a matching bearer.
 	requiredToken string
@@ -39,7 +46,11 @@ type testServer struct {
 }
 
 func newTestServer() *testServer {
-	return &testServer{heads: map[string]*SnapshotBatch{}, subscribers: map[int]chan *SnapshotBatch{}}
+	return &testServer{
+		heads:       map[string]*SnapshotBatch{},
+		subscribers: map[int]chan *SnapshotBatch{},
+		generations: map[string]int64{},
+	}
 }
 
 func (server *testServer) authorize(ctx context.Context) error {
@@ -116,6 +127,7 @@ func (server *testServer) activate(scope string, generation int64, revision stri
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	server.heads[scope] = batch
+	server.generations[scope]++
 	server.pushLocked(batch)
 }
 
@@ -128,6 +140,67 @@ func scopeMatches(subscribed []string, committed string) bool {
 		}
 	}
 	return false
+}
+
+// enumerateInitialLocked reconstructs the authoritative per-scope snapshot for a subscription,
+// mirroring the TypeScript rpc server's initial-sync (W12). Must be called with server.mu held.
+//
+//   - a NEVER-AUTHORED parent (generation 0) with active children gets NO synthetic no_head —
+//     emitting one would cascade-delete the children client-side and then restore them;
+//   - an EXPLICIT parent tombstone (generation > 0) DOES get a no_head, but its descendants are
+//     STILL enumerated, and every reconstruction no_head is EXACT-scope (Cascade=false), so the
+//     tombstone never masks a later child: the tombstone is sent first, then the surviving child
+//     head, with no transient cascade in between.
+func (server *testServer) enumerateInitialLocked(requested []string) []*SnapshotBatch {
+	known := map[string]struct{}{}
+	for scope := range server.generations {
+		known[scope] = struct{}{}
+	}
+
+	selected := map[string]struct{}{}
+	for _, want := range requested {
+		matching := []string{}
+		activeDescendants := 0
+		for scope := range known {
+			if scope == want || (len(scope) > len(want) && scope[:len(want)+1] == want+".") {
+				matching = append(matching, scope)
+				if scope != want && server.heads[scope] != nil {
+					activeDescendants++
+				}
+			}
+		}
+		if server.heads[want] != nil || server.generations[want] > 0 || activeDescendants == 0 {
+			selected[want] = struct{}{}
+		}
+		for _, scope := range matching {
+			selected[scope] = struct{}{}
+		}
+	}
+
+	ordered := make([]string, 0, len(selected))
+	for scope := range selected {
+		ordered = append(ordered, scope)
+	}
+	// Tombstone-first, then surviving/newer child heads: shallower scopes before deeper, then
+	// lexicographic for a deterministic sequence.
+	sort.Slice(ordered, func(i, j int) bool {
+		di, dj := strings.Count(ordered[i], "."), strings.Count(ordered[j], ".")
+		if di != dj {
+			return di < dj
+		}
+		return ordered[i] < ordered[j]
+	})
+
+	result := make([]*SnapshotBatch, 0, len(ordered))
+	for _, scope := range ordered {
+		if head := server.heads[scope]; head != nil {
+			result = append(result, head)
+		} else {
+			// EXACT-scope reconstruction no_head: Cascade stays false (proto3 default).
+			result = append(result, &SnapshotBatch{Scope: scope, NoHead: true})
+		}
+	}
+	return result
 }
 
 // batchIdentity is the dedup key for "the same state twice in a row": the content-addressed
@@ -213,15 +286,9 @@ drain:
 			break drain
 		}
 	}
-	initial := make([]*SnapshotBatch, 0, len(request.Scopes))
+	var initial []*SnapshotBatch
 	if !legacy {
-		for _, scope := range request.Scopes {
-			if head := server.heads[scope]; head != nil {
-				initial = append(initial, head)
-			} else {
-				initial = append(initial, &SnapshotBatch{Scope: scope, NoHead: true})
-			}
-		}
+		initial = server.enumerateInitialLocked(request.Scopes)
 	}
 	server.mu.Unlock()
 

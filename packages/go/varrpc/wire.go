@@ -46,6 +46,12 @@ type SnapshotBatch struct {
 	ValuesJSON  []byte // field 6
 	NotModified bool   // field 7
 	NoHead      bool   // field 8
+	// Cascade (field 9) is meaningful only when NoHead is true. true => CASCADING deactivation:
+	// the client drops the scope AND every scope nested beneath it. false (proto3 default, omitted
+	// on the wire) => EXACT-scope no_head from a reconstruction (initial sync / reconnect), so a
+	// reconstruction never transiently clears a descendant it is about to restore. Live commit
+	// deactivations set cascade=true; initial-sync/reconnect no_heads set cascade=false (W12).
+	Cascade bool // field 9
 }
 
 // --- encoding helpers ---
@@ -258,6 +264,7 @@ func (message *SnapshotBatch) Marshal() []byte {
 	buf = appendBytes(buf, 6, message.ValuesJSON)
 	buf = appendBool(buf, 7, message.NotModified)
 	buf = appendBool(buf, 8, message.NoHead)
+	buf = appendBool(buf, 9, message.Cascade)
 	return buf
 }
 
@@ -310,6 +317,12 @@ func (message *SnapshotBatch) Unmarshal(data []byte) error {
 				return err
 			}
 			message.NoHead = value != 0
+		case field == 9 && wireType == wireVarint:
+			value, err := d.varint()
+			if err != nil {
+				return err
+			}
+			message.Cascade = value != 0
 		default:
 			if err := d.skip(wireType); err != nil {
 				return err
