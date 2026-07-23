@@ -1,0 +1,160 @@
+---
+title: Releasing CNOS
+description: Publish all CNOS runtimes together or release one ecosystem independently with immutable scoped tags.
+---
+
+CNOS supports global and partial releases. Use the mode that matches the runtimes containing the change.
+
+## Choose a release mode
+
+| Mode | Command | Tag | Workflows triggered |
+| --- | --- | --- | --- |
+| Global | `release.ps1` or `release.sh` | `vX.Y.Z` | Every ecosystem |
+| Partial | `release-part.ps1` or `release-part.sh` | `release/<ecosystem>/vX.Y.Z` | Selected ecosystem only |
+
+Use a global release only when every runtime should publish the same repository version. Use a partial release when a feature or fix exists in one or a subset of runtime implementations.
+
+The existing global release scripts remain the stable all-runtime path. The partial scripts do not modify or invoke them.
+
+## Supported ecosystems
+
+The partial release command accepts:
+
+```text
+node
+go
+java
+kotlin
+python
+rust
+csharp
+php
+```
+
+Each ecosystem owns its registry version sequence. For example, Node and Go can publish `1.18.0` now while Java remains at `1.17.0`. Java can later publish its own `1.18.0`; it does not need to skip to `1.18.1`.
+
+## Prerequisites
+
+Before starting a release:
+
+1. Check out `main`.
+2. Commit all changes.
+3. Push them so local `main` equals `origin/main`.
+4. Ensure the relevant GitHub Actions publishing secrets are configured.
+5. Ensure the target version has not already been tagged or published for that ecosystem.
+
+The partial release script refuses to run from another branch, with a dirty working tree, or when local `main` differs from `origin/main`.
+
+## Run a partial release
+
+PowerShell:
+
+```powershell
+.\scripts\release-part.ps1 node minor
+.\scripts\release-part.ps1 go 1.18.0
+.\scripts\release-part.ps1 java patch
+```
+
+Bash:
+
+```bash
+bash ./scripts/release-part.sh node minor
+bash ./scripts/release-part.sh go 1.18.0
+bash ./scripts/release-part.sh java patch
+```
+
+The second argument accepts `major`, `minor`, `patch`, or an explicit `X.Y.Z` version.
+
+The same implementation is available through pnpm:
+
+```bash
+pnpm release:part node minor
+```
+
+For each release, the script:
+
+1. Fetches `origin/main` and tags.
+2. Verifies the branch and working tree.
+3. Detects the selected ecosystem's current version.
+4. Resolves the requested semantic-version bump.
+5. Runs the selected ecosystem's checks.
+6. Updates only that ecosystem's version-bearing paths.
+7. Commits and pushes the version bump when files changed.
+8. Creates and pushes `release/<ecosystem>/vX.Y.Z`.
+
+Pushing the scoped tag starts only the corresponding GitHub Actions publish workflow.
+
+### Skipping checks
+
+Use `--skip-tests` only when the exact release commit has already passed the relevant checks:
+
+```powershell
+.\scripts\release-part.ps1 node minor -SkipTests
+```
+
+```bash
+bash ./scripts/release-part.sh node minor --skip-tests
+```
+
+The default is to run checks.
+
+## Scoped tags and immutability
+
+Partial releases use distinct immutable tags:
+
+```text
+release/node/v1.18.0
+release/go/v1.18.0
+release/java/v1.18.0
+```
+
+These tags can coexist because they name different ecosystem releases. They also allow multiple registries to publish the same semantic version independently.
+
+Do not delete, move, or recreate a release tag after publishing begins. If GitHub Actions fails because of a transient registry or infrastructure problem, retry the existing workflow run from the same tag.
+
+Do not push a global `v1.18.0` tag after any ecosystem has published `1.18.0` from a scoped tag. The global tag intentionally triggers every publish workflow and would attempt to republish the already-released ecosystem.
+
+## Node package boundary
+
+`@kitsy/cnos-core` is a private workspace package. It is never published to npm.
+
+The public runtime-variable packages bundle the core implementation and declarations they expose:
+
+```text
+@kitsy/cnos-var-server
+@kitsy/cnos-var-http
+@kitsy/cnos-var-rpc
+```
+
+The Node publish workflow builds and packs public packages before publishing. It publishes the runtime-variable packages before `@kitsy/cnos` and other dependents.
+
+## Go module tags
+
+The scoped signal tag for Go is:
+
+```text
+release/go/v1.18.0
+```
+
+The Go publish workflow derives `1.18.0` from that tag and creates the module tags expected by the Go toolchain, including:
+
+```text
+packages/go/v1.18.0
+packages/go/varrpc/v1.18.0
+```
+
+It also tags the Go vault submodules. Before the release commit is created, the partial release script updates each submodule's parent-module requirement to the selected version. This prevents published submodules from resolving an older CNOS parent module that predates APIs they use.
+
+## Global releases
+
+Use the existing scripts when every runtime should move together:
+
+```powershell
+.\scripts\release.ps1 minor
+```
+
+```bash
+bash ./scripts/release.sh minor
+```
+
+These scripts create root `vX.Y.Z` tags. Root tags remain supported by every publishing workflow for backward compatibility.

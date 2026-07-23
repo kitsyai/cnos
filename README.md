@@ -43,10 +43,27 @@ For step-by-step setup flows, see [docs/cnos-how-to.md](/Users/pkvsi/Wks/kitsy/c
 
 ## Release flow
 
-Versioning and publishing are managed through Changesets.
+CNOS supports two release modes:
 
-1. Add a changeset with `pnpm changeset`.
-2. Prepare versions with `pnpm version-packages`.
-3. Publish from CI with the release workflow or locally with `pnpm release`.
+- A global release bumps every runtime and pushes `vX.Y.Z`, which triggers every publish workflow.
+- A partial release bumps one ecosystem and pushes `release/<ecosystem>/vX.Y.Z`, which triggers only that ecosystem's workflow.
 
-For manual `pnpm publish`, the public packages now rebuild on `prepack` so `dist/` cannot drift from `package.json` version bumps.
+Use a partial release when a feature or fix exists in only some runtime implementations:
+
+```powershell
+.\scripts\release-part.ps1 node minor
+.\scripts\release-part.ps1 go 1.18.0
+```
+
+```bash
+bash ./scripts/release-part.sh node minor
+bash ./scripts/release-part.sh go 1.18.0
+```
+
+Node, Go, Java, Kotlin, Python, Rust, C#, and PHP maintain independent registry version sequences under this flow. Node and Go can both publish `1.18.0` from separate scoped tags without creating a global `v1.18.0` tag.
+
+Do not push a global `vX.Y.Z` tag after any ecosystem has already published that version through a scoped tag. Global tags intentionally trigger all registries and would attempt duplicate publication. Release tags are immutable; retry a failed GitHub Actions run from the existing tag rather than deleting, moving, or recreating it.
+
+`@kitsy/cnos-core` is private and never published directly. Public Node packages bundle the core implementation and declarations they expose.
+
+See the [release guide](packages/docs/docs/guides/releases.mdx) for prerequisites, supported commands, tag behavior, and Go module details.

@@ -45,6 +45,8 @@ sidebar:
         label: SSR Projects
       - path: guides/ci-cd
         label: CI/CD Pipelines
+      - path: guides/releases
+        label: Releasing CNOS
       - path: guides/containers-and-actions
         label: Containers and Actions
       - path: guides/workspaces
