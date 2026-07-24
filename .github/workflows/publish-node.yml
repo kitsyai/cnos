@@ -5,6 +5,12 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'release/node/v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing Node package version to publish (X.Y.Z)
+        required: true
+        type: string
 
 concurrency:
   group: publish-node-${{ github.ref }}
@@ -18,7 +24,7 @@ jobs:
 
       - uses: pnpm/action-setup@v3
         with:
-          version: 9
+          version: 10.13.1
 
       - uses: actions/setup-node@v4
         with:
@@ -27,6 +33,32 @@ jobs:
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Verify tagged release version
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF_NAME##*/}"
+          EXPECTED_VERSION="${TAG#v}"
+          ACTUAL_VERSION="$(node -p "require('./packages/cnos/package.json').version")"
+          test "$ACTUAL_VERSION" = "$EXPECTED_VERSION" || {
+            echo "Tag requests ${EXPECTED_VERSION}, but Node packages are ${ACTUAL_VERSION}."
+            exit 1
+          }
+
+      - name: Verify manual release version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: |
+          echo "$EXPECTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "Version must be X.Y.Z."
+            exit 1
+          }
+          ACTUAL_VERSION="$(node -p "require('./packages/cnos/package.json').version")"
+          test "$ACTUAL_VERSION" = "$EXPECTED_VERSION" || {
+            echo "Manual publish requests ${EXPECTED_VERSION}, but Node packages are ${ACTUAL_VERSION}."
+            exit 1
+          }
 
       - name: Build and pack public packages
         run: pnpm publish:check
