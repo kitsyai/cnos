@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/hashicorp/vault/api v1.23.0
-	github.com/kitsyai/cnos/packages/go v1.11.4
+	github.com/kitsyai/cnos/packages/go v1.18.0
 )
 
 require (
